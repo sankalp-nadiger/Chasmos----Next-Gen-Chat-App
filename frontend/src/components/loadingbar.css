@@ -1,0 +1,108 @@
+/* Container for the entire loading screen */ 
+.loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #f0f2f5; /* Light gray background */
+    color: #4a4a4a; /* Dark gray text color */
+    transition: opacity 0.5s ease-out; /* Smooth fade-out */
+    opacity: 1;
+    z-index: 1000;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&display=swap');
+
+.appname {
+    font-family: 'Orbitron', sans-serif; /* Futuristic & bold */
+    font-size: 2.5rem; /* Large logo size */
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    text-align: center;
+    margin: 20px 0;
+
+    /* Gradient text effect */
+    background: linear-gradient(90deg, #25D366, #00BFFF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+
+    /* Extra effects */
+    text-shadow: 0px 0px 12px rgba(37, 211, 102, 0.4);
+    transition: transform 0.3s ease, text-shadow 0.3s ease;
+}
+
+/* Hover effect */
+.appname:hover {
+    transform: scale(1.08);
+    text-shadow: 0px 0px 20px rgba(0, 191, 255, 0.6);
+}
+
+
+
+/* Hide the loading container when not active */
+.loading-container:not(.active) {
+    opacity: 0;
+    pointer-events: none; /* Prevents interaction when hidden */
+}
+
+/* WhatsApp-style logo animation */
+.whatsapp-logo svg {
+    margin-bottom: 20px;
+    animation: bounce 1s ease-in-out infinite; /* Logo bounce */
+}
+
+.text-container {
+    text-align: center;
+}
+
+.text-container p {
+    margin: 5px 0;
+    font-size: 1.2rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.end-to-end-encrypted {
+    font-size: 0.9rem;
+    color: #888;
+}
+
+/* Loading bar container */
+.loading-bar {
+    width: 100%;
+    max-width: 200px; /* Limit the bar width */
+    height: 4px;
+    background-color: #e0e0e0; /* Bar track background */
+    margin-top: 30px;
+    border-radius: 2px;
+    overflow: hidden;
+    position: relative;
+}
+
+/* The green bar filling animation */
+.loading-bar::before {
+    content: "";
+    display: block;
+    height: 100%;
+    width: 0;
+    background-color: #25D366; /* WhatsApp green */
+    animation: load 1.5s linear forwards; /* Runs for 4 seconds */
+    border-radius: 2px;
+}
+
+/* Keyframes for the loading bar */
+@keyframes load {
+    0% { width: 0; }
+    100% { width: 100%; }
+}
+
+/* Bounce effect for logo */
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
