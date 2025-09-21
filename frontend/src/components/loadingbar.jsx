@@ -34,14 +34,7 @@ const LoadingBar = () => {
                 </svg>
             </div>
             <div className='appname'>Chasmos</div>
-            <div className="text-container">
-                <p>Next-gen-chat-app</p>
-               
-               
-            </div>
             <div className="loading-bar"></div>
-
-             <p className="end-to-end-encrypted">End-to-end encrypted</p>
         </div>
     );
 };
