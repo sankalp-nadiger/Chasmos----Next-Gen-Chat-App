@@ -57,21 +57,6 @@
     animation: bounce 1s ease-in-out infinite; /* Logo bounce */
 }
 
-.text-container {
-    text-align: center;
-}
-
-.text-container p {
-    margin: 5px 0;
-    font-size: 1.2rem;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-}
-
-.end-to-end-encrypted {
-    font-size: 0.9rem;
-    color: #888;
-}
-
 /* Loading bar container */
 .loading-bar {
     width: 100%;
