@@ -121,7 +121,8 @@ const ChatHeader = React.memo(({
             {showThreeDotsMenu && (
               <div
                 ref={threeDotsMenuRef}
-                className={`absolute top-8 right-0 w-56 ${currentTheme.secondary} border ${currentTheme.border} rounded-lg shadow-xl py-2 z-50`}
+                className={`absolute top-8 right-0 w-56 ${currentTheme.secondary} border ${currentTheme.border} rounded-lg shadow-xl py-2 overflow-hidden`}
+style={{ zIndex: 9999 }}
               >
                 {/* Share Contact */}
                 <div className={`px-4 py-2 ${currentTheme.hover} cursor-pointer flex items-center space-x-3 transition-colors`}>

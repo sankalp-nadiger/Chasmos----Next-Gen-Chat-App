@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import CosmosBackground from '../components/CosmosBg';
 
 const ThemeContext = createContext();
 
@@ -111,7 +112,19 @@ export const ThemeProvider = ({ children }) => {
 
   return (
     <ThemeContext.Provider value={value}>
-      {children}
+      <div className="relative w-full h-screen">
+        <CosmosBackground 
+          opacity={0.3} 
+          theme={theme}
+          showStars={true}
+          showNebula={true}
+          showParticles={true}
+          className="cosmos-background"
+        />
+        <div className="relative z-10 w-full h-full">
+          {children}
+        </div>
+      </div>
     </ThemeContext.Provider>
   );
 };
