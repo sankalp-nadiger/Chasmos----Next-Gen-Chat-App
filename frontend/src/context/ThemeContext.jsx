@@ -48,13 +48,13 @@ export const ThemeProvider = ({ children }) => {
   // Theme configurations - memoized to prevent recreation on each render
   const themes = useMemo(() => ({
     light: {
-      primary: 'bg-blue-50',
+      primary: 'bg-white',
       secondary: 'bg-white',
       accent: 'bg-blue-500',
       text: 'text-gray-900',
       textSecondary: 'text-gray-600',
       border: 'border-gray-200',
-      hover: 'hover:bg-blue-100',
+      hover: 'hover:bg-gray-100',
       searchBg: 'bg-gray-100',
       inputBg: 'bg-gray-100',
       sidebar: 'bg-white',
@@ -65,19 +65,19 @@ export const ThemeProvider = ({ children }) => {
       shadow: 'shadow-lg'
     },
     mixed: {
-      primary: 'bg-gradient-to-br from-blue-100 to-indigo-200',
-      secondary: 'bg-white/90 backdrop-blur-sm',
+      primary: 'bg-blue-50',
+      secondary: 'bg-white',
       accent: 'bg-blue-600',
       text: 'text-gray-800',
       textSecondary: 'text-gray-600',
-      border: 'border-gray-300',
-      hover: 'hover:bg-blue-200',
-      searchBg: 'bg-white/50',
-      inputBg: 'bg-white/70',
-      sidebar: 'bg-white/95',
+      border: 'border-blue-200',
+      hover: 'hover:bg-blue-50',
+      searchBg: 'bg-blue-50',
+      inputBg: 'bg-white',
+      sidebar: 'bg-white',
       message: {
         sent: 'bg-blue-600 text-white',
-        received: 'bg-gray-200 text-gray-800'
+        received: 'bg-blue-100 text-gray-800'
       },
       shadow: 'shadow-xl'
     },

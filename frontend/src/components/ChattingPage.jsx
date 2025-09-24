@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -9,9 +9,16 @@ import {
   Check,
   CheckCheck,
   Pin,
+  X,
+  Archive,
+  Trash2,
+  Share2,
+  Settings,
+  MessageSquare,
 } from "lucide-react";
 import { useTheme } from "../context/ThemeContext";
 import MessageInput from "./MessageInput";
+import ContactItem from "./ContactItem";
 import {
   mockContacts,
   mockMessages,
@@ -26,80 +33,168 @@ const ChatHeader = React.memo(({
   currentTheme, 
   isMobileView, 
   onBackToContacts, 
-  onToggleChatSearch 
+  onToggleChatSearch,
+  showChatSearch,
+  chatSearchTerm,
+  onChatSearchChange,
+  chatSearchRef,
+  onCloseChatSearch,
+  showThreeDotsMenu,
+  onToggleThreeDotsMenu,
+  threeDotsMenuRef,
+  onCloseThreeDotsMenu,
+  pinnedMessages,
+  onShowPinnedMessages
 }) => {
+  const pinnedCount = Object.values(pinnedMessages || {}).filter(Boolean).length;
   return (
-    <div
-      className={`${currentTheme.secondary} p-4 flex items-center justify-between`}
-    >
-      <div className="flex items-center space-x-3">
-        {isMobileView && (
-          <button
-            onClick={onBackToContacts}
-            className={`${currentTheme.text} hover:${currentTheme.accent} p-1 rounded`}
-          >
-            ←
-          </button>
-        )}
-
-        <div className="relative">
-          {selectedContact.isDocument ? (
-            <div
-              className={`w-10 h-10 rounded-full ${currentTheme.accent} flex items-center justify-center`}
+    <div className={`${currentTheme.secondary} relative`}>
+      <div className="p-4 flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          {isMobileView && (
+            <button
+              onClick={onBackToContacts}
+              className={`${currentTheme.text} hover:${currentTheme.accent} p-1 rounded`}
             >
-              <FileText className="w-5 h-5 text-white" />
-            </div>
-          ) : selectedContact.avatar ? (
-            <img
-              src={selectedContact.avatar}
-              alt={selectedContact.name}
-              className="w-10 h-10 rounded-full object-cover"
+              ←
+            </button>
+          )}
+
+          <div className="relative">
+            {selectedContact.isDocument ? (
+              <div
+                className={`w-10 h-10 rounded-full ${currentTheme.accent} flex items-center justify-center`}
+              >
+                <FileText className="w-5 h-5 text-white" />
+              </div>
+            ) : selectedContact.avatar ? (
+              <img
+                src={selectedContact.avatar}
+                alt={selectedContact.name}
+                className="w-10 h-10 rounded-full object-cover"
+              />
+            ) : (
+              <div
+                className={`w-10 h-10 rounded-full ${currentTheme.accent} flex items-center justify-center text-white font-semibold`}
+              >
+                {generateAvatarFallback(selectedContact.name)}
+              </div>
+            )}
+
+            {selectedContact.isOnline && !selectedContact.isDocument && (
+              <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
+            )}
+          </div>
+
+          <div>
+            <h2 className={`font-semibold ${currentTheme.text}`}>
+              {selectedContact.name}
+            </h2>
+            <p className={`text-sm ${currentTheme.textSecondary}`}>
+              {selectedContact.isTyping
+                ? "typing..."
+                : selectedContact.isOnline && !selectedContact.isDocument
+                ? "Online"
+                : "Offline"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-3 relative">
+          <Search
+            className={`w-5 h-5 ${currentTheme.textSecondary} cursor-pointer hover:${currentTheme.text} transition-colors duration-200`}
+            onClick={() => {
+              console.log('Search icon clicked, current showChatSearch:', showChatSearch);
+              onToggleChatSearch();
+            }}
+          />
+          <div className="relative">
+            <MoreVertical
+              className={`w-5 h-5 ${currentTheme.textSecondary} cursor-pointer hover:${currentTheme.text} transition-colors duration-200`}
+              onClick={() => {
+                console.log('Three dots clicked, current showThreeDotsMenu:', showThreeDotsMenu);
+                onToggleThreeDotsMenu();
+              }}
             />
-          ) : (
-            <div
-              className={`w-10 h-10 rounded-full ${currentTheme.accent} flex items-center justify-center text-white font-semibold`}
-            >
-              {generateAvatarFallback(selectedContact.name)}
-            </div>
-          )}
+            
+            {/* Three Dots Menu */}
+            {showThreeDotsMenu && (
+              <div
+                ref={threeDotsMenuRef}
+                className={`absolute top-8 right-0 w-56 ${currentTheme.secondary} border ${currentTheme.border} rounded-lg shadow-xl py-2 z-50`}
+              >
+                {/* Share Contact */}
+                <div className={`px-4 py-2 ${currentTheme.hover} cursor-pointer flex items-center space-x-3 transition-colors`}>
+                  <Share2 className={`h-4 w-4 ${currentTheme.textSecondary}`} />
+                  <span className={`${currentTheme.text} text-sm`}>Share Contact</span>
+                </div>
 
-          {selectedContact.isOnline && !selectedContact.isDocument && (
-            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
-          )}
+                {/* Archive Chat */}
+                <div className={`px-4 py-2 ${currentTheme.hover} cursor-pointer flex items-center space-x-3 transition-colors`}>
+                  <Archive className={`h-4 w-4 ${currentTheme.textSecondary}`} />
+                  <span className={`${currentTheme.text} text-sm`}>Archive Chat</span>
+                </div>
+
+                {/* Chat Settings */}
+                <div className={`px-4 py-2 ${currentTheme.hover} cursor-pointer flex items-center space-x-3 transition-colors`}>
+                  <Settings className={`h-4 w-4 ${currentTheme.textSecondary}`} />
+                  <span className={`${currentTheme.text} text-sm`}>Chat Settings</span>
+                </div>
+
+                {/* Divider */}
+                <div className={`border-t ${currentTheme.border} my-2`}></div>
+
+                {/* Delete Chat */}
+                <div className="px-4 py-2 hover:bg-red-50 cursor-pointer flex items-center space-x-3 transition-colors">
+                  <Trash2 className="h-4 w-4 text-red-500" />
+                  <span className="text-red-500 text-sm">Delete Chat</span>
+                </div>
+              </div>
+            )}
+            
+            {/* Search bar below three dots */}
+            {console.log('Rendering search bar, showChatSearch:', showChatSearch)}
+            {showChatSearch && (
+              <div
+                ref={chatSearchRef}
+                className={`absolute top-8 right-0 w-80 ${currentTheme.secondary} border ${currentTheme.border} rounded-lg shadow-xl p-3 z-50`}
+              >
+                <div className="flex items-center space-x-2">
+                  <Search className={`h-4 w-4 ${currentTheme.textSecondary}`} />
+                  <input
+                    type="text"
+                    placeholder="Search messages..."
+                    className={`flex-1 outline-none text-sm bg-transparent ${currentTheme.text} placeholder-gray-400`}
+                    value={chatSearchTerm}
+                    onChange={onChatSearchChange}
+                    autoFocus
+                  />
+                  <X
+                    className={`h-4 w-4 ${currentTheme.textSecondary} cursor-pointer hover:${currentTheme.text} transition-opacity`}
+                    onClick={() => {
+                      console.log('Close button clicked');
+                      onCloseChatSearch();
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-
-        <div>
-          <h2 className={`font-semibold ${currentTheme.text}`}>
-            {selectedContact.name}
-          </h2>
-          <p className={`text-sm ${currentTheme.textSecondary}`}>
-            {selectedContact.isTyping
-              ? "typing..."
-              : selectedContact.isOnline && !selectedContact.isDocument
-              ? "Online"
-              : "Offline"}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex items-center space-x-3">
-        <Search
-          className={`w-5 h-5 ${currentTheme.textSecondary} cursor-pointer hover:${currentTheme.text} transition-colors duration-200`}
-          onClick={onToggleChatSearch}
-        />
-        <MoreVertical
-          className={`w-5 h-5 ${currentTheme.textSecondary} cursor-pointer hover:${currentTheme.text} transition-colors duration-200`}
-        />
       </div>
     </div>
   );
 }, (prevProps, nextProps) => {
   return prevProps.selectedContact?.id === nextProps.selectedContact?.id &&
-         prevProps.selectedContact?.isTyping === nextProps.selectedContact?.isTyping;
+         prevProps.selectedContact?.isTyping === nextProps.selectedContact?.isTyping &&
+         prevProps.showChatSearch === nextProps.showChatSearch &&
+         prevProps.chatSearchTerm === nextProps.chatSearchTerm &&
+         prevProps.showThreeDotsMenu === nextProps.showThreeDotsMenu &&
+         JSON.stringify(prevProps.pinnedMessages) === JSON.stringify(nextProps.pinnedMessages);
 });
 
 // MessageBubble component definition (moved before MessagesArea)
-const MessageBubble = React.memo(({ message, isPinned, onPinToggle }) => {
+const MessageBubble = React.memo(({ message, isPinned, onPinToggle, currentTheme }) => {
   const isOwnMessage = message.sender === "me";
 
   const handlePinClick = useCallback(() => {
@@ -127,8 +222,8 @@ const MessageBubble = React.memo(({ message, isPinned, onPinToggle }) => {
       <motion.div
         className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg relative ${
           isOwnMessage
-            ? "bg-blue-500 text-white"
-            : "bg-gray-100 text-gray-900"
+            ? currentTheme.message.sent
+            : currentTheme.message.received
         } ${isPinned ? "ring-2 ring-yellow-400" : ""}`}
         whileHover={{
           boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
@@ -276,9 +371,10 @@ const MessageBubble = React.memo(({ message, isPinned, onPinToggle }) => {
   );
   }, (prevProps, nextProps) => {
     return prevProps.message.id === nextProps.message.id && 
-           prevProps.isPinned === nextProps.isPinned;
-  });// Memoized Messages Area Component  
-const MessagesArea = React.memo(({ 
+           prevProps.isPinned === nextProps.isPinned &&
+           prevProps.currentTheme === nextProps.currentTheme;
+  });// Messages Area Component  
+const MessagesArea = ({ 
   filteredMessages, 
   pinnedMessages, 
   onPinMessage, 
@@ -295,6 +391,7 @@ const MessagesArea = React.memo(({
             message={message} 
             isPinned={pinnedMessages[message.id] || false}
             onPinToggle={onPinMessage}
+            currentTheme={currentTheme}
           />
         ))}
       </AnimatePresence>
@@ -325,10 +422,7 @@ const MessagesArea = React.memo(({
       )}
     </div>
   );
-}, (prevProps, nextProps) => {
-  return prevProps.filteredMessages.length === nextProps.filteredMessages.length &&
-         prevProps.selectedContactId === nextProps.selectedContactId;
-});
+};
 
 const ChattingPage = () => {
   const { currentTheme } = useTheme();
@@ -342,7 +436,12 @@ const ChattingPage = () => {
   const [isMobileView, setIsMobileView] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showChatSearch, setShowChatSearch] = useState(false);
+  const [showThreeDotsMenu, setShowThreeDotsMenu] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState({});
+
+  // Ref for chat search container (click-outside functionality)
+  const chatSearchRef = useRef(null);
+  const threeDotsMenuRef = useRef(null);
 
   // Handle responsive design
   useEffect(() => {
@@ -359,27 +458,51 @@ const ChattingPage = () => {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, [selectedContact]);
-  // Close chat search bar when switching chats
+  // Close chat search bar and three dots menu when switching chats
   useEffect(() => {
     setShowChatSearch(false);
+    setShowThreeDotsMenu(false);
     setChatSearchTerm("");
   }, [selectedContact]);
+
+  // Handle click outside chat search and three dots menu to close them
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (chatSearchRef.current && !chatSearchRef.current.contains(event.target) && showChatSearch) {
+        setShowChatSearch(false);
+        setChatSearchTerm("");
+      }
+      if (threeDotsMenuRef.current && !threeDotsMenuRef.current.contains(event.target) && showThreeDotsMenu) {
+        setShowThreeDotsMenu(false);
+      }
+    };
+
+    if (showChatSearch || showThreeDotsMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showChatSearch, showThreeDotsMenu]);
 
   const filteredContacts = useMemo(
     () => searchContacts(contacts, searchTerm),
     [contacts, searchTerm]
   );
 
-  const filteredMessages = useMemo(() => {
-    if (!selectedContact || !chatSearchTerm) {
-      return messages[selectedContact?.id] || [];
+  // Remove useMemo and calculate messages directly in render
+  const getMessagesForContact = (contactId, searchTerm = "") => {
+    if (!contactId) return [];
+    
+    const contactMessages = messages[contactId] || [];
+    
+    if (!searchTerm.trim()) {
+      return contactMessages;
     }
-    const contactMessages = messages[selectedContact.id] || [];
+    
     return contactMessages.filter((message) => {
       const text = message.text || message.content || "";
-      return text.toLowerCase().includes(chatSearchTerm.toLowerCase());
+      return text.toLowerCase().includes(searchTerm.toLowerCase());
     });
-  }, [messages, selectedContact, chatSearchTerm]);
+  };
 
   // Memoize input change handlers
   const handleSearchTermChange = useCallback((e) => {
@@ -439,12 +562,27 @@ const ChattingPage = () => {
   }, [isMobileView]);
 
   const toggleChatSearch = useCallback(() => {
+    console.log('toggleChatSearch called, current state:', showChatSearch);
     setShowChatSearch(!showChatSearch);
+    console.log('toggleChatSearch setting state to:', !showChatSearch);
   }, [showChatSearch]);
 
   const closeChatSearch = useCallback(() => {
     setShowChatSearch(false);
     setChatSearchTerm("");
+  }, []);
+
+  const toggleThreeDotsMenu = useCallback(() => {
+    console.log('toggleThreeDotsMenu called, current state:', showThreeDotsMenu);
+    setShowThreeDotsMenu(!showThreeDotsMenu);
+    // Close search if it's open
+    if (showChatSearch) {
+      setShowChatSearch(false);
+    }
+  }, [showThreeDotsMenu, showChatSearch]);
+
+  const closeThreeDotsMenu = useCallback(() => {
+    setShowThreeDotsMenu(false);
   }, []);
 
   const handlePinMessage = useCallback((messageId) => {
@@ -454,159 +592,13 @@ const ChattingPage = () => {
     }));
   }, []);
 
-  const ContactItem = React.memo(({ contact, isSelected, onSelect }) => (
-    <motion.div
-      layout
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      whileHover={{
-        scale: 1.02,
-        transition: { duration: 0.2, ease: "easeInOut" },
-      }}
-      whileTap={{ scale: 0.98 }}
-      className={`flex items-center p-3 cursor-pointer transition-all duration-300 ${
-        currentTheme.hover
-      } ${
-        isSelected
-          ? currentTheme.accent + " text-white shadow-lg"
-          : ""
-      }`}
-      onClick={() => onSelect(contact)}
-    >
-      <motion.div
-        className="relative"
-        whileHover={{ rotate: [0, -5, 5, 0], transition: { duration: 0.5 } }}
-      >
-        {contact.isDocument ? (
-          <motion.div
-            className={`w-12 h-12 rounded-full ${currentTheme.accent} flex items-center justify-center`}
-            whileHover={{ rotateY: 180, transition: { duration: 0.6 } }}
-          >
-            <FileText className="w-6 h-6 text-white" />
-          </motion.div>
-        ) : contact.avatar ? (
-          <motion.img
-            src={contact.avatar}
-            alt={contact.name}
-            className="w-12 h-12 rounded-full object-cover"
-            whileHover={{ scale: 1.1, transition: { duration: 0.3 } }}
-          />
-        ) : (
-          <motion.div
-            className={`w-12 h-12 rounded-full ${currentTheme.accent} flex items-center justify-center text-white font-semibold`}
-            whileHover={{
-              scale: 1.1,
-              rotateY: 180,
-              transition: { duration: 0.4 },
-            }}
-          >
-            {generateAvatarFallback(contact.name)}
-          </motion.div>
-        )}
-
-        {contact.isOnline && !contact.isDocument && (
-          <motion.div
-            className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"
-            animate={{
-              scale: [1, 1.2, 1],
-              opacity: [1, 0.7, 1],
-            }}
-            transition={{
-              duration: 2,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
-          />
-        )}
-      </motion.div>
-
-      <div className="ml-3 flex-1 min-w-0">
-        <motion.div
-          className="flex items-center justify-between"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.1 }}
-        >
-          <h3
-            className={`font-semibold truncate ${
-              isSelected
-                ? "text-white"
-                : currentTheme.text
-            }`}
-          >
-            {contact.name}
-          </h3>
-          <motion.span
-            className={`text-xs ${
-              isSelected
-                ? "text-blue-100"
-                : currentTheme.textSecondary
-            }`}
-            initial={{ x: 10, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            transition={{ delay: 0.2 }}
-          >
-            {contact.timestamp}
-          </motion.span>
-        </motion.div>
-
-        <motion.div
-          className="flex items-center justify-between"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.15 }}
-        >
-          <p
-            className={`text-sm truncate ${
-              contact.isTyping
-                ? "text-green-500 italic"
-                : isSelected
-                ? "text-blue-100"
-                : currentTheme.textSecondary
-            }`}
-          >
-            {contact.isTyping ? (
-              <motion.span
-                animate={{ opacity: [1, 0.5, 1] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-              >
-                typing...
-              </motion.span>
-            ) : (
-              contact.lastMessage
-            )}
-          </p>
-
-          {contact.unreadCount > 0 && (
-            <motion.span
-              className={`${currentTheme.accent} text-white text-xs rounded-full px-2 py-1 ml-2 min-w-[1.25rem] text-center`}
-              initial={{ scale: 0, rotate: -180 }}
-              animate={{ scale: 1, rotate: 0 }}
-              whileHover={{ scale: 1.1 }}
-              transition={{
-                type: "spring",
-                stiffness: 500,
-                damping: 25,
-              }}
-            >
-              {contact.unreadCount}
-            </motion.span>
-          )}
-        </motion.div>
-      </div>
-    </motion.div>
-  ), (prevProps, nextProps) => {
-    // Only re-render if contact data or selection state changes
-    return prevProps.contact.id === nextProps.contact.id &&
-           prevProps.isSelected === nextProps.isSelected &&
-           prevProps.contact.lastMessage === nextProps.contact.lastMessage &&
-           prevProps.contact.unreadCount === nextProps.contact.unreadCount &&
-           prevProps.contact.isTyping === nextProps.contact.isTyping;
-  });
-
   return (
-    <div className={`h-screen flex ${currentTheme.primary}`}>
+    <>
+      <style>
+        {`@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&display=swap');`}
+      </style>
+      
+      <div className={`h-screen flex ${currentTheme.primary}`}>
       {/* Sidebar */}
       <AnimatePresence mode="wait">
         {showSidebar && (
@@ -637,12 +629,28 @@ const ChattingPage = () => {
             {/* Search Header */}
             <div className="p-4">
               <div className="flex items-center space-x-3 mb-4">
-                <div
-                  className={`w-10 h-10 rounded-full ${currentTheme.accent} flex items-center justify-center`}
-                >
-                  <span className="text-white font-bold">C</span>
+                <div className={`w-10 h-10 rounded-full ${currentTheme.accent} flex items-center justify-center`}>
+                  <svg
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      fill="currentColor"
+                      className="text-blue-500"
+                    />
+                    <path
+                      d="M17.5 15.5C17.25 15.25 16.8125 15.0625 16.375 14.875C15.9375 14.6875 15.5625 14.5 15.0625 14.1875C14.5625 13.875 14.1875 13.625 13.8125 13.3125C13.4375 13 13.0625 12.5625 12.75 12.0625C12.5 11.5625 12.25 11.0625 12 10.5625C11.75 10.0625 11.5 9.5625 11.25 9.0625C11 8.5625 10.75 8.125 10.5 7.625C10.25 7.125 10 6.625 9.75 6.125C9.5 5.625 9.25 5.1875 9 4.6875C8.75 4.1875 8.5 3.75 8.25 3.25C8 2.75 7.75 2.25 7.5 1.75C7.25 1.25 7 0.75 6.75 0.25C6.5 0.25 6.25 0.5 6 0.75C5.75 1 5.5 1.25 5.25 1.5C5 1.75 4.75 2 4.5 2.25C4.25 2.5 4 2.75 3.75 3C3.5 3.25 3.25 3.5 3 3.75C2.75 4 2.5 4.25 2.25 4.5C2 4.75 1.75 5 1.5 5.25C1.25 5.5 1 5.75 0.75 6C0.5 6.25 0.25 6.5 0.25 6.75L0.25 6.75Z"
+                      fill="white"
+                    />
+                  </svg>
                 </div>
-                <h1 className={`text-xl font-bold ${currentTheme.text}`}>
+                <h1 className={`text-xl font-bold ${currentTheme.text}`} style={{ fontFamily: "'Orbitron', sans-serif", letterSpacing: '2px' }}>
                   Chasmos
                 </h1>
               </div>
@@ -669,19 +677,61 @@ const ChattingPage = () => {
                   contact={contact} 
                   isSelected={selectedContact?.id === contact.id}
                   onSelect={handleContactSelect}
+                  currentTheme={currentTheme}
                 />
               ))}
             </div>
 
             {/* Floating Add Button */}
-            <button
-              className={`absolute ${isMobileView ? 'bottom-6 right-6 fixed' : 'bottom-6 right-6'} w-14 h-14 ${currentTheme.accent} rounded-full ${currentTheme.shadow} flex items-center justify-center text-white hover:opacity-90 transition-opacity z-20`}
+            <motion.button
+              whileHover={{ 
+                scale: 1.1,
+                rotate: [0, -10, 10, -10, 0],
+                boxShadow: "0 10px 30px rgba(59, 130, 246, 0.4)"
+              }}
+              whileTap={{ 
+                scale: 0.95,
+                rotate: -5
+              }}
+              animate={{
+                y: [0, -5, 0],
+                transition: {
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }
+              }}
+              className={`absolute ${isMobileView ? 'bottom-6 right-6 fixed' : 'bottom-6 right-6'} w-16 h-16 ${currentTheme.accent} rounded-full flex items-center justify-center text-white transition-all duration-300 z-20 group`}
+              style={{
+                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                boxShadow: '0 8px 25px rgba(59, 130, 246, 0.3)'
+              }}
               onClick={() => console.log("Add new chat")}
             >
-              <span className="text-white text-2xl font-bold leading-none flex items-center justify-center">
-                +
-              </span>
-            </button>
+              <motion.div
+                whileHover={{
+                  rotate: 360,
+                  transition: { duration: 0.6 }
+                }}
+                className="relative"
+              >
+                <MessageSquare className="w-7 h-7 text-white" />
+              </motion.div>
+              
+              {/* Ripple effect on hover */}
+              <motion.div
+                className="absolute inset-0 rounded-full bg-white opacity-0 group-hover:opacity-20"
+                animate={{
+                  scale: [1, 1.5],
+                  opacity: [0, 0.2, 0],
+                }}
+                transition={{
+                  duration: 1,
+                  repeat: Infinity,
+                  ease: "easeOut"
+                }}
+              />
+            </motion.button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -697,42 +747,22 @@ const ChattingPage = () => {
               isMobileView={isMobileView}
               onBackToContacts={handleBackToContacts}
               onToggleChatSearch={toggleChatSearch}
+              showChatSearch={showChatSearch}
+              chatSearchTerm={chatSearchTerm}
+              onChatSearchChange={handleChatSearchTermChange}
+              chatSearchRef={chatSearchRef}
+              onCloseChatSearch={closeChatSearch}
+              showThreeDotsMenu={showThreeDotsMenu}
+              onToggleThreeDotsMenu={toggleThreeDotsMenu}
+              threeDotsMenuRef={threeDotsMenuRef}
+              onCloseThreeDotsMenu={closeThreeDotsMenu}
+              pinnedMessages={pinnedMessages}
             />
-
-            {/* Chat Search Input */}
-            <AnimatePresence>
-              {showChatSearch && (
-                <motion.div
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  transition={{ duration: 0.2 }}
-                  className="fixed left-1/2 top-6 z-30 w-[90vw] max-w-md -translate-x-1/2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg p-3 flex items-center space-x-2"
-                >
-                  <Search className="w-5 h-5 text-gray-400 dark:text-gray-300" />
-                  <input
-                    type="text"
-                    placeholder="Search messages..."
-                    value={chatSearchTerm}
-                    onChange={handleChatSearchTermChange}
-                    className="flex-1 bg-transparent text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none px-2"
-                    autoFocus
-                  />
-                  {chatSearchTerm && (
-                    <button
-                      onClick={closeChatSearch}
-                      className="text-gray-400 hover:text-gray-700 dark:hover:text-white text-xl px-2"
-                    >
-                      ×
-                    </button>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
 
             {/* Messages Area */}
             <MessagesArea
-              filteredMessages={filteredMessages}
+              key={selectedContact.id} 
+              filteredMessages={getMessagesForContact(selectedContact.id, chatSearchTerm)}
               pinnedMessages={pinnedMessages}
               onPinMessage={handlePinMessage}
               currentTheme={currentTheme}
@@ -757,15 +787,33 @@ const ChattingPage = () => {
                 transition={{ duration: 0.5 }}
                 className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full ${currentTheme.accent} mx-auto mb-4 sm:mb-6 flex items-center justify-center`}
               >
-                <span className="text-2xl sm:text-3xl text-white font-bold">
-                  C
-                </span>
+                <svg
+                  width="48"
+                  height="48"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-12 h-12 sm:w-14 sm:h-14"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    fill="currentColor"
+                    className="text-blue-500"
+                  />
+                  <path
+                    d="M17.5 15.5C17.25 15.25 16.8125 15.0625 16.375 14.875C15.9375 14.6875 15.5625 14.5 15.0625 14.1875C14.5625 13.875 14.1875 13.625 13.8125 13.3125C13.4375 13 13.0625 12.5625 12.75 12.0625C12.5 11.5625 12.25 11.0625 12 10.5625C11.75 10.0625 11.5 9.5625 11.25 9.0625C11 8.5625 10.75 8.125 10.5 7.625C10.25 7.125 10 6.625 9.75 6.125C9.5 5.625 9.25 5.1875 9 4.6875C8.75 4.1875 8.5 3.75 8.25 3.25C8 2.75 7.75 2.25 7.5 1.75C7.25 1.25 7 0.75 6.75 0.25C6.5 0.25 6.25 0.5 6 0.75C5.75 1 5.5 1.25 5.25 1.5C5 1.75 4.75 2 4.5 2.25C4.25 2.5 4 2.75 3.75 3C3.5 3.25 3.25 3.5 3 3.75C2.75 4 2.5 4.25 2.25 4.5C2 4.75 1.75 5 1.5 5.25C1.25 5.5 1 5.75 0.75 6C0.5 6.25 0.25 6.5 0.25 6.75L0.25 6.75Z"
+                    fill="white"
+                  />
+                </svg>
               </motion.div>
               <motion.h2
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: 0.2, duration: 0.5 }}
                 className={`text-xl sm:text-2xl font-bold mb-2 ${currentTheme.text}`}
+                style={{ fontFamily: "'Orbitron', sans-serif", letterSpacing: '2px' }}
               >
                 Welcome to Chasmos
               </motion.h2>
@@ -782,6 +830,7 @@ const ChattingPage = () => {
         ) : null}
       </div>
     </div>
+    </>
   );
 };
 
