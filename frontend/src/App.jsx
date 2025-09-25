@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import LoadingBar from "./components/loadingbar.jsx";
 import "./App.css";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
