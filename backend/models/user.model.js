@@ -1,4 +1,3 @@
-// backend/models/user.model.js
 import mongoose from "mongoose";
 
 const userSchema = new mongoose.Schema(
@@ -14,6 +13,8 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
     },
+    phoneNumber: { type: String, required: true, unique: true },
+    avatar: { type: String },
     password: {
       type: String,
       required: true,
