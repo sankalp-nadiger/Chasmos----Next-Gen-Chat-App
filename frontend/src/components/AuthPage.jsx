@@ -21,52 +21,39 @@ import {
 } from "lucide-react";
 import { useTheme } from "../context/ThemeContext";
 
+// Import SVG assets
+import schedulingIcon from "../assets/scheduling.svg";
+import projectIcon from "../assets/project.svg";
+import screenIcon from "../assets/screen.svg";
+
 // Features data for carousel
 const appFeatures = [
   {
     id: 1,
-    title: "Real-time Messaging",
+    title: "Message Scheduling",
     description:
-      "Instant messaging with read receipts, typing indicators, and emoji reactions",
+      "Schedule your messages to be sent at the perfect time, ensuring timely communication",
     icon: MessageCircle,
-    image: "🚀",
+    image: <img src={schedulingIcon} alt="Message Scheduling" className="w-8 h-8" />,
     color: "from-blue-500 to-cyan-500",
   },
   {
     id: 2,
-    title: "Smart Contacts",
+    title: "Collaborative Project Discussion",
     description:
-      "Intelligent contact management with online status and last seen",
+      "Discuss project ideas with integrated documentation and real-time collaboration tools",
     icon: Users,
-    image: "👥",
+    image: <img src={projectIcon} alt="Project Discussion" className="w-8 h-8" />,
     color: "from-purple-500 to-pink-500",
   },
   {
     id: 3,
-    title: "End-to-End Security",
+    title: "Screenshot Detection",
     description:
-      "Your messages are protected with advanced encryption technology",
+      "Automatically detect and organize screenshots for easy reference and sharing",
     icon: Shield,
-    image: "🔒",
+    image: <img src={screenIcon} alt="Screenshot Detection" className="w-8 h-8" />,
     color: "from-green-500 to-emerald-500",
-  },
-  {
-    id: 4,
-    title: "Lightning Fast",
-    description:
-      "Optimized performance for smooth and responsive user experience",
-    icon: Zap,
-    image: "⚡",
-    color: "from-yellow-500 to-orange-500",
-  },
-  {
-    id: 5,
-    title: "Beautiful Themes",
-    description:
-      "Dynamic themes that change based on time of day automatically",
-    icon: Heart,
-    image: "🎨",
-    color: "from-red-500 to-rose-500",
   },
 ];
 
@@ -92,8 +79,8 @@ const FeatureCarousel = ({ currentTheme }) => {
   }, []);
 
   return (
-    <div className="relative h-full flex flex-col items-center justify-center p-8">
-      <div className="mb-8 text-center">
+    <div className="relative h-full flex flex-col items-center justify-center px-12 py-8 xl:px-24 2xl:px-32">
+      <div className="mb-8 text-center max-w-lg mx-auto">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -152,7 +139,7 @@ const FeatureCarousel = ({ currentTheme }) => {
           >
             <div className="text-center h-full flex flex-col justify-center">
               <div
-                className={`w-16 h-16 rounded-full bg-gradient-to-br ${appFeatures[currentSlide].color} mx-auto mb-4 flex items-center justify-center text-2xl`}
+                className={`w-16 h-16 rounded-full bg-gradient-to-br ${appFeatures[currentSlide].color} mx-auto mb-4 flex items-center justify-center`}
               >
                 {appFeatures[currentSlide].image}
               </div>
@@ -189,10 +176,10 @@ const FeatureCarousel = ({ currentTheme }) => {
           <button
             key={index}
             onClick={() => setCurrentSlide(index)}
-            className={`w-2 h-2 rounded-full transition-all duration-200 ${
+            className={`w-3 h-3 rounded-full transition-all duration-200 hover:scale-110 ${
               index === currentSlide
-                ? currentTheme.accent
-                : `${currentTheme.textSecondary} opacity-50`
+                ? currentTheme.accent + " shadow-md"
+                : `bg-gray-400 hover:bg-gray-300 opacity-70 hover:opacity-100`
             }`}
           />
         ))}
@@ -206,10 +193,13 @@ const LoginForm = ({ currentTheme, onLogin }) => {
   const [formData, setFormData] = useState({
     contact: "",
     password: "",
+    otp: "",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [contactType, setContactType] = useState("email"); // email or phone
+  const [loginMethod, setLoginMethod] = useState("password"); // password or otp
   const [isLoading, setIsLoading] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
 
   const detectContactType = useCallback((value) => {
     const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
@@ -229,22 +219,40 @@ const LoginForm = ({ currentTheme, onLogin }) => {
       const value = e.target.value;
       setFormData((prev) => ({ ...prev, contact: value }));
       detectContactType(value);
+      // Reset OTP sent status when contact changes
+      setOtpSent(false);
     },
     [detectContactType]
   );
 
+  const handleSendOtp = useCallback(async () => {
+    if (!formData.contact) return;
+    
+    setIsLoading(true);
+    // Simulate OTP sending
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    setOtpSent(true);
+    setIsLoading(false);
+  }, [formData.contact]);
+
   const handleSubmit = useCallback(
     async (e) => {
       e.preventDefault();
-      setIsLoading(true);
 
-      // Simulate login process
+      if (loginMethod === "otp" && !otpSent) {
+        // Send OTP first
+        await handleSendOtp();
+        return;
+      }
+
+      setIsLoading(true);
+      // Simulate login process (password or OTP verification)
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
       setIsLoading(false);
       onLogin?.(formData);
     },
-    [formData, onLogin]
+    [formData, onLogin, loginMethod, otpSent, handleSendOtp]
   );
 
   return (
@@ -285,64 +293,169 @@ const LoginForm = ({ currentTheme, onLogin }) => {
         </div>
       </div>
 
-      {/* Password Input */}
-      <div className="space-y-2">
+      {/* Login Method Toggle */}
+      <div className="space-y-3">
         <label className={`block text-sm font-medium ${currentTheme.text}`}>
-          Password
+          Choose Login Method
         </label>
-        <div className="relative">
-          <div
-            className={`absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none ${currentTheme.textSecondary}`}
-          >
-            <Lock className="h-5 w-5" />
-          </div>
-          <input
-            type={showPassword ? "text" : "password"}
-            placeholder="Enter your password"
-            value={formData.password}
-            onChange={(e) =>
-              setFormData((prev) => ({ ...prev, password: e.target.value }))
-            }
-            className={`w-full pl-10 pr-12 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${currentTheme.text}`}
-            required
+        <div className={`flex rounded-lg p-1 ${currentTheme.searchBg} relative overflow-hidden`}>
+          {/* Animated Background Slider */}
+          <motion.div
+            className={`absolute top-1 bottom-1 w-1/2 ${currentTheme.accent} rounded-md shadow-md`}
+            animate={{
+              x: loginMethod === "password" ? "0%" : "100%",
+              transition: {
+                type: "spring",
+                stiffness: 300,
+                damping: 30,
+              },
+            }}
           />
+          
           <button
             type="button"
-            onClick={() => setShowPassword(!showPassword)}
-            className={`absolute inset-y-0 right-0 pr-3 flex items-center ${currentTheme.textSecondary} hover:${currentTheme.text} transition-colors`}
+            onClick={() => setLoginMethod("password")}
+            className={`relative z-10 flex-1 py-2 px-4 text-sm font-medium rounded-md transition-colors duration-200 ${
+              loginMethod === "password"
+                ? "text-white"
+                : currentTheme.textSecondary
+            }`}
           >
-            {showPassword ? (
-              <EyeOff className="h-5 w-5" />
-            ) : (
-              <Eye className="h-5 w-5" />
-            )}
+            <Lock className="w-4 h-4 inline mr-2" />
+            Password
+          </button>
+          
+          <button
+            type="button"
+            onClick={() => setLoginMethod("otp")}
+            className={`relative z-10 flex-1 py-2 px-4 text-sm font-medium rounded-md transition-colors duration-200 ${
+              loginMethod === "otp"
+                ? "text-white"
+                : currentTheme.textSecondary
+            }`}
+          >
+            <Send className="w-4 h-4 inline mr-2" />
+            OTP
           </button>
         </div>
       </div>
 
-      {/* Remember Me & Forgot Password */}
-      <div className="flex items-center justify-between">
-        <label className="flex items-center">
-          <input
-            type="checkbox"
-            className={`rounded border ${currentTheme.border} text-blue-600 focus:ring-blue-500`}
-          />
-          <span className={`ml-2 text-sm ${currentTheme.textSecondary}`}>
-            Remember me
-          </span>
-        </label>
-        <button
-          type="button"
-          className="text-sm text-blue-600 hover:text-blue-500 font-medium transition-colors"
-        >
-          Forgot password?
-        </button>
-      </div>
+      {/* Password or OTP Input */}
+      {loginMethod === "password" ? (
+        <div className="space-y-2">
+          <label className={`block text-sm font-medium ${currentTheme.text}`}>
+            Password
+          </label>
+          <div className="relative">
+            <div
+              className={`absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none ${currentTheme.textSecondary}`}
+            >
+              <Lock className="h-5 w-5" />
+            </div>
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="Enter your password"
+              value={formData.password}
+              onChange={(e) =>
+                setFormData((prev) => ({ ...prev, password: e.target.value }))
+              }
+              className={`w-full pl-10 pr-12 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${currentTheme.text}`}
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className={`absolute inset-y-0 right-0 pr-3 flex items-center ${currentTheme.textSecondary} hover:${currentTheme.text} transition-colors`}
+            >
+              {showPassword ? (
+                <EyeOff className="h-5 w-5" />
+              ) : (
+                <Eye className="h-5 w-5" />
+              )}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <label className={`block text-sm font-medium ${currentTheme.text}`}>
+            OTP Verification
+          </label>
+          
+          {otpSent ? (
+            <div className="space-y-3">
+              <div className={`p-3 rounded-lg ${currentTheme.searchBg} border ${currentTheme.border}`}>
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="w-5 h-5 text-green-500" />
+                  <span className={`text-sm ${currentTheme.text}`}>
+                    OTP sent to {contactType === "phone" ? "your phone" : "your email"}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="relative">
+                <div
+                  className={`absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none ${currentTheme.textSecondary}`}
+                >
+                  <Send className="h-5 w-5" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Enter 6-digit OTP"
+                  value={formData.otp}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, otp: e.target.value }))
+                  }
+                  maxLength="6"
+                  className={`w-full pl-10 pr-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${currentTheme.text} text-center font-mono text-lg tracking-widest`}
+                  required
+                />
+              </div>
+              
+              <button
+                type="button"
+                onClick={handleSendOtp}
+                disabled={isLoading}
+                className={`text-sm text-blue-600 hover:text-blue-500 font-medium transition-colors disabled:opacity-50`}
+              >
+                Resend OTP
+              </button>
+            </div>
+          ) : (
+            <div className={`p-4 rounded-lg ${currentTheme.searchBg} border ${currentTheme.border} text-center`}>
+              <Send className={`w-8 h-8 ${currentTheme.textSecondary} mx-auto mb-2`} />
+              <p className={`text-sm ${currentTheme.textSecondary}`}>
+                Ready to send OTP verification code
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Remember Me & Forgot Password - Only for password login */}
+      {loginMethod === "password" && (
+        <div className="flex items-center justify-between">
+          <label className="flex items-center">
+            <input
+              type="checkbox"
+              className={`rounded border ${currentTheme.border} text-blue-600 focus:ring-blue-500`}
+            />
+            <span className={`ml-2 text-sm ${currentTheme.textSecondary}`}>
+              Remember me
+            </span>
+          </label>
+          <button
+            type="button"
+            className="text-sm text-blue-600 hover:text-blue-500 font-medium transition-colors"
+          >
+            Forgot password?
+          </button>
+        </div>
+      )}
 
       {/* Submit Button */}
       <motion.button
         type="submit"
-        disabled={isLoading}
+        disabled={isLoading || (loginMethod === "otp" && otpSent && !formData.otp)}
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
         className={`w-full py-3 px-4 rounded-lg font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 focus:ring-4 focus:ring-blue-200 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2`}
@@ -351,7 +464,12 @@ const LoginForm = ({ currentTheme, onLogin }) => {
           <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
         ) : (
           <>
-            <span>Sign In</span>
+            <span>
+              {loginMethod === "otp" 
+                ? (otpSent ? "Verify OTP" : "Send OTP") 
+                : "Sign In"
+              }
+            </span>
             <ArrowRight className="w-5 h-5" />
           </>
         )}
@@ -695,10 +813,10 @@ const SignupForm = ({ currentTheme, onSignup }) => {
         {[1, 2, 3].map((stepNumber) => (
           <div
             key={stepNumber}
-            className={`w-2 h-2 rounded-full transition-all duration-200 ${
+            className={`w-3 h-3 rounded-full transition-all duration-200 ${
               stepNumber <= step
-                ? currentTheme.accent
-                : `${currentTheme.border} bg-gray-200`
+                ? currentTheme.accent + " shadow-md"
+                : `bg-gray-400 opacity-60`
             }`}
           />
         ))}
@@ -714,16 +832,26 @@ const AuthPage = ({ onAuthenticated }) => {
 
   const handleLogin = useCallback(
     (formData) => {
-      console.log("Login:", formData);
-      onAuthenticated?.(true);
+      // Pass user data along with authentication success
+      const userData = {
+        email: formData.contact,
+        name: formData.contact.split('@')[0] || 'User',
+        loginTime: new Date().toISOString()
+      };
+      onAuthenticated?.(true, userData);
     },
     [onAuthenticated]
   );
 
   const handleSignup = useCallback(
     (formData) => {
-      console.log("Signup:", formData);
-      onAuthenticated?.(true);
+      // Pass user data along with authentication success
+      const userData = {
+        email: formData.contact,
+        name: formData.contact.split('@')[0] || 'User',
+        signupTime: new Date().toISOString()
+      };
+      onAuthenticated?.(true, userData);
     },
     [onAuthenticated]
   );
@@ -739,7 +867,7 @@ const AuthPage = ({ onAuthenticated }) => {
         `}
       </style>
 
-      <div className={`min-h-screen flex ${currentTheme.primary}`}>
+      <div className={`min-h-screen flex ${currentTheme.primary} max-w-7xl mx-auto`}>
         {/* Left Side - Features Carousel */}
         <div
           className={`hidden lg:flex lg:w-1/2 ${currentTheme.primary} relative overflow-hidden`}

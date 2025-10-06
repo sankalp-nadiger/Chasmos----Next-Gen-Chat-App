@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 const MessageInput = React.memo(({ 
   onSendMessage, 
   selectedContact,
-  currentTheme 
+  effectiveTheme 
 }) => {
   // Move messageInput state to this component to isolate re-renders
   const [messageInput, setMessageInput] = useState("");
@@ -48,7 +48,6 @@ const MessageInput = React.memo(({
   const handleFileChange = useCallback((e, type) => {
     const file = e.target.files[0];
     if (file) {
-      console.log(`${type} selected:`, file.name);
       // Here you would typically handle file upload
       // For now, just send a message indicating the file
       const fileMessage = `${type === 'image' ? '📷' : '📄'} ${file.name}`;
@@ -71,7 +70,7 @@ const MessageInput = React.memo(({
   }, [showAttachmentMenu]);
 
   return (
-    <div className={`${currentTheme.secondary} p-4 relative`}>
+    <div className={`${effectiveTheme.secondary} p-4 relative`}>
       {/* Hidden file inputs */}
       <input
         ref={fileInputRef}
@@ -96,7 +95,7 @@ const MessageInput = React.memo(({
             whileTap={{ scale: 0.95 }}
           >
             <Paperclip
-              className={`w-6 h-6 ${currentTheme.textSecondary} cursor-pointer hover:${currentTheme.text} transition-colors duration-200`}
+              className={`w-6 h-6 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-colors duration-200`}
               onClick={toggleAttachmentMenu}
             />
           </motion.div>
@@ -109,7 +108,7 @@ const MessageInput = React.memo(({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.9 }}
                 transition={{ duration: 0.2 }}
-                className={`absolute -top-20 left-0 ${currentTheme.secondary} border ${currentTheme.border} rounded-lg shadow-xl p-3 z-50`}
+                className={`absolute -top-20 left-0 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50`}
               >
                 <div className="flex items-center space-x-4">
                   {/* Document Upload */}
@@ -122,7 +121,7 @@ const MessageInput = React.memo(({
                     <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
                       <FileText className="w-5 h-5 text-white" />
                     </div>
-                    <p className={`${currentTheme.text} text-xs font-medium`}>Document</p>
+                    <p className={`${effectiveTheme.text} text-xs font-medium`}>Document</p>
                   </motion.div>
 
                   {/* Image Upload */}
@@ -135,7 +134,7 @@ const MessageInput = React.memo(({
                     <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
                       <Image className="w-5 h-5 text-white" />
                     </div>
-                    <p className={`${currentTheme.text} text-xs font-medium`}>Photo</p>
+                    <p className={`${effectiveTheme.text} text-xs font-medium`}>Photo</p>
                   </motion.div>
 
                   {/* Camera */}
@@ -145,13 +144,12 @@ const MessageInput = React.memo(({
                     className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-purple-50 transition-colors"
                     onClick={() => {
                       setShowAttachmentMenu(false);
-                      console.log('Camera clicked');
                     }}
                   >
                     <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
                       <Camera className="w-5 h-5 text-white" />
                     </div>
-                    <p className={`${currentTheme.text} text-xs font-medium`}>Camera</p>
+                    <p className={`${effectiveTheme.text} text-xs font-medium`}>Camera</p>
                   </motion.div>
 
                   {/* Location */}
@@ -161,13 +159,12 @@ const MessageInput = React.memo(({
                     className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-red-50 transition-colors"
                     onClick={() => {
                       setShowAttachmentMenu(false);
-                      console.log('Location clicked');
                     }}
                   >
                     <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center">
                       <MapPin className="w-5 h-5 text-white" />
                     </div>
-                    <p className={`${currentTheme.text} text-xs font-medium`}>Location</p>
+                    <p className={`${effectiveTheme.text} text-xs font-medium`}>Location</p>
                   </motion.div>
                 </div>
               </motion.div>
@@ -175,14 +172,14 @@ const MessageInput = React.memo(({
           </AnimatePresence>
         </div>
 
-        <div className={`flex-1 ${currentTheme.inputBg} rounded-lg px-4 py-2 flex items-center`}>
+        <div className={`flex-1 ${effectiveTheme.inputBg} rounded-lg px-4 py-2 flex items-center`}>
           <input
             type="text"
             placeholder="Type a message..."
             value={messageInput}
             onChange={handleInputChange}
             onKeyPress={handleKeyPress}
-            className={`flex-1 bg-transparent ${currentTheme.text} placeholder-gray-400 focus:outline-none`}
+            className={`flex-1 bg-transparent ${effectiveTheme.text} placeholder-gray-400 focus:outline-none`}
           />
         </div>
 
@@ -190,7 +187,7 @@ const MessageInput = React.memo(({
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={handleSendClick}
-          className={`${currentTheme.accent} p-2 rounded-full text-white hover:opacity-90 transition-opacity`}
+          className={`${effectiveTheme.accent} p-2 rounded-full text-white hover:opacity-90 transition-opacity`}
         >
           <Send className="w-5 h-5" />
         </motion.button>
