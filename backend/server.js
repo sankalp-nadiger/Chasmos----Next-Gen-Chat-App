@@ -7,11 +7,16 @@ import userRoutes from "./routes/user.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import messageRoutes from "./routes/message.routes.js";
 import { notFound, errorHandler } from "./middleware/auth.middleware.js";
-import path from "path";
+import cors from 'cors';
 
 dotenv.config();
 connectDB();
 const app = express();
+
+app.use(cors({
+  origin: 'http://localhost:5173',
+  credentials: true
+}));
 
 app.use(express.json()); // to accept json data
 
@@ -33,7 +38,8 @@ const server = app.listen(
 const io = new Server(server, {
   pingTimeout: 60000,
   cors: {
-    origin: "http://localhost:3000",
+    origin: ['http://localhost:5173','https://chasmos.netlify.app'],
+        methods: ["GET", "POST"]
     // credentials: true,
   },
 });
