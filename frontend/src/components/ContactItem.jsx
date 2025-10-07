@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { FileText } from "lucide-react";
 import { generateAvatarFallback } from "../utils/mockData";
 
-const ContactItem = ({ contact, isSelected, onSelect, currentTheme }) => {
+const ContactItem = ({ contact, isSelected, onSelect, effectiveTheme }) => {
   return (
   <motion.div
     layout
@@ -17,8 +17,8 @@ const ContactItem = ({ contact, isSelected, onSelect, currentTheme }) => {
     whileTap={{ scale: 0.98 }}
     className={`flex items-center p-3 cursor-pointer transition-all duration-300 ${
       isSelected
-        ? currentTheme.accent + " text-white shadow-lg"
-        : ""
+        ? effectiveTheme.accent + " text-white shadow-lg"
+        : effectiveTheme.hover
     }`}
     onClick={() => onSelect(contact)}
   >
@@ -28,7 +28,7 @@ const ContactItem = ({ contact, isSelected, onSelect, currentTheme }) => {
     >
       {contact.isDocument ? (
         <motion.div
-          className={`w-12 h-12 rounded-full ${currentTheme.accent} flex items-center justify-center`}
+          className={`w-12 h-12 rounded-full ${effectiveTheme.accent} flex items-center justify-center`}
           whileHover={{ rotateY: 180, transition: { duration: 0.6 } }}
         >
           <FileText className="w-6 h-6 text-white" />
@@ -42,7 +42,7 @@ const ContactItem = ({ contact, isSelected, onSelect, currentTheme }) => {
         />
       ) : (
         <motion.div
-          className={`w-12 h-12 rounded-full ${currentTheme.accent} flex items-center justify-center text-white font-semibold`}
+          className={`w-12 h-12 rounded-full ${effectiveTheme.accent} flex items-center justify-center text-white font-semibold`}
           whileHover={{
             scale: 1.1,
             rotateY: 180,
@@ -80,7 +80,7 @@ const ContactItem = ({ contact, isSelected, onSelect, currentTheme }) => {
           className={`font-semibold truncate ${
             isSelected
               ? "text-white"
-              : currentTheme.text
+              : effectiveTheme.text
           }`}
         >
           {contact.name}
@@ -89,7 +89,7 @@ const ContactItem = ({ contact, isSelected, onSelect, currentTheme }) => {
           className={`text-xs ${
             isSelected
               ? "text-blue-100"
-              : currentTheme.textSecondary
+              : effectiveTheme.textSecondary
           }`}
           initial={{ x: 10, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
@@ -111,7 +111,7 @@ const ContactItem = ({ contact, isSelected, onSelect, currentTheme }) => {
               ? "text-green-500 italic"
               : isSelected
               ? "text-blue-100"
-              : currentTheme.textSecondary
+              : effectiveTheme.textSecondary
           }`}
         >
           {contact.isTyping ? (
@@ -128,7 +128,7 @@ const ContactItem = ({ contact, isSelected, onSelect, currentTheme }) => {
 
         {contact.unreadCount > 0 && (
           <motion.span
-            className={`${currentTheme.accent} text-white text-xs rounded-full px-2 py-1 ml-2 min-w-[1.25rem] text-center`}
+            className={`${effectiveTheme.accent} text-white text-xs rounded-full px-2 py-1 ml-2 min-w-[1.25rem] text-center`}
             initial={{ scale: 0, rotate: -180 }}
             animate={{ scale: 1, rotate: 0 }}
             whileHover={{ scale: 1.1 }}
