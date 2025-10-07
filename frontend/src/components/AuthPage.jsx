@@ -867,7 +867,7 @@ const AuthPage = ({ onAuthenticated }) => {
         `}
       </style>
 
-      <div className={`min-h-screen flex ${currentTheme.primary} max-w-7xl mx-auto`}>
+      <div className={`min-h-screen flex ${currentTheme.primary} w-full`}>
         {/* Left Side - Features Carousel */}
         <div
           className={`hidden lg:flex lg:w-1/2 ${currentTheme.primary} relative overflow-hidden`}
