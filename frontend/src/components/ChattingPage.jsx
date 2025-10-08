@@ -16,10 +16,18 @@ import {
   Settings,
   MessageSquare,
   LogOut,
+  Users,
+  UserPlus,
+  User,
+  MoreHorizontal,
 } from "lucide-react";
 import { useTheme } from "../context/ThemeContext";
 import MessageInput from "./MessageInput";
 import ContactItem from "./ContactItem";
+import GroupCreation from "./GroupCreation";
+import NewChat from "./NewChat";
+import Profile from "./Profile";
+import SettingsPage from "./Settings";
 import {
   mockContacts,
   mockMessages,
@@ -443,7 +451,7 @@ const MessagesArea = ({
 };
 
 const ChattingPage = ({ onLogout }) => {
-  const { currentTheme } = useTheme();
+  const { currentTheme, setTheme, theme } = useTheme();
   
   const [selectedContact, setSelectedContact] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -456,10 +464,19 @@ const ChattingPage = ({ onLogout }) => {
   const [showChatSearch, setShowChatSearch] = useState(false);
   const [showThreeDotsMenu, setShowThreeDotsMenu] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState({});
+  const [showFloatingMenu, setShowFloatingMenu] = useState(false);
+  const [lastClickTime, setLastClickTime] = useState(0);
+  const [showGroupCreation, setShowGroupCreation] = useState(false);
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Ref for chat search container (click-outside functionality)
   const chatSearchRef = useRef(null);
   const threeDotsMenuRef = useRef(null);
+  const floatingMenuRef = useRef(null);
+  const userMenuRef = useRef(null);
 
   // Handle responsive design
   useEffect(() => {
@@ -493,13 +510,19 @@ const ChattingPage = ({ onLogout }) => {
       if (threeDotsMenuRef.current && !threeDotsMenuRef.current.contains(event.target) && showThreeDotsMenu) {
         setShowThreeDotsMenu(false);
       }
+      if (floatingMenuRef.current && !floatingMenuRef.current.contains(event.target) && showFloatingMenu) {
+        setShowFloatingMenu(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target) && showUserMenu) {
+        setShowUserMenu(false);
+      }
     };
 
-    if (showChatSearch || showThreeDotsMenu) {
+    if (showChatSearch || showThreeDotsMenu || showFloatingMenu || showUserMenu) {
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
-  }, [showChatSearch, showThreeDotsMenu]);
+  }, [showChatSearch, showThreeDotsMenu, showFloatingMenu, showUserMenu]);
 
   const filteredContacts = useMemo(
     () => searchContacts(contacts, searchTerm),
@@ -576,6 +599,8 @@ const ChattingPage = ({ onLogout }) => {
     if (isMobileView) {
       setSelectedContact(null);
       setShowSidebar(true);
+      setShowGroupCreation(false);
+      setShowNewChat(false);
     }
   }, [isMobileView]);
 
@@ -662,6 +687,75 @@ const ChattingPage = ({ onLogout }) => {
       };
     }
   }, []);
+
+  // Floating menu functions
+  const toggleFloatingMenu = useCallback(() => {
+    const currentTime = Date.now();
+    const timeDiff = currentTime - lastClickTime;
+    
+    // Handle double click (less than 300ms between clicks)
+    if (timeDiff < 300 && showFloatingMenu) {
+      setShowFloatingMenu(false);
+      setLastClickTime(0);
+      return;
+    }
+    
+    setShowFloatingMenu(!showFloatingMenu);
+    setLastClickTime(currentTime);
+  }, [showFloatingMenu, lastClickTime]);
+
+  const closeFloatingMenu = useCallback(() => {
+    setShowFloatingMenu(false);
+  }, []);
+
+  const handleCreateGroup = useCallback(() => {
+    setShowGroupCreation(true);
+    setShowFloatingMenu(false);
+    if (isMobileView) {
+      setShowSidebar(false);
+    }
+  }, [isMobileView]);
+
+  const handleNewChat = useCallback(() => {
+    setShowNewChat(true);
+    setShowFloatingMenu(false);
+    if (isMobileView) {
+      setShowSidebar(false);
+    }
+  }, [isMobileView]);
+
+  const handleInviteUser = useCallback(() => {
+    console.log("Invite user clicked");
+    setShowFloatingMenu(false);
+  }, []);
+
+  const handleCloseGroupCreation = useCallback(() => {
+    setShowGroupCreation(false);
+  }, []);
+
+  const handleCloseNewChat = useCallback(() => {
+    setShowNewChat(false);
+  }, []);
+
+  const handleCreateGroupComplete = useCallback((newGroup) => {
+    // Add the new group to contacts
+    setContacts(prev => [newGroup, ...prev]);
+    setShowGroupCreation(false);
+    // Optionally select the new group
+    setSelectedContact(newGroup);
+  }, []);
+
+  const handleStartNewChat = useCallback((contact) => {
+    setSelectedContact(contact);
+    setShowNewChat(false);
+    // Initialize empty messages for this contact if not exists
+    if (!messages[contact.id]) {
+      setMessages(prev => ({
+        ...prev,
+        [contact.id]: []
+      }));
+    }
+  }, [messages]);
 
   const [cosmicTheme, setCosmicTheme] = useState(() => getTimeBasedCosmicTheme());
   const [lastUpdateTime, setLastUpdateTime] = useState(new Date().getHours());
@@ -843,7 +937,7 @@ const ChattingPage = ({ onLogout }) => {
         )}
       {/* Sidebar */}
       <AnimatePresence mode="wait">
-        {showSidebar && (
+        {showSidebar && !(isMobileView && (showGroupCreation || showNewChat)) && (
           <motion.div
             initial={{ x: isMobileView ? -300 : -100, opacity: 0 }}
             animate={{
@@ -898,16 +992,72 @@ const ChattingPage = ({ onLogout }) => {
                   </h1>
                 </div>
                 
-                {/* Logout Button */}
-                <motion.button
-                  onClick={onLogout}
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.95 }}
-                  className={`p-2 rounded-lg ${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text} hover:text-red-500 transition-all duration-200 group`}
-                  title="Logout"
-                >
-                  <LogOut className="w-5 h-5 transition-transform duration-200" />
-                </motion.button>
+                {/* User Menu */}
+                <div className="relative" ref={userMenuRef}>
+                  <motion.button
+                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                    className={`p-2 rounded-lg ${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text} transition-all duration-200`}
+                    title="User Menu"
+                  >
+                    <MoreHorizontal className="w-5 h-5 transition-transform duration-200" />
+                  </motion.button>
+
+                  {/* Dropdown Menu */}
+                  <AnimatePresence>
+                    {showUserMenu && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                        transition={{ duration: 0.2 }}
+                        className={`absolute right-0 top-12 w-48 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-lg z-50 overflow-hidden`}
+                      >
+                        <div className="py-2">
+                          {/* Profile Option */}
+                          <button
+                            className={`w-full px-4 py-3 text-left flex items-center space-x-3 hover:${effectiveTheme.hover} transition-colors`}
+                            onClick={() => {
+                              setShowUserMenu(false);
+                              setShowProfile(true);
+                            }}
+                          >
+                            <User className="w-4 h-4" />
+                            <span className={`text-sm ${effectiveTheme.text}`}>Profile</span>
+                          </button>
+
+                          {/* Settings Option */}
+                          <button
+                            className={`w-full px-4 py-3 text-left flex items-center space-x-3 hover:${effectiveTheme.hover} transition-colors`}
+                            onClick={() => {
+                              setShowUserMenu(false);
+                              setShowSettings(true);
+                            }}
+                          >
+                            <Settings className="w-4 h-4" />
+                            <span className={`text-sm ${effectiveTheme.text}`}>Settings</span>
+                          </button>
+
+                          {/* Divider */}
+                          <div className={`my-2 h-px ${effectiveTheme.border}`}></div>
+
+                          {/* Logout Option */}
+                          <button
+                            className={`w-full px-4 py-3 text-left flex items-center space-x-3 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-red-600 dark:text-red-400`}
+                            onClick={() => {
+                              setShowUserMenu(false);
+                              onLogout();
+                            }}
+                          >
+                            <LogOut className="w-4 h-4" />
+                            <span className="text-sm">Logout</span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               </div>
 
               <div className={`relative ${effectiveTheme.searchBg} rounded-lg`}>
@@ -937,8 +1087,64 @@ const ChattingPage = ({ onLogout }) => {
               ))}
             </div>
 
-            {/* Floating Add Button */}
-            <motion.button
+            {/* Floating Add Button with Menu */}
+            <div className="relative">
+              {/* Floating Action Menu */}
+              {showFloatingMenu && (
+                <motion.div
+                  ref={floatingMenuRef}
+                  initial={{ opacity: 0, scale: 0.8, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.8, y: 20 }}
+                  transition={{ duration: 0.2 }}
+                  className={`absolute ${isMobileView ? 'bottom-20 right-6 fixed' : 'bottom-20 right-6'} flex flex-col space-y-3 z-30`}
+                >
+                  {/* Create Group */}
+                  <motion.button
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 }}
+                    onClick={handleCreateGroup}
+                    className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
+                  >
+                    <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+                      <Users className="w-5 h-5 text-white" />
+                    </div>
+                    <span className={`${effectiveTheme.text} font-medium whitespace-nowrap`}>Create a group</span>
+                  </motion.button>
+
+                  {/* New Chat */}
+                  <motion.button
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.15 }}
+                    onClick={handleNewChat}
+                    className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
+                  >
+                    <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
+                      <MessageSquare className="w-5 h-5 text-white" />
+                    </div>
+                    <span className={`${effectiveTheme.text} font-medium whitespace-nowrap`}>New chat</span>
+                  </motion.button>
+
+                  {/* Invite User */}
+                  <motion.button
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.2 }}
+                    onClick={handleInviteUser}
+                    className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
+                  >
+                    <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
+                      <UserPlus className="w-5 h-5 text-white" />
+                    </div>
+                    <span className={`${effectiveTheme.text} font-medium whitespace-nowrap`}>Invite new user</span>
+                  </motion.button>
+                </motion.div>
+              )}
+
+              {/* Main Floating Button */}
+              <motion.button
               whileHover={{ 
                 scale: 1.1,
                 rotate: [0, -10, 10, -10, 0],
@@ -956,21 +1162,36 @@ const ChattingPage = ({ onLogout }) => {
                   ease: "easeInOut"
                 }
               }}
-              className={`absolute ${isMobileView ? 'bottom-6 right-6 fixed' : 'bottom-6 right-6'} w-16 h-16 ${effectiveTheme.accent} rounded-full flex items-center justify-center text-white transition-all duration-300 z-20 group`}
+              className={`absolute ${isMobileView ? 'bottom-6 right-6 fixed' : 'bottom-6 right-6'} w-16 h-16 rounded-full flex items-center justify-center text-white transition-all duration-300 z-20 group`}
               style={{
-                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                boxShadow: '0 8px 25px rgba(59, 130, 246, 0.3)'
+                background: showFloatingMenu 
+                  ? 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
+                  : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                boxShadow: showFloatingMenu 
+                  ? '0 8px 25px rgba(239, 68, 68, 0.3)'
+                  : '0 8px 25px rgba(59, 130, 246, 0.3)',
+                border: 'none'
               }}
-              onClick={() => console.log("Add new chat")}
+              onClick={() => {
+                toggleFloatingMenu();
+              }}
             >
               <motion.div
                 whileHover={{
                   rotate: 360,
                   transition: { duration: 0.6 }
                 }}
+                animate={{
+                  rotate: showFloatingMenu ? 45 : 0
+                }}
+                transition={{ duration: 0.3 }}
                 className="relative"
               >
-                <MessageSquare className="w-7 h-7 text-white" />
+                {showFloatingMenu ? (
+                  <X className="w-7 h-7 text-white" />
+                ) : (
+                  <MessageSquare className="w-7 h-7 text-white" />
+                )}
               </motion.div>
               
               {/* Ripple effect on hover */}
@@ -987,13 +1208,38 @@ const ChattingPage = ({ onLogout }) => {
                 }}
               />
             </motion.button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Main Chat Area */}
       <div key={selectedContact?.id || 'no-contact'} className="flex-1 flex flex-col relative h-full overflow-hidden">
-        {selectedContact ? (
+        {showGroupCreation ? (
+          <GroupCreation
+            contacts={contacts}
+            effectiveTheme={effectiveTheme}
+            onClose={handleCloseGroupCreation}
+            onCreateGroup={handleCreateGroupComplete}
+          />
+        ) : showNewChat ? (
+          <NewChat
+            contacts={contacts}
+            effectiveTheme={effectiveTheme}
+            onClose={handleCloseNewChat}
+            onStartChat={handleStartNewChat}
+          />
+        ) : showProfile ? (
+          <Profile
+            effectiveTheme={effectiveTheme}
+            onClose={() => setShowProfile(false)}
+          />
+        ) : showSettings ? (
+          <SettingsPage
+            effectiveTheme={effectiveTheme}
+            onClose={() => setShowSettings(false)}
+          />
+        ) : selectedContact ? (
           <>
             {/* Chat Header */}
             <ChatHeader
@@ -1084,7 +1330,29 @@ const ChattingPage = ({ onLogout }) => {
               </motion.p>
             </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="flex-1 flex items-center justify-center p-4">
+            <div className="text-center space-y-4">
+              <motion.h2
+                initial={{ y: -20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.2, duration: 0.5 }}
+                className={`text-2xl sm:text-3xl font-bold ${effectiveTheme.text} mb-4`}
+                style={{ fontFamily: "'Orbitron', sans-serif", letterSpacing: '2px' }}
+              >
+                Welcome to Chasmos
+              </motion.h2>
+              <motion.p
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.4, duration: 0.5 }}
+                className={`text-sm sm:text-base ${effectiveTheme.textSecondary}`}
+              >
+                Select a conversation to start messaging
+              </motion.p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
     </>
