@@ -6,7 +6,9 @@ import colors from "colors";
 import userRoutes from "./routes/user.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import messageRoutes from "./routes/message.routes.js";
-import { notFound, errorHandler } from "./middleware/auth.middleware.js";
+import taskRoutes from "./routes/task.routes.js";
+import sprintRoutes from "./routes/sprint.routes.js";
+import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
 import cors from 'cors';
 
 dotenv.config();
@@ -20,7 +22,6 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -30,11 +31,14 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json()); // to accept json data
+app.use(express.json());
 
+// Routes
 app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
+app.use("/api/tasks", taskRoutes);
+app.use("/api/sprints", sprintRoutes); 
 
 // Error Handling middlewares
 app.use(notFound);
@@ -51,8 +55,7 @@ const io = new Server(server, {
   pingTimeout: 60000,
   cors: {
     origin: ['http://localhost:5173','https://chasmos.netlify.app'],
-        methods: ["GET", "POST"]
-    // credentials: true,
+    methods: ["GET", "POST"]
   },
 });
 
