@@ -219,7 +219,7 @@ export const getRecentChats = async (req, res) => {
         unreadCount: chat.unreadCount?.[userId] || 0, // if you track per-user unread
         otherUser: {
           id: otherUser._id,
-          username: otherUser.username,
+          name: otherUser.email,
           avatar: otherUser.avatar || null,
           isOnline: otherUser.isOnline || false
         }

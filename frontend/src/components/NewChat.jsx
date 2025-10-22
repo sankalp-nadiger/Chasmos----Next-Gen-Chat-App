@@ -34,7 +34,7 @@ const NewChat = ({ effectiveTheme = {}, onClose, onStartChat, existingContacts =
         const data = await res.json();
         const formattedContacts = data.map(u => ({
           id: u._id,
-          name: u.email,
+          name: u.username,
           avatar: u.avatar || null,
           isOnline: Math.random() < 0.5,
           timestamp: u.createdAt,
@@ -144,6 +144,7 @@ const NewChat = ({ effectiveTheme = {}, onClose, onStartChat, existingContacts =
   );
 };
 
+//Contacts appearing in new chat page
 const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen }) => {
   return (
     <motion.div

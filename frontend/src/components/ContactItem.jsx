@@ -15,6 +15,7 @@ const formatTimestamp = (timestamp) => {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
+//recent-chats in main chat area
 const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
   return (
     <div
@@ -41,18 +42,25 @@ const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="flex justify-between items-center">
-            <h3 className={`font-semibold truncate ${effectiveTheme.text || "text-gray-900"}`}>
-              {contact.name || contact.username}
-            </h3>
-            <span className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"}`}>
-              {formatTimestamp(contact.timestamp)}
-            </span>
-          </div>
-          <p className={`text-sm truncate ${effectiveTheme.textSecondary || "text-gray-500"}`}>
-            {contact.lastMessage || (contact.isTyping ? "Typing..." : "Say hi!")}
-          </p>
-        </div>
+  <div className="flex items-center justify-between">
+    <h3
+      className={`font-semibold truncate ${effectiveTheme.text || "text-gray-900"}`}
+    >
+      {contact.name || contact.username}
+    </h3>
+    <span
+      className={`text-xs flex-shrink-0 ml-3 ${effectiveTheme.textSecondary || "text-gray-500"}`}
+    >
+      {formatTimestamp(contact.timestamp)}
+    </span>
+  </div>
+  <p
+    className={`text-sm truncate ${effectiveTheme.textSecondary || "text-gray-500"}`}
+  >
+    {contact.lastMessage || (contact.isTyping ? "Typing..." : "Say hi!")}
+  </p>
+</div>
+
       </div>
 
       {/* Right: Chat icon / unread badge */}
