@@ -4,6 +4,7 @@ import LoadingBar from "./components/loadingbar.jsx";
 import "./App.css";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
 import ChattingPage from "./components/ChattingPage.jsx";
+import NewChat from "./components/NewChat.jsx";
 import AuthPage from "./components/AuthPage.jsx";
 
 // Protected Route Component
@@ -122,7 +123,7 @@ const AppContent = () => {
           path="/" 
           element={<Navigate to="/auth" replace />} 
         />
-        
+          <Route path="/new-chat" element={<NewChat />} />
         {/* Catch all route */}
         <Route 
           path="*" 

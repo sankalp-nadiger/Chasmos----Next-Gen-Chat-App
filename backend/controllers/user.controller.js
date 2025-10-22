@@ -62,7 +62,7 @@ export const registerUser = asyncHandler(async (req, res) => {
 
   // Create new user
   const user = await User.create({
-    name: name.trim(),
+    username: username.trim(),
     email: email.toLowerCase().trim(),
     password,
     phoneNumber,
