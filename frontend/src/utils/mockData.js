@@ -358,9 +358,19 @@ export const formatTime = (date) => {
   return date.toLocaleDateString();
 };
 
-export const formatMessageTime = (date) => {
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+export const formatMessageTime = (timestamp) => {
+  if (!timestamp) return "";
+
+  // Handle both Date objects and numeric timestamps
+  const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+
+  // Fallback if the timestamp is invalid
+  if (isNaN(date.getTime())) return "";
+
+  // Format: 10:42 AM
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
+
 
 export const searchContacts = (contacts, searchTerm) => {
   if (!searchTerm.trim()) return contacts;

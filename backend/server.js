@@ -8,7 +8,7 @@ import chatRoutes from "./routes/chat.routes.js";
 import messageRoutes from "./routes/message.routes.js";
 import taskRoutes from "./routes/task.routes.js";
 import sprintRoutes from "./routes/sprint.routes.js";
-import { notFound, errorHandler } from "./middleware/auth.middleware.js";
+//import { notFound, errorHandler } from "./middleware/auth.middleware.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
 import cors from 'cors';
 
