@@ -29,7 +29,7 @@ import projectIcon from "../assets/project.svg";
 import screenIcon from "../assets/screen.svg";
 
 // API Base URL from environment variable
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
 // Features data for carousel
 const appFeatures = [

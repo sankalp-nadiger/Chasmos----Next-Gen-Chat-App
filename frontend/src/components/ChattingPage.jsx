@@ -29,7 +29,12 @@ import {
   UserPlus,
   User,
   MoreHorizontal,
-  MessageCircle, Clock, ChevronDown, ChevronUp ,
+  MessageCircle, 
+  Clock, 
+  ChevronDown, 
+  ChevronUp,
+  Globe,
+  Folder,
 } from "lucide-react";
 import { useTheme } from "../context/ThemeContext";
 import MessageInput from "./MessageInput";
@@ -60,10 +65,6 @@ const ChatHeader = React.memo(
     onChatSearchChange,
     chatSearchRef,
     onCloseChatSearch,
-    showThreeDotsMenu,
-    onToggleThreeDotsMenu,
-    threeDotsMenuRef,
-    onCloseThreeDotsMenu,
     pinnedMessages,
     onShowPinnedMessages,
   }) => {
@@ -128,96 +129,34 @@ const ChatHeader = React.memo(
               className={`w-5 h-5 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-colors duration-200`}
               onClick={onToggleChatSearch}
             />
-            <div className="relative">
-              <MoreVertical
-                className={`w-5 h-5 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-colors duration-200`}
-                onClick={onToggleThreeDotsMenu}
-              />
 
-              {/* Three Dots Menu */}
-              {showThreeDotsMenu && (
-                <div
-                  ref={threeDotsMenuRef}
-                  className={`absolute top-8 right-0 w-56 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl py-2 overflow-hidden`}
-                  style={{ zIndex: 9999 }}
-                >
-                  {/* Share Contact */}
-                  <div
-                    className={`px-4 py-2 ${effectiveTheme.hover} cursor-pointer flex items-center space-x-3 transition-colors`}
-                  >
-                    <Share2
-                      className={`h-4 w-4 ${effectiveTheme.textSecondary}`}
-                    />
-                    <span className={`${effectiveTheme.text} text-sm`}>
-                      Share Contact
-                    </span>
-                  </div>
-
-                  {/* Archive Chat */}
-                  <div
-                    className={`px-4 py-2 ${effectiveTheme.hover} cursor-pointer flex items-center space-x-3 transition-colors`}
-                  >
-                    <Archive
-                      className={`h-4 w-4 ${effectiveTheme.textSecondary}`}
-                    />
-                    <span className={`${effectiveTheme.text} text-sm`}>
-                      Archive Chat
-                    </span>
-                  </div>
-
-                  {/* Chat Settings */}
-                  <div
-                    className={`px-4 py-2 ${effectiveTheme.hover} cursor-pointer flex items-center space-x-3 transition-colors`}
-                  >
-                    <Settings
-                      className={`h-4 w-4 ${effectiveTheme.textSecondary}`}
-                    />
-                    <span className={`${effectiveTheme.text} text-sm`}>
-                      Chat Settings
-                    </span>
-                  </div>
-
-                  {/* Divider */}
-                  <div
-                    className={`border-t ${effectiveTheme.border} my-2`}
-                  ></div>
-
-                  {/* Delete Chat */}
-                  <div className="px-4 py-2 hover:bg-red-50 cursor-pointer flex items-center space-x-3 transition-colors">
-                    <Trash2 className="h-4 w-4 text-red-500" />
-                    <span className="text-red-500 text-sm">Delete Chat</span>
-                  </div>
+            {/* Search bar */}
+            {showChatSearch && (
+              <div
+                ref={chatSearchRef}
+                className={`absolute top-8 right-0 w-80 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50`}
+              >
+                <div className="flex items-center space-x-2">
+                  <Search
+                    className={`h-4 w-4 ${effectiveTheme.textSecondary}`}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Search messages..."
+                    className={`flex-1 outline-none text-sm bg-transparent ${effectiveTheme.text} placeholder-gray-400`}
+                    value={chatSearchTerm}
+                    onChange={onChatSearchChange}
+                    autoFocus
+                  />
+                  <X
+                    className={`h-4 w-4 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-opacity`}
+                    onClick={() => {
+                      onCloseChatSearch();
+                    }}
+                  />
                 </div>
-              )}
-
-              {/* Search bar below three dots */}
-              {showChatSearch && (
-                <div
-                  ref={chatSearchRef}
-                  className={`absolute top-8 right-0 w-80 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50`}
-                >
-                  <div className="flex items-center space-x-2">
-                    <Search
-                      className={`h-4 w-4 ${effectiveTheme.textSecondary}`}
-                    />
-                    <input
-                      type="text"
-                      placeholder="Search messages..."
-                      className={`flex-1 outline-none text-sm bg-transparent ${effectiveTheme.text} placeholder-gray-400`}
-                      value={chatSearchTerm}
-                      onChange={onChatSearchChange}
-                      autoFocus
-                    />
-                    <X
-                      className={`h-4 w-4 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-opacity`}
-                      onClick={() => {
-                        onCloseChatSearch();
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -230,7 +169,6 @@ const ChatHeader = React.memo(
         nextProps.selectedContact?.isTyping &&
       prevProps.showChatSearch === nextProps.showChatSearch &&
       prevProps.chatSearchTerm === nextProps.chatSearchTerm &&
-      prevProps.showThreeDotsMenu === nextProps.showThreeDotsMenu &&
       JSON.stringify(prevProps.pinnedMessages) ===
         JSON.stringify(nextProps.pinnedMessages)
     );
@@ -518,6 +456,7 @@ const ChattingPage = ({ onLogout }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [activeNavItem, setActiveNavItem] = useState('chats'); // 'chats', 'groups', 'documents', 'community'
    const [recentChats, setRecentChats] = useState([]);
    const [receivedChats, setReceivedChats] = React.useState([]); // incoming chat requests
 const [acceptedChats, setAcceptedChats] = React.useState([]); // chats you accepted
@@ -663,10 +602,30 @@ const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
     }
   }, [showChatSearch, showThreeDotsMenu, showFloatingMenu, showUserMenu]);
 
-  const filteredContacts = useMemo(
-    () => searchContacts(contacts, searchTerm),
-    [contacts, searchTerm]
-  );
+  const filteredContacts = useMemo(() => {
+    let filtered = searchContacts(contacts, searchTerm);
+    
+    // Filter by navigation item type
+    switch (activeNavItem) {
+      case 'chats':
+        filtered = filtered.filter(contact => !contact.isGroup && !contact.isDocument && !contact.isCommunity);
+        break;
+      case 'groups':
+        filtered = filtered.filter(contact => contact.isGroup);
+        break;
+      case 'documents':
+        filtered = filtered.filter(contact => contact.isDocument);
+        break;
+      case 'community':
+        filtered = filtered.filter(contact => contact.isCommunity);
+        break;
+      default:
+        // Show all for default case
+        break;
+    }
+    
+    return filtered;
+  }, [contacts, searchTerm, activeNavItem]);
 
   // Remove useMemo and calculate messages directly in render
   const getMessagesForContact = (contactId, searchTerm = "") => {
@@ -1109,6 +1068,109 @@ const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
             })}
           </div>
         )}
+
+        {/* Vertical Navigation Bar */}
+        <div className={`w-16 ${effectiveTheme.secondary} border-r ${effectiveTheme.border} flex flex-col justify-between py-4`}>
+          {/* Top Navigation Items */}
+          <div className="flex flex-col space-y-4">
+            {/* Single Chats */}
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setActiveNavItem('chats')}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                activeNavItem === 'chats' 
+                  ? `${effectiveTheme.accent} text-white shadow-lg` 
+                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+              }`}
+              title="Chats"
+            >
+              <MessageCircle className="w-5 h-5" />
+            </motion.button>
+
+            {/* Groups */}
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setActiveNavItem('groups')}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                activeNavItem === 'groups' 
+                  ? `${effectiveTheme.accent} text-white shadow-lg` 
+                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+              }`}
+              title="Groups"
+            >
+              <Users className="w-5 h-5" />
+            </motion.button>
+
+            {/* Documents */}
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setActiveNavItem('documents')}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                activeNavItem === 'documents' 
+                  ? `${effectiveTheme.accent} text-white shadow-lg` 
+                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+              }`}
+              title="Documents"
+            >
+              <Folder className="w-5 h-5" />
+            </motion.button>
+
+            {/* Community */}
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setActiveNavItem('community')}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                activeNavItem === 'community' 
+                  ? `${effectiveTheme.accent} text-white shadow-lg` 
+                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+              }`}
+              title="Community"
+            >
+              <Globe className="w-5 h-5" />
+            </motion.button>
+          </div>
+
+          {/* Bottom Navigation Items */}
+          <div className="flex flex-col space-y-4">
+            {/* Profile */}
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowProfile(true)}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`}
+              title="Profile"
+            >
+              <User className="w-5 h-5" />
+            </motion.button>
+
+            {/* Settings */}
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowSettings(true)}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`}
+              title="Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </motion.button>
+
+            {/* Logout */}
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onLogout}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 hover:bg-red-100 dark:hover:bg-red-900/20 text-red-500 hover:text-red-600`}
+              title="Logout"
+            >
+              <LogOut className="w-5 h-5" />
+            </motion.button>
+          </div>
+        </div>
+
         {/* Sidebar */}
         <AnimatePresence mode="wait">
           {showSidebar &&
@@ -1607,10 +1669,6 @@ const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
                 onChatSearchChange={handleChatSearchTermChange}
                 chatSearchRef={chatSearchRef}
                 onCloseChatSearch={closeChatSearch}
-                showThreeDotsMenu={showThreeDotsMenu}
-                onToggleThreeDotsMenu={toggleThreeDotsMenu}
-                threeDotsMenuRef={threeDotsMenuRef}
-                onCloseThreeDotsMenu={closeThreeDotsMenu}
                 pinnedMessages={pinnedMessages}
               />
 
