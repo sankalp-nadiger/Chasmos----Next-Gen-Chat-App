@@ -154,7 +154,7 @@ const NewChat = ({ effectiveTheme = {}, onClose, onStartChat, existingContacts =
     const fetchUsers = async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await fetch("${API_BASE_URL}/api/user", {
+        const res = await fetch(`${API_BASE_URL}/api/user`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error("Failed to fetch users");
@@ -328,7 +328,7 @@ const NewChat = ({ effectiveTheme = {}, onClose, onStartChat, existingContacts =
               <div className="flex items-center space-x-2 mb-4">
                 <Users className={`w-5 h-5 ${effectiveTheme.textSecondary || 'text-gray-500'}`} />
                 <h3 className={`font-medium ${effectiveTheme.text || 'text-gray-900'}`}>
-                  New Users ({filteredRegisteredUsers.length})
+                  All Users on Platform ({filteredRegisteredUsers.length})
                 </h3>
               </div>
               {filteredRegisteredUsers.length === 0 ? (
