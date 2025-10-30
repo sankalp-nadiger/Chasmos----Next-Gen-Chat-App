@@ -7,7 +7,7 @@ import React, {
 } from "react";
 
 import { motion, AnimatePresence } from "framer-motion";
-import chatReqIcon from '../assets/chat-reuest.png';
+import chatReqIcon from '../assets/Chat-reuest.png';
 import chatAcceptIcon from '../assets/chat-accepted.png';
 import {
   Search,
