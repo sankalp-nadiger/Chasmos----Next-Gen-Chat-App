@@ -124,6 +124,9 @@ const businessContacts = {
   ]
 };
 
+// API Base URL from environment variable
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+
 // Helper to format timestamp
 const formatTimestamp = (timestamp) => {
   if (!timestamp) return "Last seen recently";
@@ -151,7 +154,7 @@ const NewChat = ({ effectiveTheme = {}, onClose, onStartChat, existingContacts =
     const fetchUsers = async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await fetch("http://localhost:3000/api/user", {
+        const res = await fetch("${API_BASE_URL}/api/user", {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error("Failed to fetch users");
