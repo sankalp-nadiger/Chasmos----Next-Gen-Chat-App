@@ -471,7 +471,8 @@ const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
   const threeDotsMenuRef = useRef(null);
   const floatingMenuRef = useRef(null);
   const userMenuRef = useRef(null);
-  
+  // API Base URL from environment variable
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
 
   // Fetch contacts from APi
@@ -501,7 +502,7 @@ const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
         const token = localStorage.getItem("token");
         if (!token) throw new Error("No token found.");
 
-        const res = await fetch("http://localhost:3000/api/chat/recent", {
+        const res = await fetch("${API_BASE_URL}/api/chat/recent", {
           headers: { Authorization: `Bearer ${token}` },
         });
 
