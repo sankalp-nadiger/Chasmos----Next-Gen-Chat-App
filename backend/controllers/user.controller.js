@@ -1,10 +1,6 @@
 import asyncHandler from "express-async-handler";
 import User from "../models/user.model.js";
 import generateToken from "../config/generatetoken.js";
-
-//@description     Get or Search all users
-//@route           GET /api/user?search=
-//@access          Protected
 export const allUsers = asyncHandler(async (req, res) => {
   const keyword = req.query.search
     ? {
@@ -22,9 +18,6 @@ export const allUsers = asyncHandler(async (req, res) => {
   res.status(200).json(users);
 });
 
-//@description     Register new user
-//@route           POST /api/user/
-//@access          Public
 export const registerUser = asyncHandler(async (req, res) => {
   const { name, email, password, phoneNumber, avatar } = req.body;
 
@@ -62,7 +55,7 @@ export const registerUser = asyncHandler(async (req, res) => {
 
   // Create new user
   const user = await User.create({
-    username: username.trim(),
+    name: name.trim(),
     email: email.toLowerCase().trim(),
     password,
     phoneNumber,
@@ -85,9 +78,6 @@ export const registerUser = asyncHandler(async (req, res) => {
   }
 });
 
-//@description     Auth the user
-//@route           POST /api/user/login
-//@access          Public
 export const authUser = asyncHandler(async (req, res) => {
   const { emailOrPhone, password } = req.body;
   // Validate required fields
@@ -96,15 +86,12 @@ export const authUser = asyncHandler(async (req, res) => {
     throw new Error("Please provide email/phone and password");
   }
 
-  // Find user by email or phone (case insensitive for email)
   let user = null;
   if (emailOrPhone.includes("@")) {
     user = await User.findOne({ email: emailOrPhone.toLowerCase().trim() });
   } else {
     user = await User.findOne({ phoneNumber: emailOrPhone.trim() });
   }
-
-  // Check if user exists and password matches
   if (user && (await user.matchPassword(password))) {
     res.status(200).json({
       _id: user._id,
@@ -121,9 +108,6 @@ export const authUser = asyncHandler(async (req, res) => {
   }
 });
 
-//@description     Get user profile
-//@route           GET /api/user/profile
-//@access          Protected
 export const getUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id).select("-password");
 
@@ -135,9 +119,6 @@ export const getUserProfile = asyncHandler(async (req, res) => {
   }
 });
 
-//@description     Update user profile
-//@route           PUT /api/user/profile
-//@access          Protected
 export const updateUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
 

@@ -1,11 +1,11 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
-
 const userSchema = new mongoose.Schema(
   {
-    username: {
+    name: {
       type: String,
+      required: true,
       trim: true,
     },
     email: {
@@ -14,23 +14,32 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
     },
-    phoneNumber: { type: String, required: true, unique: true },
-    avatar: { type: String },
+    phoneNumber: { 
+      type: String, 
+      required: true, 
+      unique: true 
+    },
+    avatar: { 
+      type: String,
+      default: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+    },
     password: {
       type: String,
       required: true,
       minlength: 6,
     },
+    isAdmin: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );
 
-// Password match method
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-// Hash password before saving
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) {
     return next();

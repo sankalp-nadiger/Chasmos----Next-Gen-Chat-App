@@ -3,15 +3,10 @@ import Task from "../models/task.model.js";
 import Sprint from "../models/sprint.model.js";
 import Chat from "../models/chat.model.js";
 import Notification from "../models/notification.model.js";
-
-// Helper function to create notifications
 const createTaskNotification = async (type, task, chat, createdBy, additionalRecipients = []) => {
   try {
-    // Get chat admins
     const chatData = await Chat.findById(chat).populate('admins');
     const admins = chatData.admins.map(admin => admin._id);
-    
-    // Recipients: admins + assigner + assignees + additional recipients
     const recipients = [
       ...admins,
       createdBy,
@@ -51,10 +46,6 @@ const createTaskNotification = async (type, task, chat, createdBy, additionalRec
     console.error('Error creating notification:', error);
   }
 };
-
-//@description     Create new task
-//@route           POST /api/tasks/
-//@access          Protected
 export const createTask = asyncHandler(async (req, res) => {
   const {
     title,
@@ -139,9 +130,6 @@ export const getTasks = asyncHandler(async (req, res) => {
   res.status(200).json(tasks);
 });
 
-//@description     Get single task
-//@route           GET /api/tasks/:taskId
-//@access          Protected
 export const getTask = asyncHandler(async (req, res) => {
   const task = await Task.findById(req.params.taskId)
     .populate("assignees", "name email avatar")
@@ -163,10 +151,6 @@ export const getTask = asyncHandler(async (req, res) => {
 
   res.status(200).json(task);
 });
-
-//@description     Update task
-//@route           PUT /api/tasks/:taskId
-//@access          Protected
 export const updateTask = asyncHandler(async (req, res) => {
   const task = await Task.findById(req.params.taskId);
   
@@ -197,9 +181,6 @@ export const updateTask = asyncHandler(async (req, res) => {
   res.status(200).json(updatedTask);
 });
 
-//@description     Delete task
-//@route           DELETE /api/tasks/:taskId
-//@access          Protected
 export const deleteTask = asyncHandler(async (req, res) => {
   const task = await Task.findById(req.params.taskId);
   
@@ -223,9 +204,6 @@ export const deleteTask = asyncHandler(async (req, res) => {
   res.status(200).json({ message: "Task deleted successfully" });
 });
 
-//@description     Assign users to task
-//@route           PUT /api/tasks/:taskId/assign
-//@access          Protected
 export const assignTask = asyncHandler(async (req, res) => {
   const { assignees } = req.body;
   
@@ -257,9 +235,6 @@ export const assignTask = asyncHandler(async (req, res) => {
   res.status(200).json(updatedTask);
 });
 
-//@description     Update task status
-//@route           PUT /api/tasks/:taskId/status
-//@access          Protected
 export const updateTaskStatus = asyncHandler(async (req, res) => {
   const { status } = req.body;
   
@@ -300,10 +275,6 @@ export const updateTaskStatus = asyncHandler(async (req, res) => {
 
   res.status(200).json(updatedTask);
 });
-
-//@description     Add comment to task
-//@route           POST /api/tasks/:taskId/comments
-//@access          Protected
 export const addComment = asyncHandler(async (req, res) => {
   const { comment } = req.body;
   
@@ -336,10 +307,6 @@ export const addComment = asyncHandler(async (req, res) => {
 
   res.status(200).json(updatedTask);
 });
-
-//@description     Get task analytics for chat
-//@route           GET /api/tasks/analytics?chatId=:chatId
-//@access          Protected
 export const getTaskAnalytics = asyncHandler(async (req, res) => {
   const { chatId } = req.query;
 

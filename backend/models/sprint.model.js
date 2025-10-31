@@ -44,6 +44,7 @@ const sprintSchema = new Schema(
   },
   { timestamps: true }
 );
+
 sprintSchema.virtual('durationDays').get(function() {
   return Math.ceil((this.endDate - this.startDate) / (1000 * 60 * 60 * 24));
 });

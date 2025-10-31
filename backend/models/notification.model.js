@@ -45,6 +45,7 @@ const notificationSchema = new Schema(
   },
   { timestamps: true }
 );
+
 notificationSchema.index({ recipients: 1, isRead: 1 });
 notificationSchema.index({ chat: 1, createdAt: -1 });
 

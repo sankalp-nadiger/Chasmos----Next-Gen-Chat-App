@@ -3,10 +3,6 @@ import Sprint from "../models/sprint.model.js";
 import Task from "../models/task.model.js";
 import Chat from "../models/chat.model.js";
 import Notification from "../models/notification.model.js";
-
-//@description     Create new sprint
-//@route           POST /api/sprints/
-//@access          Protected
 export const createSprint = asyncHandler(async (req, res) => {
   const {
     title,
@@ -50,9 +46,6 @@ export const createSprint = asyncHandler(async (req, res) => {
   res.status(201).json(populatedSprint);
 });
 
-//@description     Get all sprints for a chat
-//@route           GET /api/sprints?chatId=:chatId&status=:status
-//@access          Protected
 export const getSprints = asyncHandler(async (req, res) => {
   const { chatId, status } = req.query;
   
@@ -65,10 +58,6 @@ export const getSprints = asyncHandler(async (req, res) => {
 
   res.status(200).json(sprints);
 });
-
-//@description     Get single sprint
-//@route           GET /api/sprints/:sprintId
-//@access          Protected
 export const getSprint = asyncHandler(async (req, res) => {
   const sprint = await Sprint.findById(req.params.sprintId)
     .populate("createdBy", "name email avatar");
@@ -87,10 +76,6 @@ export const getSprint = asyncHandler(async (req, res) => {
 
   res.status(200).json(sprint);
 });
-
-//@description     Update sprint
-//@route           PUT /api/sprints/:sprintId
-//@access          Protected
 export const updateSprint = asyncHandler(async (req, res) => {
   const sprint = await Sprint.findById(req.params.sprintId);
   
@@ -114,10 +99,6 @@ export const updateSprint = asyncHandler(async (req, res) => {
 
   res.status(200).json(updatedSprint);
 });
-
-//@description     Start sprint
-//@route           PUT /api/sprints/:sprintId/start
-//@access          Protected
 export const startSprint = asyncHandler(async (req, res) => {
   const sprint = await Sprint.findById(req.params.sprintId);
   
@@ -141,10 +122,6 @@ export const startSprint = asyncHandler(async (req, res) => {
 
   res.status(200).json(updatedSprint);
 });
-
-//@description     Complete sprint
-//@route           PUT /api/sprints/:sprintId/complete
-//@access          Protected
 export const completeSprint = asyncHandler(async (req, res) => {
   const sprint = await Sprint.findById(req.params.sprintId);
   
@@ -168,10 +145,6 @@ export const completeSprint = asyncHandler(async (req, res) => {
 
   res.status(200).json(updatedSprint);
 });
-
-//@description     Get tasks for a sprint
-//@route           GET /api/sprints/:sprintId/tasks
-//@access          Protected
 export const getSprintTasks = asyncHandler(async (req, res) => {
   const sprint = await Sprint.findById(req.params.sprintId);
   
@@ -195,9 +168,6 @@ export const getSprintTasks = asyncHandler(async (req, res) => {
   res.status(200).json(tasks);
 });
 
-//@description     Delete sprint
-//@route           DELETE /api/sprints/:sprintId
-//@access          Protected
 export const deleteSprint = asyncHandler(async (req, res) => {
   const sprint = await Sprint.findById(req.params.sprintId);
   
