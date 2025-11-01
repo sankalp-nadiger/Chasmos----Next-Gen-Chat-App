@@ -8,11 +8,15 @@ import chatRoutes from "./routes/chat.routes.js";
 import messageRoutes from "./routes/message.routes.js";
 import taskRoutes from "./routes/task.routes.js";
 import sprintRoutes from "./routes/sprint.routes.js";
+import contactRoutes from "./routes/contact.routes.js";
 //import { notFound, errorHandler } from "./middleware/auth.middleware.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
+//dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 connectDB();
 const app = express();
 
@@ -40,6 +44,7 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/sprints", sprintRoutes); 
+app.use("/api/contacts", contactRoutes); // contact routes
 
 // Error Handling middlewares
 app.use(notFound);

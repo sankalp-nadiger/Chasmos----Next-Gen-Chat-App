@@ -23,6 +23,18 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
     },
+    // Stores emails of users who have sent a chat/invite request to this user
+    receivedChatRequests: [{
+      type: String
+    }],
+    // Stores emails of users to whom this user has sent chat requests (pending)
+    sentChatRequests: [{
+      type: String
+    }],
+    // Stores emails of users who accepted this user's chat requests
+    acceptedChatRequests: [{
+      type: String
+    }],
     password: {
       type: String,
       required: true,
@@ -32,6 +44,26 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+ //Fields for Google Contacts Integration
+    googleId: { 
+      type: String, 
+      unique: true, 
+      sparse: true // Allows multiple null values
+    },
+    googleAccessToken: { 
+      type: String 
+    },
+    googleRefreshToken: { 
+      type: String 
+    },
+    lastContactsSync: { 
+      type: Date 
+    },
+    googleContactsSyncEnabled: {
+      type: Boolean,
+      default: false
+    }
+
   },
   { timestamps: true }
 );
