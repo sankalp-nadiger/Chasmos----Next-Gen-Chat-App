@@ -166,3 +166,42 @@ export const addToGroup = asyncHandler(async (req, res) => {
     res.json(added);
   }
 });
+
+//Fetch recent chats
+// GET /api/chat/recent
+export const getRecentChats = async (req, res) => {
+  try {
+    const userId = req.user._id; 
+
+    // Find all chats where the user is a participant
+    const chats = await Chat.find({ participants: userId })
+      .sort({ updatedAt: -1 }) // recent chats first
+      .populate('participants', '_id email avatar isOnline') // get participant info
+      .populate('lastMessage.sender', '_id email') // optional if lastMessage has sender
+      .lean();
+
+    // Map chats for frontend
+    const formattedChats = chats.map(chat => {
+      const otherUser = chat.participants.find(p => p._id.toString() !== userId.toString());
+
+      return {
+        chatId: chat._id,
+        participants: chat.participants,
+        lastMessage: chat.lastMessage?.text || "Say hi!",
+        timestamp: chat.updatedAt,
+        unreadCount: chat.unreadCount?.[userId] || 0, 
+        otherUser: {
+          id: otherUser._id,
+          username: otherUser.username,
+          avatar: otherUser.avatar || null,
+          isOnline: otherUser.isOnline || false
+        }
+      };
+    });
+
+    res.status(200).json(formattedChats);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to fetch recent chats" });
+  }
+};
