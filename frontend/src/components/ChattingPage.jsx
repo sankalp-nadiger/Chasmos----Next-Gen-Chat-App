@@ -7,8 +7,8 @@ import React, {
 } from "react";
 
 import { motion, AnimatePresence } from "framer-motion";
-import chatReqIcon from '../assets/Chat-reuest.png';
-import chatAcceptIcon from '../assets/chat-accepted.png';
+import chatReqIcon from "../assets/Chat-reuest.png";
+import chatAcceptIcon from "../assets/chat-accepted.png";
 import {
   Search,
   MoreVertical,
@@ -29,9 +29,9 @@ import {
   UserPlus,
   User,
   MoreHorizontal,
-  MessageCircle, 
-  Clock, 
-  ChevronDown, 
+  MessageCircle,
+  Clock,
+  ChevronDown,
   ChevronUp,
   Globe,
   Folder,
@@ -456,12 +456,12 @@ const ChattingPage = ({ onLogout }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [activeNavItem, setActiveNavItem] = useState('chats'); // 'chats', 'groups', 'documents', 'community'
-   const [recentChats, setRecentChats] = useState([]);
-   const [receivedChats, setReceivedChats] = React.useState([]); // incoming chat requests
-const [acceptedChats, setAcceptedChats] = React.useState([]); // chats you accepted
-const [showReceivedDropdown, setShowReceivedDropdown] = useState(false);
-const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
+  const [activeNavItem, setActiveNavItem] = useState("chats"); // 'chats', 'groups', 'documents', 'community'
+  const [recentChats, setRecentChats] = useState([]);
+  const [receivedChats, setReceivedChats] = React.useState([]); // incoming chat requests
+  const [acceptedChats, setAcceptedChats] = React.useState([]); // chats you accepted
+  const [showReceivedDropdown, setShowReceivedDropdown] = useState(false);
+  const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -472,28 +472,161 @@ const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
   const floatingMenuRef = useRef(null);
   const userMenuRef = useRef(null);
   // API Base URL from environment variable
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+  const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
+  // Fetch both received and accepted requests
+  useEffect(() => {
+    const fetchRequests = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) {
+          console.error("No token found — user might not be logged in.");
+          return;
+        }
+
+        // 1️ Fetch received chat requests
+        const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const receivedData = await resReceived.json();
+        console.log("Received Emails:", receivedData);
+
+        // ensure it's an array
+        const receivedEmails = Array.isArray(receivedData) ? receivedData : [];
+
+        // 2️ Fetch accepted chat requests
+        const resAccepted = await fetch(`${API_BASE_URL}/api/user/accepted`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const acceptedData = await resAccepted.json();
+        const acceptedEmails = Array.isArray(acceptedData) ? acceptedData : [];
+
+        // 3️) Helper: fetch user profiles by email
+        const fetchUsersByEmails = async (emails) => {
+          if (!Array.isArray(emails)) return [];
+          const promises = emails.map(async (email) => {
+            const res = await fetch(
+              `${API_BASE_URL}/api/user?search=${email}`,
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            );
+            const data = await res.json();
+            return Array.isArray(data) ? data[0] : data; // handle array response
+          });
+          return Promise.all(promises);
+        };
+
+        const receivedUsers = await fetchUsersByEmails(receivedEmails);
+        const acceptedUsers = await fetchUsersByEmails(acceptedEmails);
+
+        setReceivedChats(receivedUsers.filter(Boolean)); // filter nulls
+        setAcceptedChats(acceptedUsers.filter(Boolean));
+      } catch (err) {
+        console.error("Error fetching chat requests:", err);
+      }
+    };
+
+    fetchRequests();
+  }, []);
+
+  //After chatting with accepted chats
+  const handleOpenChat = (chat) => {
+    setSelectedContact(chat); // just open the chat
+  };
+
+  //Handle Accept button
+  const handleAcceptChat = async (senderEmail) => {
+  try {
+    const token = localStorage.getItem("token");
+
+    const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ senderEmail }),
+    });
+
+    const data = await res.json();
+    if (!res.ok)
+      throw new Error(data.message || "Failed to accept chat request");
+
+    // Remove from receiver’s received chat requests
+    setReceivedChats((prev) => prev.filter((r) => r.email !== senderEmail));
+
+    console.log("Chat request accepted! (sender will see it)");
+
+    
+  } catch (error) {
+    console.error("Error accepting chat request:", error);
+  }
+};
+
+
+//Fetch all accepted chats sent by sender under his Accepted chat section
+useEffect(() => {
+  const fetchAcceptedChats = async () => {
+    try {
+      const token = localStorage.getItem("token");
+
+      // Step 1️⃣ — Get list of accepted emails from backend
+      const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const acceptedEmails = await res.json(); // e.g. ["john@gmail.com", "priya@gmail.com"]
+
+      if (!acceptedEmails.length) {
+        setAcceptedChats([]);
+        return;
+      }
+
+      // Step 2️⃣ — Fetch all users, filter only accepted ones
+      const allUsersRes = await fetch(`${API_BASE_URL}/api/user`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const allUsers = await allUsersRes.json();
+
+      // Step 3️⃣ — Filter users whose email is in accepted list
+      const acceptedUsers = allUsers.filter((user) =>
+        acceptedEmails.includes(user.email)
+      );
+
+      setAcceptedChats(acceptedUsers);
+    } catch (err) {
+      console.error("Error fetching accepted chats:", err);
+    }
+  };
+
+  fetchAcceptedChats();
+}, []);
 
   // Fetch contacts from APi
   const handleContactSelect = useCallback(
-  (contact) => {
-    // Set selected contact
-    setSelectedContact(contact);
+    (contact) => {
+      // Set selected contact
+      setSelectedContact(contact);
 
-    // Mark messages as read
-    setContacts((prev) =>
-      prev.map((c) => (c.id === contact.id ? { ...c, unreadCount: 0 } : c))
-    );
+      // Mark messages as read
+      setContacts((prev) =>
+        prev.map((c) => (c.id === contact.id ? { ...c, unreadCount: 0 } : c))
+      );
 
-    // Close sidebar on mobile view
-    if (isMobileView) {
-      setShowSidebar(false);
-    }
-  },
-  [isMobileView]
-);
-
+      // Close sidebar on mobile view
+      if (isMobileView) {
+        setShowSidebar(false);
+      }
+    },
+    [isMobileView]
+  );
 
   // Fetch recent chats
   useEffect(() => {
@@ -510,8 +643,10 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
 
         const data = await res.json();
 
-        const formatted = data.map(chat => {
-          const otherUser = chat.participants.find(p => p._id !== data.loggedInUserId);
+        const formatted = data.map((chat) => {
+          const otherUser = chat.participants.find(
+            (p) => p._id !== data.loggedInUserId
+          );
           return {
             id: otherUser._id,
             name: otherUser.email,
@@ -533,7 +668,6 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
 
     fetchRecentChats();
   }, []);
-
 
   // Handle responsive design
   useEffect(() => {
@@ -605,26 +739,29 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
 
   const filteredContacts = useMemo(() => {
     let filtered = searchContacts(contacts, searchTerm);
-    
+
     // Filter by navigation item type
     switch (activeNavItem) {
-      case 'chats':
-        filtered = filtered.filter(contact => !contact.isGroup && !contact.isDocument && !contact.isCommunity);
+      case "chats":
+        filtered = filtered.filter(
+          (contact) =>
+            !contact.isGroup && !contact.isDocument && !contact.isCommunity
+        );
         break;
-      case 'groups':
-        filtered = filtered.filter(contact => contact.isGroup);
+      case "groups":
+        filtered = filtered.filter((contact) => contact.isGroup);
         break;
-      case 'documents':
-        filtered = filtered.filter(contact => contact.isDocument);
+      case "documents":
+        filtered = filtered.filter((contact) => contact.isDocument);
         break;
-      case 'community':
-        filtered = filtered.filter(contact => contact.isCommunity);
+      case "community":
+        filtered = filtered.filter((contact) => contact.isCommunity);
         break;
       default:
         // Show all for default case
         break;
     }
-    
+
     return filtered;
   }, [contacts, searchTerm, activeNavItem]);
 
@@ -658,59 +795,64 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
     setChatSearchTerm(e.target.value);
   }, []);
 
-  // Handle sending message from the MessageInput component
+  // Handle sending message from the MessageInput component-Updated
   const handleSendMessageFromInput = useCallback(
-  (messageText) => {
-    if (!messageText.trim() || !selectedContact) return;
+    (messageText) => {
+      if (!messageText.trim() || !selectedContact) return;
 
-    const newMessage = {
-      id: Date.now(),
-      type: "text",
-      content: messageText,
-      sender: "me",
-      timestamp: Date.now(),
-      isRead: true,
-    };
+      // 1️⃣ Create a consistent key for the contact
+      const chatKey =
+        selectedContact.id || selectedContact._id || selectedContact.email;
 
-    // 1️⃣ Update messages
-    setMessages((prevMessages) => ({
-      ...prevMessages,
-      [selectedContact.id]: [
-        ...(prevMessages[selectedContact.id] || []),
-        newMessage,
-      ],
-    }));
+      const newMessage = {
+        id: Date.now(),
+        type: "text",
+        content: messageText,
+        sender: "me",
+        timestamp: Date.now(),
+        isRead: true,
+      };
 
-    // 2️⃣ Update recentChats
-    setRecentChats((prevChats) => {
-      const exists = prevChats.find((c) => c.id === selectedContact.id);
-      if (exists) {
-        return prevChats.map((c) =>
-          c.id === selectedContact.id
-            ? { ...c, lastMessage: messageText, timestamp: Date.now() }
-            : c
+      // 2️⃣ Update messages
+      setMessages((prevMessages) => ({
+        ...prevMessages,
+        [chatKey]: [...(prevMessages[chatKey] || []), newMessage],
+      }));
+
+      // 3️⃣ Update recentChats
+      setRecentChats((prevChats) => {
+        const exists = prevChats.find(
+          (c) => (c.id || c._id || c.email) === chatKey
         );
-      } else {
-        return [
-          {
-            id: selectedContact.id,
-            name: selectedContact.name,
-            avatar: selectedContact.avatar,
-            isOnline: selectedContact.isOnline,
-            lastMessage: messageText,
-            timestamp: Date.now(),
-            unreadCount: 0,
-          },
-          ...prevChats, // put new chat at top
-        ];
-      }
-    });
-  },
-  [selectedContact]
-);
+        if (exists) {
+          return prevChats.map((c) =>
+            (c.id || c._id || c.email) === chatKey
+              ? { ...c, lastMessage: messageText, timestamp: Date.now() }
+              : c
+          );
+        } else {
+          return [
+            {
+              id: chatKey,
+              name: selectedContact.name,
+              avatar: selectedContact.avatar || "/default-avatar.png",
+              isOnline: selectedContact.isOnline,
+              lastMessage: messageText,
+              timestamp: Date.now(),
+              unreadCount: 0,
+            },
+            ...prevChats,
+          ];
+        }
+      });
 
-
-  
+      // 4️⃣ Remove from acceptedChats after first message
+      setAcceptedChats((prev) =>
+        prev.filter((c) => (c.id || c._id || c.email) !== chatKey)
+      );
+    },
+    [selectedContact]
+  );
 
   const handleBackToContacts = useCallback(() => {
     if (isMobileView) {
@@ -865,20 +1007,21 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
     setSelectedContact(newGroup);
   }, []);
 
- const handleStartNewChat = useCallback((contact) => {
-  setSelectedContact(contact);
-  setShowNewChat(false);
+  const handleStartNewChat = useCallback(
+    (contact) => {
+      setSelectedContact(contact);
+      setShowNewChat(false);
 
-  // Initialize messages array if it doesn't exist
-  if (!messages[contact.id]) {
-    setMessages((prev) => ({
-      ...prev,
-      [contact.id]: [],
-    }));
-  }
-}, [messages]);
-
-
+      // Initialize messages array if it doesn't exist
+      if (!messages[contact.id]) {
+        setMessages((prev) => ({
+          ...prev,
+          [contact.id]: [],
+        }));
+      }
+    },
+    [messages]
+  );
 
   const [cosmicTheme, setCosmicTheme] = useState(() =>
     getTimeBasedCosmicTheme()
@@ -1071,17 +1214,19 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
         )}
 
         {/* Vertical Navigation Bar */}
-        <div className={`w-16 ${effectiveTheme.secondary} border-r ${effectiveTheme.border} flex flex-col justify-between py-4`}>
+        <div
+          className={`w-16 ${effectiveTheme.secondary} border-r ${effectiveTheme.border} flex flex-col justify-between py-4`}
+        >
           {/* Top Navigation Items */}
           <div className="flex flex-col space-y-4">
             {/* Single Chats */}
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveNavItem('chats')}
+              onClick={() => setActiveNavItem("chats")}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
-                activeNavItem === 'chats' 
-                  ? `${effectiveTheme.accent} text-white shadow-lg` 
+                activeNavItem === "chats"
+                  ? `${effectiveTheme.accent} text-white shadow-lg`
                   : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
               }`}
               title="Chats"
@@ -1093,10 +1238,10 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveNavItem('groups')}
+              onClick={() => setActiveNavItem("groups")}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
-                activeNavItem === 'groups' 
-                  ? `${effectiveTheme.accent} text-white shadow-lg` 
+                activeNavItem === "groups"
+                  ? `${effectiveTheme.accent} text-white shadow-lg`
                   : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
               }`}
               title="Groups"
@@ -1108,10 +1253,10 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveNavItem('documents')}
+              onClick={() => setActiveNavItem("documents")}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
-                activeNavItem === 'documents' 
-                  ? `${effectiveTheme.accent} text-white shadow-lg` 
+                activeNavItem === "documents"
+                  ? `${effectiveTheme.accent} text-white shadow-lg`
                   : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
               }`}
               title="Documents"
@@ -1123,10 +1268,10 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveNavItem('community')}
+              onClick={() => setActiveNavItem("community")}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
-                activeNavItem === 'community' 
-                  ? `${effectiveTheme.accent} text-white shadow-lg` 
+                activeNavItem === "community"
+                  ? `${effectiveTheme.accent} text-white shadow-lg`
                   : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
               }`}
               title="Community"
@@ -1252,70 +1397,80 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
 
                       {/* Dropdown Menu */}
                       <AnimatePresence>
-  {showUserMenu && (
-    <motion.div
-      initial={{ opacity: 0, y: -10, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -10, scale: 0.95 }}
-      transition={{ duration: 0.2 }}
-      className={`absolute right-0 top-12 w-48 rounded-lg shadow-lg z-50 overflow-hidden ${currentTheme.secondary} border ${currentTheme.border}`}
-    >
-      {/* Dropdown Options */}
-      <div className={`py-2 relative z-10`}>
-        {/* Profile */}
-        <motion.button
-          whileHover={{ scale: 0.97 }}
-          className={`w-full px-4 py-3 text-left flex items-center space-x-3 ${currentTheme.hover} transition-colors duration-200`}
-          onClick={() => {
-            setShowUserMenu(false);
-            setShowProfile(true);
-          }}
-        >
-          <FaUser
-            className="w-5 h-5"
-            style={{ color: "#60A5FA" }}
-          />
-          <span className={`text-sm ${currentTheme.text}`}>Profile</span>
-        </motion.button>
+                        {showUserMenu && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                            transition={{ duration: 0.2 }}
+                            className={`absolute right-0 top-12 w-48 rounded-lg shadow-lg z-50 overflow-hidden ${currentTheme.secondary} border ${currentTheme.border}`}
+                          >
+                            {/* Dropdown Options */}
+                            <div className={`py-2 relative z-10`}>
+                              {/* Profile */}
+                              <motion.button
+                                whileHover={{ scale: 0.97 }}
+                                className={`w-full px-4 py-3 text-left flex items-center space-x-3 ${currentTheme.hover} transition-colors duration-200`}
+                                onClick={() => {
+                                  setShowUserMenu(false);
+                                  setShowProfile(true);
+                                }}
+                              >
+                                <FaUser
+                                  className="w-5 h-5"
+                                  style={{ color: "#60A5FA" }}
+                                />
+                                <span
+                                  className={`text-sm ${currentTheme.text}`}
+                                >
+                                  Profile
+                                </span>
+                              </motion.button>
 
-        {/* Settings */}
-        <motion.button
-          whileHover={{ scale: 0.97 }}
-          className={`w-full px-4 py-3 text-left flex items-center space-x-3 ${currentTheme.hover} transition-colors duration-200`}
-          onClick={() => {
-            setShowUserMenu(false);
-            setShowSettings(true);
-          }}
-        >
-          <FaCog
-            className="w-5 h-5"
-            style={{ color: "#3B82F6" }}
-          />
-          <span className={`text-sm ${currentTheme.text}`}>Settings</span>
-        </motion.button>
+                              {/* Settings */}
+                              <motion.button
+                                whileHover={{ scale: 0.97 }}
+                                className={`w-full px-4 py-3 text-left flex items-center space-x-3 ${currentTheme.hover} transition-colors duration-200`}
+                                onClick={() => {
+                                  setShowUserMenu(false);
+                                  setShowSettings(true);
+                                }}
+                              >
+                                <FaCog
+                                  className="w-5 h-5"
+                                  style={{ color: "#3B82F6" }}
+                                />
+                                <span
+                                  className={`text-sm ${currentTheme.text}`}
+                                >
+                                  Settings
+                                </span>
+                              </motion.button>
 
-        {/* Divider */}
-        <div className={`my-2 h-px ${currentTheme.border}`}></div>
+                              {/* Divider */}
+                              <div
+                                className={`my-2 h-px ${currentTheme.border}`}
+                              ></div>
 
-        {/* Logout */}
-        <motion.button
-          whileHover={{ scale: 0.97 }}
-          className={`w-full px-4 py-3 text-left flex items-center space-x-3 ${currentTheme.hover} transition-colors duration-200 text-red-600 dark:text-red-400`}
-          onClick={() => {
-            setShowUserMenu(false);
-            onLogout();
-          }}
-        >
-          <FaSignOutAlt
-            className="w-5 h-5"
-            style={{ color: "#60A5FA" }}
-          />
-          <span className="text-sm">Logout</span>
-        </motion.button>
-      </div>
-    </motion.div>
-  )}
-</AnimatePresence>
+                              {/* Logout */}
+                              <motion.button
+                                whileHover={{ scale: 0.97 }}
+                                className={`w-full px-4 py-3 text-left flex items-center space-x-3 ${currentTheme.hover} transition-colors duration-200 text-red-600 dark:text-red-400`}
+                                onClick={() => {
+                                  setShowUserMenu(false);
+                                  onLogout();
+                                }}
+                              >
+                                <FaSignOutAlt
+                                  className="w-5 h-5"
+                                  style={{ color: "#60A5FA" }}
+                                />
+                                <span className="text-sm">Logout</span>
+                              </motion.button>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   </div>
 
@@ -1334,160 +1489,238 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
                     />
                   </div>
                 </div>
-                
 
-    {/* Chat Sidebar Area */}
-<div className="flex-1 flex flex-col">
-  {/* 🔔 Alerts Section: Chat Requests & Accepted */}
-  <div
-  >
-    {/* Chat Requests Dropdown */}
-  <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
-  <button
-    onClick={() => setShowReceivedDropdown(!showReceivedDropdown)}
-    className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-      effectiveTheme.hover || "hover:bg-blue-100 dark:hover:bg-blue-900"
-    } transition-colors text-blue-800 dark:text-blue-200 font-medium`}
-  >
-    <span className="flex items-center gap-2 text-gray-200">
-       <img src={chatReqIcon} alt="Chat Requests" className="w-4 h-4" />
-      Chat Requests Recieved ({receivedChats?.length || 0})
-    </span>
-    {showReceivedDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-  </button>
+                {/* Chat Sidebar Area */}
+                <div className="flex-1 flex flex-col">
+                  {/* 🔔 Alerts Section: Chat Requests & Accepted */}
 
-  {showReceivedDropdown && (
-    <div className={`mt-2 p-2 space-y-2 max-h-44 overflow-y-auto`}>
-      {receivedChats?.length > 0 ? (
-        receivedChats.map((req) => (
-          <div
-            key={req.id}
-            className={`p-2 rounded cursor-pointer ${
-              effectiveTheme.hover || "hover:bg-gray-100 dark:hover:bg-gray-700"
-            }`}
-            onClick={() => setInvitePreview(req)}
-          >
-            <p className="font-medium truncate">{req.senderName}</p>
-            <p className="text-sm text-gray-500 truncate">{req.inviteMessage}</p>
-          </div>
-        ))
-      ) : (
-        // "No new requests" styled like search bar
-        <div
-          className={`w-full flex items-center px-4 py-3 rounded-lg ${
-            effectiveTheme.searchBg || "bg-gray-100 dark:bg-gray-800"
-          } text-gray-400 dark:text-gray-400`}
-        >
-          No new requests
-        </div>
-      )}
-    </div>
-  )}
-</div>
+                  <div>
+                    {/* 🔹 Chat Requests Dropdown */}
+                    <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
+                      <button
+                        onClick={() =>
+                          setShowReceivedDropdown(!showReceivedDropdown)
+                        }
+                        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
+                          effectiveTheme.hover ||
+                          "hover:bg-blue-100 dark:hover:bg-blue-900"
+                        } transition-colors text-blue-800 dark:text-blue-200 font-medium`}
+                      >
+                        <span className="flex items-center gap-2 text-gray-200">
+                          <img
+                            src={chatReqIcon}
+                            alt="Chat Requests"
+                            className="w-4 h-4"
+                          />
+                          Chat Requests Received ({receivedChats.length})
+                        </span>
+                        {showReceivedDropdown ? (
+                          <ChevronUp className="w-4 h-4" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4" />
+                        )}
+                      </button>
 
+                      {showReceivedDropdown && (
+                        <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
+                          {receivedChats.length > 0 ? (
+                            receivedChats.map((req) => (
+                              <div
+                                key={req._id || req.email}
+                                className={`flex justify-between items-center p-2 rounded-md ${
+                                  effectiveTheme.hover ||
+                                  "hover:bg-gray-100 dark:hover:bg-gray-700"
+                                } transition-colors`}
+                              >
+                                {/* Left side: profile + info */}
+                                <div className="flex items-center gap-3 flex-1">
+                                  <img
+                                    src={req.avatar || "/default-avatar.png"}
+                                    alt={req.name || "User"}
+                                    className="w-10 h-10 rounded-full object-cover"
+                                  />
+                                  <div>
+                                    <p className="font-medium text-gray-100 truncate">
+                                      {req.name}
+                                    </p>
+                                    {/* ✅ Display invite message instead of email */}
+                                    {req.inviteMessage ? (
+                                      <p className="text-sm text-gray-400 italic truncate">
+                                        “{req.inviteMessage}”
+                                      </p>
+                                    ) : (
+                                      <p className="text-sm text-gray-500 truncate">
+                                        No message
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
 
+                                {/* Right side: Accept button */}
+                                <button
+                                  onClick={() => handleAcceptChat(req.email)}
+                                  className="px-3 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition"
+                                >
+                                  Accept
+                                </button>
+                              </div>
+                            ))
+                          ) : (
+                            <div
+                              className={`w-full flex items-center px-4 py-3 rounded-lg ${
+                                effectiveTheme.searchBg ||
+                                "bg-gray-100 dark:bg-gray-800"
+                              } text-gray-400`}
+                            >
+                              No new requests
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
 
-    {/* Accepted Chats Dropdown */}
-   <div className="rounded-md justify-between items-center px-2 py-1">
+                    {/* 🔹 Accepted Chats Dropdown */}
+<div className="rounded-md justify-between items-center px-2 py-1">
   <button
     onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
     className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-      effectiveTheme.hover || "hover:bg-green-100 dark:hover:bg-green-900"
+      effectiveTheme.hover ||
+      "hover:bg-green-100 dark:hover:bg-green-900"
     } transition-colors text-green-800 dark:text-green-200 font-medium`}
   >
     <span className="flex items-center gap-2 text-gray-200">
-       <img src={chatAcceptIcon} alt="Chat Requests" className="w-4 h-4" />
+      <img
+        src={chatAcceptIcon}
+        alt="Chats Accepted"
+        className="w-4 h-4"
+      />
       Chats Accepted ({acceptedChats?.length || 0})
     </span>
-    {showAcceptedDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+    {showAcceptedDropdown ? (
+      <ChevronUp className="w-4 h-4" />
+    ) : (
+      <ChevronDown className="w-4 h-4" />
+    )}
   </button>
 
   {showAcceptedDropdown && (
-    <div className={`mt-2 p-2 space-y-2 max-h-44 overflow-y-auto`}>
-      {acceptedChats?.length > 0 ? (
+    <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
+      {acceptedChats && acceptedChats.length > 0 ? (
         acceptedChats.map((chat) => (
-          <div
-            key={chat.id}
-            className={`p-2 rounded cursor-pointer ${
-              effectiveTheme.hover || "hover:bg-gray-100 dark:hover:bg-gray-700"
-            }`}
-            onClick={() => setSelectedContact(chat)}
+          <motion.div
+            key={chat._id || chat.email}
+            whileHover={{ scale: 0.98 }}
+            className={`flex justify-between items-center p-2 rounded-md ${
+              effectiveTheme.hover ||
+              "hover:bg-gray-100 dark:hover:bg-gray-700"
+            } transition-colors`}
           >
-            <p className="font-medium truncate">{chat.name}</p>
-            <p className="text-sm text-gray-500 truncate">Click to open chat</p>
-          </div>
+            {/* Left side: profile + info */}
+            <div className="flex items-center gap-3 flex-1 overflow-hidden">
+              <div className="relative flex-shrink-0">
+                <img
+                  src={
+                    chat.avatar ||
+                    "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+                  }
+                  alt={chat.name || chat.email || "User"}
+                  className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
+                />
+              </div>
+              <div className="overflow-hidden">
+                <p className="font-medium text-gray-100 truncate">
+                  {chat.name || chat.email?.split("@")[0] || "Unknown User"}
+                </p>
+                {chat.inviteMessage ? (
+                  <p className="text-sm text-gray-400 italic truncate">
+                    “{chat.inviteMessage}”
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-500 truncate">
+                    No message
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Right side: chat icon to open messages */}
+            <motion.button
+              whileHover={{ scale: 0.95 }}
+              onClick={() => handleOpenChat(chat)}
+              className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
+              title="Open Chat"
+            >
+              <MessageCircle className="w-5 h-5 text-white" />
+            </motion.button>
+          </motion.div>
         ))
       ) : (
-        // "No accepted chats" styled like search bar
         <div
-          className={`w-full flex items-center px-4 py-3 rounded-lg ${
+          className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
             effectiveTheme.searchBg || "bg-gray-100 dark:bg-gray-800"
-          } text-gray-400 dark:text-gray-400`}
+          } text-gray-400`}
         >
-          No accepted chats
+          No accepted chats yet
         </div>
       )}
     </div>
   )}
 </div>
 
-  </div>
+                  </div>
 
-  {/* 🧭 Contacts List */}
- <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col p-4 space-y-4">
-  {/* Recent Chats */}
-  {recentChats.length > 0 && (
-    <div className="flex flex-col gap-2">
-      <h4 className="text-gray-600 dark:text-gray-300 font-semibold">Recent Chats</h4>
-      {recentChats.map((chat) => (
-        <ContactItem
-          key={chat.id}
-          contact={chat} // use "contact" prop
-          effectiveTheme={effectiveTheme}
-          onSelect={(c) => setSelectedContact(c)}
-        />
-      ))}
-    </div>
-  )}
+                  {/* 🧭 Contacts List */}
+                  <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col p-4 space-y-4">
+                    {/* Recent Chats */}
+                    {recentChats.length > 0 && (
+                      <div className="flex flex-col gap-2">
+                        <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
+                          Recent Chats
+                        </h4>
+                        {recentChats.map((chat) => (
+                          <ContactItem
+                            key={chat.id}
+                            contact={chat} // use "contact" prop
+                            effectiveTheme={effectiveTheme}
+                            onSelect={(c) => setSelectedContact(c)}
+                          />
+                        ))}
+                      </div>
+                    )}
 
-  {/* All Contacts */}
-  {contacts.length > 0 && (
-    <div className="flex flex-col gap-2 mt-4">
-      <h4 className="text-gray-600 dark:text-gray-300 font-semibold">Contacts</h4>
-      {contacts.map((contact) => (
-        <ContactItem
-          key={contact.id}
-          contact={contact} // same component reused
-          effectiveTheme={effectiveTheme}
-          onSelect={(c) => setSelectedContact(c)}
-        />
-      ))}
-    </div>
-  )}
+                    {/* All Contacts */}
+                    {contacts.length > 0 && (
+                      <div className="flex flex-col gap-2 mt-4">
+                        <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
+                          Contacts
+                        </h4>
+                        {contacts.map((contact) => (
+                          <ContactItem
+                            key={contact.id}
+                            contact={contact} // same component reused
+                            effectiveTheme={effectiveTheme}
+                            onSelect={(c) => setSelectedContact(c)}
+                          />
+                        ))}
+                      </div>
+                    )}
 
-  {/* Empty State */}
-  {recentChats.length === 0 && contacts.length === 0 && (
-    <div className="text-center space-y-4 mt-10">
-      <p className="text-gray-500 dark:text-gray-400">Start chatting with Chasmos!</p>
-      <button
-        onClick={() => setShowNewChat(true)}
-        className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
-      >
-        New Chat
-      </button>
-    </div>
-  )}
-</div>
-
-</div>
-
-
-
-
-
-
-
-
+                    {/* Empty State */}
+                    {recentChats.length === 0 && contacts.length === 0 && (
+                      <div className="text-center space-y-4 mt-10">
+                        <p className="text-gray-500 dark:text-gray-400">
+                          Start chatting with Chasmos!
+                        </p>
+                        <button
+                          onClick={() => setShowNewChat(true)}
+                          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+                        >
+                          New Chat
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 {/* Floating Add Button with Menu */}
                 <div className="relative">
@@ -1676,16 +1909,27 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000
               {/* Messages Area */}
               <div className="flex-1 overflow-hidden relative">
                 <MessagesArea
-                  key={selectedContact.id}
-                  filteredMessages={getMessagesForContact(
-                    selectedContact.id,
-                    chatSearchTerm
-                  )}
+                  key={
+                    selectedContact.id ||
+                    selectedContact._id ||
+                    selectedContact.email
+                  }
+                  filteredMessages={
+                    messages[
+                      selectedContact.id ||
+                        selectedContact._id ||
+                        selectedContact.email
+                    ] || []
+                  }
                   pinnedMessages={pinnedMessages}
                   onPinMessage={handlePinMessage}
                   effectiveTheme={effectiveTheme}
                   isTyping={isTyping}
-                  selectedContactId={selectedContact.id}
+                  selectedContactId={
+                    selectedContact.id ||
+                    selectedContact._id ||
+                    selectedContact.email
+                  }
                 />
               </div>
 
