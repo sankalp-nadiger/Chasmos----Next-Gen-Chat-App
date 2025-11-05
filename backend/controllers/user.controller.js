@@ -42,10 +42,7 @@ export const registerUser = asyncHandler(async (req, res) => {
 
   // Check if user already exists (by email or phone)
   const userExists = await User.findOne({
-    $or: [
-      { email: email.toLowerCase() },
-      { phoneNumber: phoneNumber }
-    ]
+    $or: [{ email: email.toLowerCase() }, { phoneNumber: phoneNumber }],
   });
 
   if (userExists) {
@@ -59,7 +56,9 @@ export const registerUser = asyncHandler(async (req, res) => {
     email: email.toLowerCase().trim(),
     password,
     phoneNumber,
-    avatar: avatar || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+    avatar:
+      avatar ||
+      "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
   });
 
   if (user) {
@@ -162,12 +161,16 @@ export const sendChatRequest = asyncHandler(async (req, res) => {
   }
 
   // Prevent sending request to self
-  if (recipientEmail.toLowerCase().trim() === req.user.email.toLowerCase().trim()) {
+  if (
+    recipientEmail.toLowerCase().trim() === req.user.email.toLowerCase().trim()
+  ) {
     res.status(400);
     throw new Error("You cannot send a chat request to yourself");
   }
 
-  const recipient = await User.findOne({ email: recipientEmail.toLowerCase().trim() });
+  const recipient = await User.findOne({
+    email: recipientEmail.toLowerCase().trim(),
+  });
   if (!recipient) {
     res.status(404);
     throw new Error("Recipient user not found");
@@ -206,73 +209,57 @@ export const acceptChatRequest = asyncHandler(async (req, res) => {
     throw new Error("Please provide senderEmail");
   }
 
-  const user = await User.findById(req.user._id);
-  if (!user) {
+  const receiver = await User.findById(req.user._id); // user who accepts
+  const sender = await User.findOne({ email: senderEmail.toLowerCase().trim() });
+
+  if (!sender || !receiver) {
     res.status(404);
-    throw new Error("User not found");
+    throw new Error("Sender or receiver not found");
   }
 
-  user.receivedChatRequests = user.receivedChatRequests || [];
-
-  if (!user.receivedChatRequests.includes(senderEmail)) {
-    res.status(404);
-    throw new Error("Chat request from this sender not found");
-  }
-
-  // Remove the sender's email from receivedChatRequests
-  user.receivedChatRequests = user.receivedChatRequests.filter(
+  //  Remove the sender's email from receiver's received requests
+  receiver.receivedChatRequests = receiver.receivedChatRequests.filter(
     (email) => email !== senderEmail
   );
+  await receiver.save();
 
-  await user.save();
-  // Update sender: move the recipient from sender.sentChatRequests to sender.acceptedChatRequests
-  const sender = await User.findOne({ email: senderEmail.toLowerCase().trim() });
-  if (sender) {
-    sender.sentChatRequests = sender.sentChatRequests || [];
-    sender.acceptedChatRequests = sender.acceptedChatRequests || [];
+  //  Update sender’s records
+  sender.sentChatRequests = sender.sentChatRequests || [];
+  sender.acceptedChatRequests = sender.acceptedChatRequests || [];
 
-    // Remove this recipient from sender.sentChatRequests if present
-    sender.sentChatRequests = sender.sentChatRequests.filter(
-      (email) => email !== user.email
-    );
+  // Remove receiver from sender’s sentChatRequests
+  sender.sentChatRequests = sender.sentChatRequests.filter(
+    (email) => email !== receiver.email
+  );
 
-    // Add to acceptedChatRequests if not already present
-    if (!sender.acceptedChatRequests.includes(user.email)) {
-      sender.acceptedChatRequests.push(user.email);
-    }
-
-    await sender.save();
-
-    // Emit socket event to sender if io is available on the app
-    try {
-      const io = req.app && req.app.get && req.app.get("io");
-      if (io) {
-        // Assumes sender joins a room with their user id string when they connect
-        io.to(sender._id.toString()).emit("chatRequestAccepted", {
-          from: user.email,
-          message: `${user.email} accepted your chat request`,
-        });
-      }
-    } catch (err) {
-      // Non-fatal: don't block acceptance if socket emit fails
-      console.error("Socket emit failed:", err);
-    }
+  // Add receiver’s email (string only)
+  if (!sender.acceptedChatRequests.includes(receiver.email)) {
+    sender.acceptedChatRequests.push(receiver.email);
   }
 
-  // Optionally, here you might add each other to a contacts list. For now, just remove the request and update sender.
-  res.status(200).json({ message: "Chat request accepted", receivedChatRequests: user.receivedChatRequests });
+  await sender.save();
+
+  
+  res.status(200).json({
+    message: "Chat request accepted",
+    receivedChatRequests: receiver.receivedChatRequests,
+  });
 });
 
 // Fetch accepted chat requests that other users accepted which were sent by the current user
-export const getAcceptedChatRequestsSentByUser = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id).select("acceptedChatRequests");
-  if (!user) {
-    res.status(404);
-    throw new Error("User not found");
-  }
+export const getAcceptedChatRequestsSentByUser = asyncHandler(
+  async (req, res) => {
+    const user = await User.findById(req.user._id).select(
+      "acceptedChatRequests"
+    );
+    if (!user) {
+      res.status(404);
+      throw new Error("User not found");
+    }
 
-  res.status(200).json(user.acceptedChatRequests || []);
-});
+    res.status(200).json(user.acceptedChatRequests || []);
+  }
+);
 
 // Get list of received chat requests for current user
 export const getReceivedChatRequests = asyncHandler(async (req, res) => {
@@ -283,4 +270,42 @@ export const getReceivedChatRequests = asyncHandler(async (req, res) => {
   }
 
   res.status(200).json(user.receivedChatRequests || []);
+});
+
+export const withdrawChatRequest = asyncHandler(async (req, res) => {
+  const { recipientEmail } = req.body;
+
+  if (!recipientEmail) {
+    res.status(400);
+    throw new Error("Please provide recipientEmail");
+  }
+
+  const recipient = await User.findOne({
+    email: recipientEmail.toLowerCase().trim(),
+  });
+  if (!recipient) {
+    res.status(404);
+    throw new Error("Recipient not found");
+  }
+
+  // Remove sender’s email from recipient’s receivedChatRequests
+  recipient.receivedChatRequests = (
+    recipient.receivedChatRequests || []
+  ).filter(
+    (email) =>
+      email.toLowerCase().trim() !== req.user.email.toLowerCase().trim()
+  );
+  await recipient.save();
+
+  // Remove recipient’s email from sender’s sentChatRequests
+  const sender = await User.findById(req.user._id);
+  if (sender) {
+    sender.sentChatRequests = (sender.sentChatRequests || []).filter(
+      (email) =>
+        email.toLowerCase().trim() !== recipientEmail.toLowerCase().trim()
+    );
+    await sender.save();
+  }
+
+  res.status(200).json({ message: "Chat request withdrawn successfully" });
 });

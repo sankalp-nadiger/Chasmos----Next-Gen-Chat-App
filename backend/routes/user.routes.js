@@ -9,6 +9,7 @@ import {
   acceptChatRequest,
   getReceivedChatRequests,
   getAcceptedChatRequestsSentByUser,
+  withdrawChatRequest,
 } from "../controllers/user.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 
@@ -36,5 +37,9 @@ router.get("/requests", protect, getReceivedChatRequests);
 
 // Get accepted chat requests (i.e. users who accepted requests sent by current user)
 router.get("/requests/accepted", protect, getAcceptedChatRequestsSentByUser);
+
+//withdraw chat request
+router.post("/request/withdraw", protect, withdrawChatRequest);
+
 
 export default router;
