@@ -7,15 +7,16 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-
 import { motion, AnimatePresence } from "framer-motion";
+import { Send, Paperclip, Image, FileText, Camera, MapPin } from "lucide-react";
+
+
 import chatReqIcon from "../assets/Chat-reuest.png";
 import chatAcceptIcon from "../assets/chat-accepted.png";
 import {
   Search,
   MoreVertical,
   Plus,
-  FileText,
   Download,
   Check,
   CheckCheck,
@@ -53,10 +54,6 @@ import {
   searchContacts,
   generateAvatarFallback,
 } from "../utils/mockData";
-import DocumentChat from "./DocumentChat";
-import NewDocumentUploader from "./NewDocumentUploader";
-import DocumentChatWrapper from "./DocumentChat";
-
 
 // Memoized Chat Header Component
 const ChatHeader = React.memo(
@@ -468,11 +465,18 @@ const ChattingPage = ({ onLogout }) => {
   const [acceptedChats, setAcceptedChats] = React.useState([]); // chats you accepted
   const [showReceivedDropdown, setShowReceivedDropdown] = useState(false);
   const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
-  const [selectedDocument, setSelectedDocument] = useState(null);
+const [selectedDocument, setSelectedDocument] = useState({
+  fileName: "MyDocument.pdf",
+  messages: [],
+});
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-const [isNewDocumentChat, setIsNewDocumentChat] = useState(false);
+const [messageInput, setMessageInput] = useState("");
+const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+
+const imageInputRef = useRef(null);
+const attachmentMenuRef = useRef(null);
 
   // Ref for chat search container (click-outside functionality)
   const chatSearchRef = useRef(null);
@@ -483,7 +487,31 @@ const [isNewDocumentChat, setIsNewDocumentChat] = useState(false);
   const API_BASE_URL =
     import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
- 
+  // Fake data fallback (so UI doesn’t crash if API isn’t ready)
+  // 🧠 Add this near top of ChattingPage component
+  const [documentChats, setDocumentChats] = useState([
+    {
+      _id: "1",
+      fileName: "Project_Proposal.docx",
+      date: "Oct 28, 2025",
+    },
+    {
+      _id: "2",
+      fileName: "Research_Notes.pdf",
+      date: "Oct 25, 2025",
+    },
+    {
+      _id: "3",
+      fileName: "Client_Meeting_Summary.txt",
+      date: "Oct 20, 2025",
+    },
+    {
+      _id: "4",
+      fileName: "Final_Report.docx",
+      date: "Oct 15, 2025",
+    },
+  ]);
+ const fileInputRef = useRef(null); 
   // Fetch contacts from APi
   const handleContactSelect = useCallback(
     (contact) => {
@@ -502,71 +530,64 @@ const [isNewDocumentChat, setIsNewDocumentChat] = useState(false);
     },
     [isMobileView]
   );
-
-    const [documentChats, setDocumentChats] = useState([]);
-const [isExpanded, setIsExpanded] = useState(true);
-
-
-
-// ✅ Create a new chat/document
-const handleNewChatdoc = async () => {
-  try {
-    const token = localStorage.getItem("token");
-    const res = await fetch("http://localhost:3000/api/document/new", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ fileName: "Untitled Document" }),
-    });
-
-    if (!res.ok) throw new Error("Failed to create new chat");
-    const newDoc = await res.json();
-
-    setDocumentChats((prev) => [newDoc, ...prev]);
-    setSelectedDocument(newDoc);
-  } catch (error) {
-    console.error("Error creating new document chat:", error);
+// Toggle attachment menu visibility
+const toggleAttachmentMenu = () => {
+  setShowAttachmentMenu((prev) => !prev);
+};
+const handleInputChange = (e) => {
+  setMessageInput(e.target.value);
+};
+const handleKeyPress = (e) => {
+  if (e.key === "Enter" && messageInput.trim()) {
+    handleSendClick();
   }
 };
 
-  useEffect(() => {
-    const fetchDocumentHistory = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(`${API_BASE_URL}/api/document`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error("Failed to fetch document history");
+// Handle sending message
+const handleSendClick = () => {
+  if (!messageInput.trim()) return;
 
-        const data = await res.json();
-        setDocumentChats(data);
-      } catch (error) {
-        console.error("Error fetching document history:", error);
-      }
-    };
+  const newMsg = { sender: "user", text: messageInput };
+  setSelectedDocument((prev) => ({
+    ...prev,
+    messages: [...(prev.messages || []), newMsg],
+  }));
 
-    fetchDocumentHistory();
-  }, []);
+  setMessageInput("");
+};
 
-  // 🔹 Message input state
-  const [messageInput, setMessageInput] = useState("");
+// Handle file uploads (document or image)
+const handleFileUpload = (type) => {
+  if (type === "document") {
+    fileInputRef.current?.click();
+  } else if (type === "image") {
+    imageInputRef.current?.click();
+  }
+  setShowAttachmentMenu(false);
+};
 
-  // 🔹 Theme object example (you can replace with your real theme)
-  
+// When a file is selected
+const handleFileChange = (e, type) => {
+  const file = e.target.files[0];
+  if (!file) return;
 
-  // 🔹 Function to send message (triggered by Enter key or Send button)
-  const handleSendClick = useCallback(() => {
-    if (!messageInput.trim() || !selectedDocument) return;
+  const fileMsg = `${type === "image" ? "📷" : "📄"} ${file.name}`;
+  setSelectedDocument((prev) => ({
+    ...prev,
+    messages: [...(prev.messages || []), { sender: "user", text: fileMsg }],
+  }));
+};
 
-    // Here, send the message to your backend or append to chat array
-    console.log(`📩 Sending message: "${messageInput}" for document:`, selectedDocument);
-
-    // Clear input after sending
-    setMessageInput("");
-  }, [messageInput, selectedDocument]);
-
+// Close attachment menu when clicking outside
+useEffect(() => {
+  const handleClickOutside = (event) => {
+    if (attachmentMenuRef.current && !attachmentMenuRef.current.contains(event.target)) {
+      setShowAttachmentMenu(false);
+    }
+  };
+  document.addEventListener("mousedown", handleClickOutside);
+  return () => document.removeEventListener("mousedown", handleClickOutside);
+}, []);
 
   // Fetch recent chats
   useEffect(() => {
@@ -990,6 +1011,7 @@ const handleNewChatdoc = async () => {
 
     return () => clearInterval(interval);
   }, [getTimeBasedCosmicTheme, lastUpdateTime, cosmicTheme.period]);
+  
 
   return (
     <>
@@ -1743,251 +1765,309 @@ const handleNewChatdoc = async () => {
                       </div>
                     </>
                   ) : activeNavItem === "documents" ? (
-                   
-<div className="flex-1 overflow-y-auto p-4 space-y-4">
-  {/* Header with dropdown toggle */}
-  <div
-    className="flex items-center justify-between cursor-pointer"
-    onClick={() => setIsExpanded(!isExpanded)}
-  >
-    <h4 className="text-gray-700 dark:text-gray-100 font-semibold">
-      Document History
-    </h4>
-    {isExpanded ? (
-      <ChevronUp className="w-5 h-5 text-gray-500" />
-    ) : (
-      <ChevronDown className="w-5 h-5 text-gray-500" />
-    )}
-  </div>
-
-  {/* Animated Dropdown */}
-  <AnimatePresence initial={false}>
-    {isExpanded && (
-      <motion.div
-        initial={{ opacity: 0, height: 0 }}
-        animate={{ opacity: 1, height: "auto" }}
-        exit={{ opacity: 0, height: 0 }}
-        transition={{ duration: 0.3 }}
-        className="space-y-3 overflow-hidden"
-      >
-        {loading ? (
-          <div className="text-gray-500 text-center py-4">
-            Loading...
-          </div>
-        ) : documentChats.length > 0 ? (
-          documentChats.map((doc) => (
-            <motion.div
-              key={doc._id}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.97 }}
-onClick={() => {
-  if (!selectedDocument || selectedDocument._id !== doc._id) {
-    setSelectedDocument(doc);
-    setIsNewDocumentChat(false);
-  }
-}}
-              className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
-                ${effectiveTheme.secondary || "bg-white dark:bg-[#1f1f1f]"} 
-                border ${effectiveTheme.border} hover:${effectiveTheme.hover}`}
-            >
-              <div className="flex flex-col">
-                <p className="font-medium truncate text-gray-700 dark:text-gray-200">
-                  {doc.fileName || "Untitled Document"}
-                </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
-  {doc.lastUpdated
-    ? new Date(doc.lastUpdated).toLocaleString()
-    : "No date available"}
-</p>
-
-              </div>
-            </motion.div>
-          ))
-        ) : (
-          <div
-            className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
-              effectiveTheme.searchBg || "bg-gray-100 dark:bg-gray-800"
-            } text-gray-400 dark:text-gray-400`}
-          >
-            No document history found
-          </div>
-        )}
-      </motion.div>
-    )}
-  </AnimatePresence>
-
-  {/* 🆕 Floating New Chat Button */}
-  <div className="flex justify-center mt-8">
-    <motion.button
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ scale: 1.05 }}
-      whileTap={{ scale: 0.95 }}
-      transition={{ type: "spring", stiffness: 220 }}
-        onClick={() => {
-    setSelectedDocument(null);
-    setIsNewDocumentChat(true);
-  }}
-      className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-5 py-3 rounded-xl shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-all duration-200 group`}
-    >
-      <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
-        <MessageSquare className="w-5 h-5 text-white" />
-      </div>
-      <span className={`${effectiveTheme.text} font-semibold`}>
-        New Chat
-      </span>
-    </motion.button>
-  </div>
-</div>
-
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                      <h4 className="text-gray-600 dark:text-white-600 font-semibold">
+                        Document History
+                      </h4>
+                      {documentChats?.length > 0 ? (
+                        documentChats.map((doc) => (
+                          <div
+                            key={doc._id}
+                            onClick={() => setSelectedDocument(doc)}
+                            className={`p-3 rounded-lg cursor-pointer transition-all duration-200
+    ${effectiveTheme.secondary || "bg-white dark:bg-[#1f1f1f]"} 
+    border border-transparent 
+    hover:bg-gray-100/80 dark:hover:bg-gray-800/60 
+    active:scale-[0.98]`}
+                          >
+                            <div className="flex flex-col">
+                              <p className="font-medium truncate  text-gray-400 dark:text-gray-300">
+                                {doc.fileName}
+                              </p>
+                              <p className="text-xs text-gray-600 dark:text-gray-600 truncate mt-0.5">
+                                {doc.date}
+                              </p>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div
+                          className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
+                            effectiveTheme.searchBg ||
+                            "bg-gray-100 dark:bg-gray-800"
+                          } text-gray-400 dark:text-gray-400`}
+                        >
+                          No document history found
+                        </div>
+                      )}
+                    </div>
                   ) : null}
-
-                  
                 </div>
               </motion.div>
             )}
         </AnimatePresence>
 
         {/* Main Chat Area */}
-       <div
-  key={selectedContact?.id || selectedDocument?._id || "no-contact"}
-  className="flex-1 flex flex-col relative h-full overflow-hidden"
->
-  {showGroupCreation ? (
-    <GroupCreation
-      contacts={contacts}
-      effectiveTheme={effectiveTheme}
-      onClose={handleCloseGroupCreation}
-      onCreateGroup={handleCreateGroupComplete}
-    />
-  ) : showNewChat ? (
-    <NewChat
-      contacts={contacts}
-      effectiveTheme={effectiveTheme}
-      onClose={handleCloseNewChat}
-      onStartChat={handleStartNewChat}
-    />
-  ) : showProfile ? (
-    <Profile
-      effectiveTheme={effectiveTheme}
-      onClose={() => setShowProfile(false)}
-    />
-  ) : showSettings ? (
-    <SettingsPage
-      effectiveTheme={effectiveTheme}
-      onClose={() => setShowSettings(false)}
-    />
-  )  : isNewDocumentChat ? (
-  <NewDocumentUploader
-    onUploadComplete={(doc) => {
-      setSelectedDocument(doc);
-      setIsNewDocumentChat(false);
-    }}
-    onCancel={() => setIsNewDocumentChat(false)}
-    effectiveTheme={effectiveTheme}
-  />
-) : selectedDocument ? (
-  <DocumentChatWrapper
-    key={selectedDocument._id}
-    selectedDocument={selectedDocument}
-    setSelectedDocument={setSelectedDocument}
-    effectiveTheme={effectiveTheme}
-  />
-): selectedContact ? (
-    // CASE 3: Normal person/group chat
-    <>
-      <ChatHeader
-        selectedContact={selectedContact}
-        effectiveTheme={effectiveTheme}
-        isMobileView={isMobileView}
-        onBackToContacts={handleBackToContacts}
-        onToggleChatSearch={toggleChatSearch}
-        showChatSearch={showChatSearch}
-        chatSearchTerm={chatSearchTerm}
-        onChatSearchChange={handleChatSearchTermChange}
-        chatSearchRef={chatSearchRef}
-        onCloseChatSearch={closeChatSearch}
-        pinnedMessages={pinnedMessages}
-      />
-      <div className="flex-1 overflow-hidden relative">
-        <MessagesArea
-          key={selectedContact.id}
-          filteredMessages={getMessagesForContact(
-            selectedContact.id,
-            chatSearchTerm
-          )}
-          pinnedMessages={pinnedMessages}
-          onPinMessage={handlePinMessage}
-          effectiveTheme={effectiveTheme}
-          isTyping={isTyping}
-          selectedContactId={selectedContact.id}
-        />
+        <div
+          key={selectedContact?.id || selectedDocument?._id || "no-contact"}
+          className="flex-1 flex flex-col relative h-full overflow-hidden"
+        >
+          {showGroupCreation ? (
+            <GroupCreation
+              contacts={contacts}
+              effectiveTheme={effectiveTheme}
+              onClose={handleCloseGroupCreation}
+              onCreateGroup={handleCreateGroupComplete}
+            />
+          ) : showNewChat ? (
+            <NewChat
+              contacts={contacts}
+              effectiveTheme={effectiveTheme}
+              onClose={handleCloseNewChat}
+              onStartChat={handleStartNewChat}
+            />
+          ) : showProfile ? (
+            <Profile
+              effectiveTheme={effectiveTheme}
+              onClose={() => setShowProfile(false)}
+            />
+          ) : showSettings ? (
+            <SettingsPage
+              effectiveTheme={effectiveTheme}
+              onClose={() => setShowSettings(false)}
+            />
+          ) : selectedDocument ? (
+  <>
+    {/* 📄 Document Chat Header */}
+    <div
+      className={`flex items-center justify-between px-4 py-3 border-b ${effectiveTheme.border} ${effectiveTheme.secondary}`}
+    >
+      <div>
+        <h2 className={`font-semibold text-lg ${effectiveTheme.text}`}>
+          {selectedDocument.fileName}
+        </h2>
+        <p className="text-sm text-gray-500">{selectedDocument.date}</p>
       </div>
-      <MessageInput
-        onSendMessage={handleSendMessageFromInput}
-        selectedContact={selectedContact}
-        effectiveTheme={effectiveTheme}
-      />
-    </>
-  ) : !isMobileView ? (
-    // CASE 4: Empty welcome screen
-    <div className="flex-1 flex items-center justify-center p-4">
-      <div className="text-center max-w-sm w-full">
-                      <motion.div
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        transition={{ duration: 0.5 }}
-                        className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full ${effectiveTheme.accent} mx-auto mb-4 sm:mb-6 flex items-center justify-center`}
-                      >
-                        <svg
-                          width="48"
-                          height="48"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="w-12 h-12 sm:w-14 sm:h-14"
-                        >
-                          <circle
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            fill="currentColor"
-                            className="text-blue-500"
-                          />
-                          <path
-                            d="M17.5 15.5C17.25 15.25 16.8125 15.0625 16.375 14.875C15.9375 14.6875 15.5625 14.5 15.0625 14.1875C14.5625 13.875 14.1875 13.625 13.8125 13.3125C13.4375 13 13.0625 12.5625 12.75 12.0625C12.5 11.5625 12.25 11.0625 12 10.5625C11.75 10.0625 11.5 9.5625 11.25 9.0625C11 8.5625 10.75 8.125 10.5 7.625C10.25 7.125 10 6.625 9.75 6.125C9.5 5.625 9.25 5.1875 9 4.6875C8.75 4.1875 8.5 3.75 8.25 3.25C8 2.75 7.75 2.25 7.5 1.75C7.25 1.25 7 0.75 6.75 0.25C6.5 0.25 6.25 0.5 6 0.75C5.75 1 5.5 1.25 5.25 1.5C5 1.75 4.75 2 4.5 2.25C4.25 2.5 4 2.75 3.75 3C3.5 3.25 3.25 3.5 3 3.75C2.75 4 2.5 4.25 2.25 4.5C2 4.75 1.75 5 1.5 5.25C1.25 5.5 1 5.75 0.75 6C0.5 6.25 0.25 6.5 0.25 6.75L0.25 6.75Z"
-                            fill="white"
-                          />
-                        </svg>
-                      </motion.div>
-                      <motion.h2
-                        initial={{ y: 20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.2, duration: 0.5 }}
-                        className={`text-xl sm:text-2xl font-bold mb-2 ${effectiveTheme.text}`}
-                        style={{
-                          fontFamily: "'Orbitron', sans-serif",
-                          letterSpacing: "2px",
-                        }}
-                      >
-                        Welcome to Chasmos
-                      </motion.h2>
-                      <motion.p
-                        initial={{ y: 20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.4, duration: 0.5 }}
-                        className={`text-sm sm:text-base ${effectiveTheme.textSecondary}`}
-                      >
-                        Select a conversation to start messaging
-                      </motion.p>
-                    </div>
+      <button
+        onClick={() => setSelectedDocument(null)}
+        className="text-gray-400 hover:text-red-500 transition"
+      >
+        ✖
+      </button>
     </div>
-  ) : (
-    // CASE 5: Default null (mobile or undefined)
-    null
-  )}
-</div>
 
+    {/* 💬 Document Chat Messages */}
+    <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      {selectedDocument.messages && selectedDocument.messages.length > 0 ? (
+        selectedDocument.messages.map((msg, idx) => (
+          <div
+            key={idx}
+            className={`flex ${
+              msg.sender === "user" ? "justify-end" : "justify-start"
+            }`}
+          >
+            <div
+              className={`px-4 py-2 rounded-2xl max-w-xs text-sm ${
+                msg.sender === "user"
+                  ? "bg-blue-500 text-white rounded-br-none"
+                  : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100 rounded-bl-none"
+              }`}
+            >
+              {msg.text}
+            </div>
+          </div>
+        ))
+      ) : (
+        <div className="text-center text-gray-400 py-10">
+          Start chatting about this document
+        </div>
+      )}
+    </div>
+
+    {/* 📎 Document Chat Input (EXACT same design as your normal chat) */}
+    <div className={`${effectiveTheme.secondary} p-4 relative border-t ${effectiveTheme.border}`}>
+      {/* Hidden file inputs */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.doc,.docx,.txt,.xls,.xlsx"
+        onChange={(e) => handleFileChange(e, "document")}
+        style={{ display: "none" }}
+      />
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        onChange={(e) => handleFileChange(e, "image")}
+        style={{ display: "none" }}
+      />
+
+      <div className="flex items-center space-x-3">
+        {/* Attachment Menu */}
+        <div className="relative" ref={attachmentMenuRef}>
+          <motion.div
+            whileHover={{ scale: 1.1, rotate: 15 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <Paperclip
+              className={`w-6 h-6 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-colors duration-200`}
+              onClick={toggleAttachmentMenu}
+            />
+          </motion.div>
+
+          <AnimatePresence>
+            {showAttachmentMenu && (
+              <motion.div
+                initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                transition={{ duration: 0.2 }}
+                className={`absolute -top-20 left-0 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50`}
+              >
+                <div className="flex items-center space-x-4">
+                  {/* Document Upload */}
+                  <motion.div
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-blue-50 transition-colors"
+                    onClick={() => handleFileUpload("document")}
+                  >
+                    <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-white" />
+                    </div>
+                    <p className={`${effectiveTheme.text} text-xs font-medium`}>
+                      Document
+                    </p>
+                  </motion.div>
+
+                  {/* Image Upload */}
+                  <motion.div
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-green-50 transition-colors"
+                    onClick={() => handleFileUpload("image")}
+                  >
+                    <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+                      <Image className="w-5 h-5 text-white" />
+                    </div>
+                    <p className={`${effectiveTheme.text} text-xs font-medium`}>
+                      Photo
+                    </p>
+                  </motion.div>
+
+                  {/* Camera */}
+                  <motion.div
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-purple-50 transition-colors"
+                    onClick={() => setShowAttachmentMenu(false)}
+                  >
+                    <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
+                      <Camera className="w-5 h-5 text-white" />
+                    </div>
+                    <p className={`${effectiveTheme.text} text-xs font-medium`}>
+                      Camera
+                    </p>
+                  </motion.div>
+
+                  {/* Location */}
+                  <motion.div
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                    onClick={() => setShowAttachmentMenu(false)}
+                  >
+                    <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center">
+                      <MapPin className="w-5 h-5 text-white" />
+                    </div>
+                    <p className={`${effectiveTheme.text} text-xs font-medium`}>
+                      Location
+                    </p>
+                  </motion.div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Message input */}
+        <div
+          className={`flex-1 ${effectiveTheme.inputBg} rounded-lg px-4 py-2 flex items-center`}
+        >
+          <input
+            type="text"
+            placeholder={`Message ${selectedDocument.fileName}...`}
+            value={messageInput}
+            onChange={handleInputChange}
+            onKeyPress={handleKeyPress}
+            className={`flex-1 bg-transparent ${effectiveTheme.text} placeholder-gray-400 focus:outline-none`}
+          />
+        </div>
+
+        {/* Send button */}
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={handleSendClick}
+          className={`${effectiveTheme.accent} p-2 rounded-full text-white hover:opacity-90 transition-opacity`}
+        >
+          <Send className="w-5 h-5" />
+        </motion.button>
+      </div>
+    </div>
+  </>
+) :  <div className="flex-1 flex items-center justify-center p-4">
+              <div className="text-center max-w-sm w-full">
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.5 }}
+                  className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full ${effectiveTheme.accent} mx-auto mb-4 sm:mb-6 flex items-center justify-center`}
+                >
+                  <svg
+                    width="48"
+                    height="48"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-12 h-12 sm:w-14 sm:h-14"
+                  >
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      fill="currentColor"
+                      className="text-blue-500"
+                    />
+                    <path
+                      d="M17.5 15.5C17.25 15.25 16.8125 15.0625 16.375 14.875C15.9375 14.6875 15.5625 14.5 15.0625 14.1875C14.5625 13.875 14.1875 13.625 13.8125 13.3125C13.4375 13 13.0625 12.5625 12.75 12.0625C12.5 11.5625 12.25 11.0625 12 10.5625C11.75 10.0625 11.5 9.5625 11.25 9.0625C11 8.5625 10.75 8.125 10.5 7.625C10.25 7.125 10 6.625 9.75 6.125C9.5 5.625 9.25 5.1875 9 4.6875C8.75 4.1875 8.5 3.75 8.25 3.25C8 2.75 7.75 2.25 7.5 1.75C7.25 1.25 7 0.75 6.75 0.25C6.5 0.25 6.25 0.5 6 0.75C5.75 1 5.5 1.25 5.25 1.5C5 1.75 4.75 2 4.5 2.25C4.25 2.5 4 2.75 3.75 3C3.5 3.25 3.25 3.5 3 3.75C2.75 4 2.5 4.25 2.25 4.5C2 4.75 1.75 5 1.5 5.25C1.25 5.5 1 5.75 0.75 6C0.5 6.25 0.25 6.5 0.25 6.75L0.25 6.75Z"
+                      fill="white"
+                    />
+                  </svg>
+                </motion.div>
+                <motion.h2
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.2, duration: 0.5 }}
+                  className={`text-xl sm:text-2xl font-bold mb-2 ${effectiveTheme.text}`}
+                  style={{
+                    fontFamily: "'Orbitron', sans-serif",
+                    letterSpacing: "2px",
+                  }}
+                >
+                  Welcome to Chasmos
+                </motion.h2>
+                <motion.p
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.4, duration: 0.5 }}
+                  className={`text-sm sm:text-base ${effectiveTheme.textSecondary}`}
+                >
+                  Select a conversation to start messaging
+                </motion.p>
+              </div>
+            </div>}
+        </div>
       </div>
     </>
   );
