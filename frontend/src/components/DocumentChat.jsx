@@ -26,6 +26,8 @@ const DocumentChat = React.memo(
     const attachmentMenuRef = useRef(null);
     const fileInputRef = useRef(null);
     const imageInputRef = useRef(null);
+  const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
     // 🔹 Auto scroll when new message added
     useEffect(() => {
@@ -75,7 +77,7 @@ const DocumentChat = React.memo(
       const formData = new FormData();
       formData.append("document", file);
 
-      const res = await fetch("http://localhost:3000/api/documents/upload", {
+      const res = await fetch(`${API_BASE_URL}/api/documents/upload`, {
         method: "POST",
         body: formData,
       });
