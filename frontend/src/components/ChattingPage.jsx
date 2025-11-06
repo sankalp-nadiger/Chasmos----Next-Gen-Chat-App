@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-undef */
 import React, {
   useState,
   useEffect,
@@ -51,6 +53,9 @@ import {
   searchContacts,
   generateAvatarFallback,
 } from "../utils/mockData";
+import DocumentChat from "./DocumentChat";
+import NewDocumentUploader from "./NewDocumentUploader";
+import DocumentChatWrapper from "./DocumentChat";
 
 // Memoized Chat Header Component
 const ChatHeader = React.memo(
@@ -449,6 +454,10 @@ const ChattingPage = ({ onLogout }) => {
   const [showChatSearch, setShowChatSearch] = useState(false);
   const [showThreeDotsMenu, setShowThreeDotsMenu] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState({});
+  
+  const [selectedDocument, setSelectedDocument] = useState(null);
+
+  const [isNewDocumentChat, setIsNewDocumentChat] = useState(false);
   const [showFloatingMenu, setShowFloatingMenu] = useState(false);
   const [lastClickTime, setLastClickTime] = useState(0);
   const [showGroupCreation, setShowGroupCreation] = useState(false);
@@ -538,34 +547,10 @@ const ChattingPage = ({ onLogout }) => {
     setSelectedContact(chat); // just open the chat
   };
 
-  //Handle Accept button
-  const handleAcceptChat = async (senderEmail) => {
-  try {
-    const token = localStorage.getItem("token");
 
-    const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ senderEmail }),
-    });
-
-    const data = await res.json();
-    if (!res.ok)
-      throw new Error(data.message || "Failed to accept chat request");
-
-    // Remove from receiver’s received chat requests
-    setReceivedChats((prev) => prev.filter((r) => r.email !== senderEmail));
-
-    console.log("Chat request accepted! (sender will see it)");
-
-    
-  } catch (error) {
-    console.error("Error accepting chat request:", error);
-  }
+const handleAcceptChat = async (senderEmail) => {
 };
+
 
 
 //Fetch all accepted chats sent by sender under his Accepted chat section
@@ -1023,6 +1008,201 @@ useEffect(() => {
     [messages]
   );
 
+  // Ref for chat search container (click-outside functionality)
+ 
+  // Fetch contacts from APi
+ 
+
+  const [documentChats, setDocumentChats] = useState([]);
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  // ✅ Create a new chat/document
+  const handleNewChatdoc = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE_URL}/api/document/new`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ fileName: "Untitled Document" }),
+      });
+
+      if (!res.ok) throw new Error("Failed to create new chat");
+      const newDoc = await res.json();
+
+      setDocumentChats((prev) => [newDoc, ...prev]);
+      setSelectedDocument(newDoc);
+    } catch (error) {
+      console.error("Error creating new document chat:", error);
+    }
+  };
+
+  useEffect(() => {
+    const fetchDocumentHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`${API_BASE_URL}/api/document`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error("Failed to fetch document history");
+
+        const data = await res.json();
+        setDocumentChats(data);
+      } catch (error) {
+        console.error("Error fetching document history:", error);
+      }
+    };
+
+    fetchDocumentHistory();
+  }, []);
+
+  // 🔹 Message input state
+  const [messageInput, setMessageInput] = useState("");
+
+  // 🔹 Theme object example (you can replace with your real theme)
+
+  // 🔹 Function to send message (triggered by Enter key or Send button)
+  const handleSendClick = useCallback(() => {
+    if (!messageInput.trim() || !selectedDocument) return;
+
+    // Here, send the message to your backend or append to chat array
+    console.log(
+      `📩 Sending message: "${messageInput}" for document:`,
+      selectedDocument
+    );
+
+    // Clear input after sending
+    setMessageInput("");
+  }, [messageInput, selectedDocument]);
+
+  // Fetch recent chats
+  useEffect(() => {
+    const fetchRecentChats = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) throw new Error("No token found.");
+
+        const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) throw new Error("Failed to fetch recent chats");
+
+        const data = await res.json();
+
+        const formatted = data.map((chat) => {
+          const otherUser = chat.participants.find(
+            (p) => p._id !== data.loggedInUserId
+          );
+          return {
+            id: otherUser._id,
+            name: otherUser.email,
+            avatar: otherUser.avatar,
+            lastMessage: chat.lastMessage,
+            timestamp: chat.timestamp,
+            isOnline: otherUser.isOnline || false,
+            unreadCount: chat.unreadCount || 0,
+          };
+        });
+
+        setRecentChats(formatted);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecentChats();
+  }, []);
+
+  // Handle responsive design
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileView(window.innerWidth < 768);
+      if (window.innerWidth >= 768) {
+        setShowSidebar(true);
+      } else {
+        setShowSidebar(!selectedContact);
+      }
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [selectedContact]);
+  // Close chat search bar and three dots menu when switching chats
+  useEffect(() => {
+    setShowChatSearch(false);
+    setShowThreeDotsMenu(false);
+    setChatSearchTerm("");
+  }, [selectedContact]);
+
+  // Handle click outside chat search and three dots menu to close them
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        chatSearchRef.current &&
+        !chatSearchRef.current.contains(event.target) &&
+        showChatSearch
+      ) {
+        setShowChatSearch(false);
+        setChatSearchTerm("");
+      }
+      if (
+        threeDotsMenuRef.current &&
+        !threeDotsMenuRef.current.contains(event.target) &&
+        showThreeDotsMenu
+      ) {
+        setShowThreeDotsMenu(false);
+      }
+      if (
+        floatingMenuRef.current &&
+        !floatingMenuRef.current.contains(event.target) &&
+        showFloatingMenu
+      ) {
+        setShowFloatingMenu(false);
+      }
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(event.target) &&
+        showUserMenu
+      ) {
+        setShowUserMenu(false);
+      }
+    };
+
+    if (
+      showChatSearch ||
+      showThreeDotsMenu ||
+      showFloatingMenu ||
+      showUserMenu
+    ) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showChatSearch, showThreeDotsMenu, showFloatingMenu, showUserMenu]);
+
+ 
+
+ 
+
+ 
+
+ 
+
+
+
+
+
+
+
+
+ 
+
   const [cosmicTheme, setCosmicTheme] = useState(() =>
     getTimeBasedCosmicTheme()
   );
@@ -1215,7 +1395,7 @@ useEffect(() => {
 
         {/* Vertical Navigation Bar */}
         <div
-          className={`w-16 ${effectiveTheme.secondary} border-r ${effectiveTheme.border} flex flex-col justify-between py-4`}
+          className={`w-16 z-50 ${effectiveTheme.secondary} border-r ${effectiveTheme.border} flex flex-col justify-between py-4`}
         >
           {/* Top Navigation Items */}
           <div className="flex flex-col space-y-4">
@@ -1482,7 +1662,13 @@ useEffect(() => {
                     />
                     <input
                       type="text"
-                      placeholder="Search conversations..."
+                      placeholder={
+                        activeNavItem === "chats"
+                          ? "Search conversations..."
+                          : activeNavItem === "documents"
+                            ? "Search documents..."
+                            : "Search..."
+                      }
                       value={searchTerm}
                       onChange={handleSearchTermChange}
                       className={`w-full pl-10 pr-4 py-3 bg-transparent ${effectiveTheme.text} placeholder-gray-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300`}
@@ -1492,9 +1678,10 @@ useEffect(() => {
 
                 {/* Chat Sidebar Area */}
                 <div className="flex-1 flex flex-col">
-                  {/* 🔔 Alerts Section: Chat Requests & Accepted */}
-
-                  <div>
+                  {activeNavItem === "chats" ? (
+                    <>
+                      {/* 🔔 Alerts Section: Chat Requests & Accepted */}
+                     <div>
                     {/* 🔹 Chat Requests Dropdown */}
                     <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
                       <button
@@ -1666,195 +1853,294 @@ useEffect(() => {
     </div>
   )}
 </div>
+</div>
 
-                  </div>
 
-                  {/* 🧭 Contacts List */}
-                  <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col p-4 space-y-4">
-                    {/* Recent Chats */}
-                    {recentChats.length > 0 && (
-                      <div className="flex flex-col gap-2">
-                        <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
-                          Recent Chats
-                        </h4>
-                        {recentChats.map((chat) => (
-                          <ContactItem
-                            key={chat.id}
-                            contact={chat} // use "contact" prop
-                            effectiveTheme={effectiveTheme}
-                            onSelect={(c) => setSelectedContact(c)}
+                      {/* 🧭 Contacts List */}
+                      <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col p-4 space-y-4">
+                        {recentChats.length > 0 && (
+                          <div className="flex flex-col gap-2">
+                            <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
+                              Recent Chats
+                            </h4>
+                            {recentChats.map((chat) => (
+                              <ContactItem
+                                key={chat.id}
+                                contact={chat}
+                                effectiveTheme={effectiveTheme}
+                                onSelect={(c) => setSelectedContact(c)}
+                              />
+                            ))}
+                          </div>
+                        )}
+
+                        {contacts.length > 0 && (
+                          <div className="flex flex-col gap-2 mt-4">
+                            <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
+                              Contacts
+                            </h4>
+                            {contacts.map((contact) => (
+                              <ContactItem
+                                key={contact.id}
+                                contact={contact}
+                                effectiveTheme={effectiveTheme}
+                                onSelect={(c) => setSelectedContact(c)}
+                              />
+                            ))}
+                          </div>
+                        )}
+
+                        {recentChats.length === 0 && contacts.length === 0 && (
+                          <div className="text-center space-y-4 mt-10">
+                            <p className="text-gray-500 dark:text-gray-400">
+                              Start chatting with Chasmos!
+                            </p>
+                            <button
+                              onClick={() => setShowNewChat(true)}
+                              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+                            >
+                              New Chat
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Floating Add Button with Menu */}
+                      <div className="relative">
+                        {showFloatingMenu && (
+                          <motion.div
+                            ref={floatingMenuRef}
+                            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.8, y: 20 }}
+                            transition={{ duration: 0.2 }}
+                            className={`absolute ${
+                              isMobileView
+                                ? "bottom-20 right-6 fixed"
+                                : "bottom-20 right-6"
+                            } flex flex-col space-y-3 z-30`}
+                          >
+                            {/* Create Group */}
+                            <motion.button
+                              initial={{ opacity: 0, x: 20 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 0.1 }}
+                              onClick={handleCreateGroup}
+                              className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
+                            >
+                              <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+                                <Users className="w-5 h-5 text-white" />
+                              </div>
+                              <span
+                                className={`${effectiveTheme.text} font-medium whitespace-nowrap`}
+                              >
+                                Create a group
+                              </span>
+                            </motion.button>
+
+                            {/* New Chat */}
+                            <motion.button
+                              initial={{ opacity: 0, x: 20 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 0.15 }}
+                              onClick={handleNewChat}
+                              className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
+                            >
+                              <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
+                                <MessageSquare className="w-5 h-5 text-white" />
+                              </div>
+                              <span
+                                className={`${effectiveTheme.text} font-medium whitespace-nowrap`}
+                              >
+                                New chat
+                              </span>
+                            </motion.button>
+
+                            {/* Invite User */}
+                            <motion.button
+                              initial={{ opacity: 0, x: 20 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 0.2 }}
+                              onClick={handleInviteUser}
+                              className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
+                            >
+                              <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
+                                <UserPlus className="w-5 h-5 text-white" />
+                              </div>
+                              <span
+                                className={`${effectiveTheme.text} font-medium whitespace-nowrap`}
+                              >
+                                Invite new user
+                              </span>
+                            </motion.button>
+                          </motion.div>
+                        )}
+
+                        {/* Main Floating Button */}
+                        <motion.button
+                          whileHover={{
+                            scale: 1.1,
+                            rotate: [0, -10, 10, -10, 0],
+                            boxShadow: "0 10px 30px rgba(59, 130, 246, 0.4)",
+                          }}
+                          whileTap={{
+                            scale: 0.95,
+                            rotate: -5,
+                          }}
+                          animate={{
+                            y: [0, -5, 0],
+                            transition: {
+                              duration: 2,
+                              repeat: Infinity,
+                              ease: "easeInOut",
+                            },
+                          }}
+                          className={`absolute ${
+                            isMobileView
+                              ? "bottom-6 right-6 fixed"
+                              : "bottom-6 right-6"
+                          } w-16 h-16 rounded-full flex items-center justify-center text-white transition-all duration-300 z-20 group`}
+                          style={{
+                            background: showFloatingMenu
+                              ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
+                              : "linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)",
+                            boxShadow: showFloatingMenu
+                              ? "0 8px 25px rgba(239, 68, 68, 0.3)"
+                              : "0 8px 25px rgba(59, 130, 246, 0.3)",
+                            border: "none",
+                          }}
+                          onClick={() => toggleFloatingMenu()}
+                        >
+                          <motion.div
+                            whileHover={{
+                              rotate: 360,
+                              transition: { duration: 0.6 },
+                            }}
+                            animate={{ rotate: showFloatingMenu ? 45 : 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="relative"
+                          >
+                            {showFloatingMenu ? (
+                              <X className="w-7 h-7 text-white" />
+                            ) : (
+                              <MessageSquare className="w-7 h-7 text-white" />
+                            )}
+                          </motion.div>
+                          <motion.div
+                            className="absolute inset-0 rounded-full bg-white opacity-0 group-hover:opacity-20"
+                            animate={{ scale: [1, 1.5], opacity: [0, 0.2, 0] }}
+                            transition={{
+                              duration: 1,
+                              repeat: Infinity,
+                              ease: "easeOut",
+                            }}
                           />
-                        ))}
+                        </motion.button>
                       </div>
-                    )}
-
-                    {/* All Contacts */}
-                    {contacts.length > 0 && (
-                      <div className="flex flex-col gap-2 mt-4">
-                        <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
-                          Contacts
+                    </>
+                  ) : activeNavItem === "documents" ? (
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                      {/* Header with dropdown toggle */}
+                      <div
+                        className="flex items-center justify-between cursor-pointer"
+                        onClick={() => setIsExpanded(!isExpanded)}
+                      >
+                        <h4 className="text-gray-300 dark:text-gray-100 font-semibold">
+                          Document History
                         </h4>
-                        {contacts.map((contact) => (
-                          <ContactItem
-                            key={contact.id}
-                            contact={contact} // same component reused
-                            effectiveTheme={effectiveTheme}
-                            onSelect={(c) => setSelectedContact(c)}
-                          />
-                        ))}
+                        {isExpanded ? (
+                          <ChevronUp className="w-5 h-5 text-gray-500" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-gray-500" />
+                        )}
                       </div>
-                    )}
 
-                    {/* Empty State */}
-                    {recentChats.length === 0 && contacts.length === 0 && (
-                      <div className="text-center space-y-4 mt-10">
-                        <p className="text-gray-500 dark:text-gray-400">
-                          Start chatting with Chasmos!
-                        </p>
-                        <button
-                          onClick={() => setShowNewChat(true)}
-                          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+                      {/* Animated Dropdown */}
+                      <AnimatePresence initial={false}>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="space-y-3 overflow-hidden"
+                          >
+                            {loading ? (
+                              <div className="text-gray-500 text-center py-4">
+                                Loading...
+                              </div>
+                            ) : documentChats.length > 0 ? (
+                              documentChats.map((doc) => (
+                                <motion.div
+                                  key={doc._id}
+                                  whileHover={{ scale: 1.02 }}
+                                  whileTap={{ scale: 0.97 }}
+                                  onClick={() => {
+                                    if (
+                                      !selectedDocument ||
+                                      selectedDocument._id !== doc._id
+                                    ) {
+                                      setSelectedDocument(doc);
+                                      setIsNewDocumentChat(false);
+                                    }
+                                  }}
+                                  className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
+                ${effectiveTheme.secondary || "bg-white dark:bg-[#1f1f1f]"} 
+                border ${effectiveTheme.border} hover:${effectiveTheme.hover}`}
+                                >
+                                  <div className="flex flex-col">
+                                    <p className="font-medium truncate text-gray-300 dark:text-gray-200">
+                                      {doc.fileName || "Untitled Document"}
+                                    </p>
+                                   <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+  {doc.updatedAt
+    ? new Date(doc.updatedAt).toLocaleString()
+    : "No date available"}
+</p>
+
+                                  </div>
+                                </motion.div>
+                              ))
+                            ) : (
+                              <div
+                                className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
+                                  effectiveTheme.searchBg ||
+                                  "bg-gray-100 dark:bg-gray-800"
+                                } text-gray-400 dark:text-gray-400`}
+                              >
+                                No document history found
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      {/* 🆕 Floating New Chat Button */}
+                      <div className="flex justify-center mt-8">
+                        <motion.button
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          transition={{ type: "spring", stiffness: 220 }}
+                          onClick={() => {
+                            setSelectedDocument(null);
+                            setIsNewDocumentChat(true);
+                          }}
+                          className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-5 py-3 rounded-xl shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-all duration-200 group`}
                         >
-                          New Chat
-                        </button>
+                          <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
+                            <MessageSquare className="w-5 h-5 text-white" />
+                          </div>
+                          <span
+                            className={`${effectiveTheme.text} font-semibold`}
+                          >
+                            New Chat
+                          </span>
+                        </motion.button>
                       </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Floating Add Button with Menu */}
-                <div className="relative">
-                  {/* Floating Action Menu */}
-                  {showFloatingMenu && (
-                    <motion.div
-                      ref={floatingMenuRef}
-                      initial={{ opacity: 0, scale: 0.8, y: 20 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.8, y: 20 }}
-                      transition={{ duration: 0.2 }}
-                      className={`absolute ${isMobileView ? "bottom-20 right-6 fixed" : "bottom-20 right-6"} flex flex-col space-y-3 z-30`}
-                    >
-                      {/* Create Group */}
-                      <motion.button
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.1 }}
-                        onClick={handleCreateGroup}
-                        className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
-                      >
-                        <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
-                          <Users className="w-5 h-5 text-white" />
-                        </div>
-                        <span
-                          className={`${effectiveTheme.text} font-medium whitespace-nowrap`}
-                        >
-                          Create a group
-                        </span>
-                      </motion.button>
-
-                      {/* New Chat */}
-                      <motion.button
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.15 }}
-                        onClick={handleNewChat}
-                        className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
-                      >
-                        <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
-                          <MessageSquare className="w-5 h-5 text-white" />
-                        </div>
-                        <span
-                          className={`${effectiveTheme.text} font-medium whitespace-nowrap`}
-                        >
-                          New chat
-                        </span>
-                      </motion.button>
-
-                      {/* Invite User */}
-                      <motion.button
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.2 }}
-                        onClick={handleInviteUser}
-                        className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
-                      >
-                        <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
-                          <UserPlus className="w-5 h-5 text-white" />
-                        </div>
-                        <span
-                          className={`${effectiveTheme.text} font-medium whitespace-nowrap`}
-                        >
-                          Invite new user
-                        </span>
-                      </motion.button>
-                    </motion.div>
-                  )}
-
-                  {/* Main Floating Button */}
-                  <motion.button
-                    whileHover={{
-                      scale: 1.1,
-                      rotate: [0, -10, 10, -10, 0],
-                      boxShadow: "0 10px 30px rgba(59, 130, 246, 0.4)",
-                    }}
-                    whileTap={{
-                      scale: 0.95,
-                      rotate: -5,
-                    }}
-                    animate={{
-                      y: [0, -5, 0],
-                      transition: {
-                        duration: 2,
-                        repeat: Infinity,
-                        ease: "easeInOut",
-                      },
-                    }}
-                    className={`absolute ${isMobileView ? "bottom-6 right-6 fixed" : "bottom-6 right-6"} w-16 h-16 rounded-full flex items-center justify-center text-white transition-all duration-300 z-20 group`}
-                    style={{
-                      background: showFloatingMenu
-                        ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
-                        : "linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)",
-                      boxShadow: showFloatingMenu
-                        ? "0 8px 25px rgba(239, 68, 68, 0.3)"
-                        : "0 8px 25px rgba(59, 130, 246, 0.3)",
-                      border: "none",
-                    }}
-                    onClick={() => {
-                      toggleFloatingMenu();
-                    }}
-                  >
-                    <motion.div
-                      whileHover={{
-                        rotate: 360,
-                        transition: { duration: 0.6 },
-                      }}
-                      animate={{
-                        rotate: showFloatingMenu ? 45 : 0,
-                      }}
-                      transition={{ duration: 0.3 }}
-                      className="relative"
-                    >
-                      {showFloatingMenu ? (
-                        <X className="w-7 h-7 text-white" />
-                      ) : (
-                        <MessageSquare className="w-7 h-7 text-white" />
-                      )}
-                    </motion.div>
-
-                    {/* Ripple effect on hover */}
-                    <motion.div
-                      className="absolute inset-0 rounded-full bg-white opacity-0 group-hover:opacity-20"
-                      animate={{
-                        scale: [1, 1.5],
-                        opacity: [0, 0.2, 0],
-                      }}
-                      transition={{
-                        duration: 1,
-                        repeat: Infinity,
-                        ease: "easeOut",
-                      }}
-                    />
-                  </motion.button>
+                    </div>
+                  ) : null}
                 </div>
               </motion.div>
             )}
@@ -1862,7 +2148,7 @@ useEffect(() => {
 
         {/* Main Chat Area */}
         <div
-          key={selectedContact?.id || "no-contact"}
+          key={selectedContact?.id || selectedDocument?._id || "no-contact"}
           className="flex-1 flex flex-col relative h-full overflow-hidden"
         >
           {showGroupCreation ? (
@@ -1889,9 +2175,25 @@ useEffect(() => {
               effectiveTheme={effectiveTheme}
               onClose={() => setShowSettings(false)}
             />
+          ) : isNewDocumentChat ? (
+            <NewDocumentUploader
+              onUploadComplete={(doc) => {
+                setSelectedDocument(doc);
+                setIsNewDocumentChat(false);
+              }}
+              onCancel={() => setIsNewDocumentChat(false)}
+              effectiveTheme={effectiveTheme}
+            />
+          ) : selectedDocument ? (
+            <DocumentChatWrapper
+              key={selectedDocument._id}
+              selectedDocument={selectedDocument}
+              setSelectedDocument={setSelectedDocument}
+              effectiveTheme={effectiveTheme}
+            />
           ) : selectedContact ? (
+            // CASE 3: Normal person/group chat
             <>
-              {/* Chat Header */}
               <ChatHeader
                 selectedContact={selectedContact}
                 effectiveTheme={effectiveTheme}
@@ -1905,35 +2207,20 @@ useEffect(() => {
                 onCloseChatSearch={closeChatSearch}
                 pinnedMessages={pinnedMessages}
               />
-
-              {/* Messages Area */}
               <div className="flex-1 overflow-hidden relative">
                 <MessagesArea
-                  key={
-                    selectedContact.id ||
-                    selectedContact._id ||
-                    selectedContact.email
-                  }
-                  filteredMessages={
-                    messages[
-                      selectedContact.id ||
-                        selectedContact._id ||
-                        selectedContact.email
-                    ] || []
-                  }
+                  key={selectedContact.id}
+                  filteredMessages={getMessagesForContact(
+                    selectedContact.id,
+                    chatSearchTerm
+                  )}
                   pinnedMessages={pinnedMessages}
                   onPinMessage={handlePinMessage}
                   effectiveTheme={effectiveTheme}
                   isTyping={isTyping}
-                  selectedContactId={
-                    selectedContact.id ||
-                    selectedContact._id ||
-                    selectedContact.email
-                  }
+                  selectedContactId={selectedContact.id}
                 />
               </div>
-
-              {/* Message Input */}
               <MessageInput
                 onSendMessage={handleSendMessageFromInput}
                 selectedContact={selectedContact}
@@ -1941,7 +2228,7 @@ useEffect(() => {
               />
             </>
           ) : !isMobileView ? (
-            /* Welcome Screen */
+            // CASE 4: Empty welcome screen
             <div className="flex-1 flex items-center justify-center p-4">
               <div className="text-center max-w-sm w-full">
                 <motion.div
@@ -1993,32 +2280,8 @@ useEffect(() => {
                 </motion.p>
               </div>
             </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center p-4">
-              <div className="text-center space-y-4">
-                <motion.h2
-                  initial={{ y: -20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ delay: 0.2, duration: 0.5 }}
-                  className={`text-2xl sm:text-3xl font-bold ${effectiveTheme.text} mb-4`}
-                  style={{
-                    fontFamily: "'Orbitron', sans-serif",
-                    letterSpacing: "2px",
-                  }}
-                >
-                  Welcome to Chasmos
-                </motion.h2>
-                <motion.p
-                  initial={{ y: 20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ delay: 0.4, duration: 0.5 }}
-                  className={`text-sm sm:text-base ${effectiveTheme.textSecondary}`}
-                >
-                  Select a conversation to start messaging
-                </motion.p>
-              </div>
-            </div>
-          )}
+          ) : // CASE 5: Default null (mobile or undefined)
+          null}
         </div>
       </div>
     </>
