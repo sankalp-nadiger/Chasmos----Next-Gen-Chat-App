@@ -15,6 +15,7 @@ import {
   Phone,
   ArrowRight
 } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
@@ -103,22 +104,6 @@ const GoogleSignupComplete = ({ googleData, currentTheme, onSuccess }) => {
     </div>
   );
 };
-
-// Mock theme context
-const useTheme = () => ({
-  currentTheme: {
-    primary: "bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800",
-    secondary: "bg-white dark:bg-gray-800",
-    accent: "bg-blue-600",
-    text: "text-gray-900 dark:text-white",
-    textSecondary: "text-gray-600 dark:text-gray-400",
-    border: "border-gray-300 dark:border-gray-600",
-    inputBg: "bg-white dark:bg-gray-700",
-    searchBg: "bg-gray-100 dark:bg-gray-700",
-    hover: "hover:bg-gray-100 dark:hover:bg-gray-700",
-    shadow: "shadow-lg"
-  }
-});
 
 // Mock Cloudinary upload
 const uploadToCloudinary = async (file) => {
