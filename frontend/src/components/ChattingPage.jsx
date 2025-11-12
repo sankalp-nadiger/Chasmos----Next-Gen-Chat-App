@@ -486,61 +486,44 @@ const ChattingPage = ({ onLogout }) => {
 
   // Fetch both received and accepted requests
   useEffect(() => {
-    const fetchRequests = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        if (!token) {
-          console.error("No token found — user might not be logged in.");
-          return;
-        }
-
-        // 1️ Fetch received chat requests
-        const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        const receivedData = await resReceived.json();
-        console.log("Received Emails:", receivedData);
-
-        // ensure it's an array
-        const receivedEmails = Array.isArray(receivedData) ? receivedData : [];
-
-        // 2️ Fetch accepted chat requests
-        const resAccepted = await fetch(`${API_BASE_URL}/api/user/accepted`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        const acceptedData = await resAccepted.json();
-        const acceptedEmails = Array.isArray(acceptedData) ? acceptedData : [];
-
-        // 3️) Helper: fetch user profiles by email
-        const fetchUsersByEmails = async (emails) => {
-          if (!Array.isArray(emails)) return [];
-          const promises = emails.map(async (email) => {
-            const res = await fetch(
-              `${API_BASE_URL}/api/user?search=${email}`,
-              {
-                headers: { Authorization: `Bearer ${token}` },
-              }
-            );
-            const data = await res.json();
-            return Array.isArray(data) ? data[0] : data; // handle array response
-          });
-          return Promise.all(promises);
-        };
-
-        const receivedUsers = await fetchUsersByEmails(receivedEmails);
-        const acceptedUsers = await fetchUsersByEmails(acceptedEmails);
-
-        setReceivedChats(receivedUsers.filter(Boolean)); // filter nulls
-        setAcceptedChats(acceptedUsers.filter(Boolean));
-      } catch (err) {
-        console.error("Error fetching chat requests:", err);
+  const fetchRequests = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        console.error("No token found — user might not be logged in.");
+        return;
       }
-    };
 
-    fetchRequests();
-  }, []);
+      // 1️⃣ Fetch received chat requests (already enriched with name, avatar, message)
+      const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const receivedData = await resReceived.json();
+      console.log("✅ Received Requests:", receivedData);
+
+      const receivedList = Array.isArray(receivedData) ? receivedData : [];
+
+      // 2️⃣ Fetch accepted chat requests (we’ll enrich backend similarly)
+      const resAccepted = await fetch(`${API_BASE_URL}/api/user/accepted`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const acceptedData = await resAccepted.json();
+      console.log("✅ Accepted Chats:", acceptedData);
+
+      const acceptedList = Array.isArray(acceptedData) ? acceptedData : [];
+
+      // 3️⃣ Update local state directly
+      setReceivedChats(receivedList);
+      setAcceptedChats(acceptedList);
+    } catch (err) {
+      console.error("Error fetching chat requests:", err);
+    }
+  };
+
+  fetchRequests();
+}, []);
 
   //After chatting with accepted chats
   const handleOpenChat = (chat) => {
@@ -1619,146 +1602,26 @@ useEffect(() => {
                         )}
                       </button>
 
-                      {showReceivedDropdown && (
-                        <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
-                          {receivedChats.length > 0 ? (
-                            receivedChats.map((req) => (
-                              <div
-                                key={req._id || req.email}
-                                className={`flex justify-between items-center p-2 rounded-md ${
-                                  effectiveTheme.hover ||
-                                  "hover:bg-gray-100 dark:hover:bg-gray-700"
-                                } transition-colors`}
-                              >
-                                {/* Left side: profile + info */}
-                                <div className="flex items-center gap-3 flex-1">
-                                  <img
-                                    src={req.avatar || "/default-avatar.png"}
-                                    alt={req.name || "User"}
-                                    className="w-10 h-10 rounded-full object-cover"
-                                  />
-                                  <div>
-                                    <p className="font-medium text-gray-100 truncate">
-                                      {req.name}
-                                    </p>
-                                    {/* ✅ Display invite message instead of email */}
-                                    {req.inviteMessage ? (
-                                      <p className="text-sm text-gray-400 italic truncate">
-                                        “{req.inviteMessage}”
-                                      </p>
-                                    ) : (
-                                      <p className="text-sm text-gray-500 truncate">
-                                        No message
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* Right side: Accept button */}
-                                <button
-                                  onClick={() => handleAcceptChat(req.email)}
-                                  className="px-3 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition"
-                                >
-                                  Accept
-                                </button>
-                              </div>
-                            ))
-                          ) : (
-                            <div
-                              className={`w-full flex items-center px-4 py-3 rounded-lg ${
-                                effectiveTheme.searchBg ||
-                                "bg-gray-100 dark:bg-gray-800"
-                              } text-gray-400`}
-                            >
-                              No new requests
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 🔹 Accepted Chats Dropdown */}
-<div className="rounded-md justify-between items-center px-2 py-1">
-  <button
-    onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
-    className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-      effectiveTheme.hover ||
-      "hover:bg-green-100 dark:hover:bg-green-900"
-    } transition-colors text-green-800 dark:text-green-200 font-medium`}
-  >
-    <span className="flex items-center gap-2 text-gray-200">
-      <img
-        src={chatAcceptIcon}
-        alt="Chats Accepted"
-        className="w-4 h-4"
-      />
-      Chats Accepted ({acceptedChats?.length || 0})
-    </span>
-    {showAcceptedDropdown ? (
-      <ChevronUp className="w-4 h-4" />
-    ) : (
-      <ChevronDown className="w-4 h-4" />
-    )}
-  </button>
-
-  {showAcceptedDropdown && (
-    <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
-      {acceptedChats && acceptedChats.length > 0 ? (
-        acceptedChats.map((chat) => (
-          <motion.div
-            key={chat._id || chat.email}
-            whileHover={{ scale: 0.98 }}
-            className={`flex justify-between items-center p-2 rounded-md ${
-              effectiveTheme.hover ||
-              "hover:bg-gray-100 dark:hover:bg-gray-700"
-            } transition-colors`}
-          >
-            {/* Left side: profile + info */}
-            <div className="flex items-center gap-3 flex-1 overflow-hidden">
-              <div className="relative flex-shrink-0">
-                <img
-                  src={
-                    chat.avatar ||
-                    "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-                  }
-                  alt={chat.name || chat.email || "User"}
-                  className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
-                />
+                {/* Right side: Accept button */}
+                <button
+                  onClick={() => handleAcceptChat(req.email)}
+                  className="px-3 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition"
+                >
+                  Accept
+                </button>
               </div>
-              <div className="overflow-hidden">
-                <p className="font-medium text-gray-100 truncate">
-                  {chat.name || chat.email?.split("@")[0] || "Unknown User"}
-                </p>
-                {chat.inviteMessage ? (
-                  <p className="text-sm text-gray-400 italic truncate">
-                    “{chat.inviteMessage}”
-                  </p>
-                ) : (
-                  <p className="text-sm text-gray-500 truncate">
-                    No message
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Right side: chat icon to open messages */}
-            <motion.button
-              whileHover={{ scale: 0.95 }}
-              onClick={() => handleOpenChat(chat)}
-              className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
-              title="Open Chat"
+            ))
+          ) : (
+            <div
+              className={`w-full flex items-center px-4 py-3 rounded-lg ${
+                effectiveTheme.searchBg
+                  ? effectiveTheme.searchBg
+                  : "bg-gray-100 dark:bg-gray-800"
+              } text-gray-400`}
             >
-              <MessageCircle className="w-5 h-5 text-white" />
-            </motion.button>
-          </motion.div>
-        ))
-      ) : (
-        <div
-          className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
-            effectiveTheme.searchBg || "bg-gray-100 dark:bg-gray-800"
-          } text-gray-400`}
-        >
-          No accepted chats yet
+              No new requests
+            </div>
+          )}
         </div>
       )}
     </div>
