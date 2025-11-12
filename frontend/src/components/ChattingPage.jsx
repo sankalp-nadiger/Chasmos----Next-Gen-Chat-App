@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-undef */
 import React, {
   useState,
   useEffect,
@@ -51,6 +53,9 @@ import {
   searchContacts,
   generateAvatarFallback,
 } from "../utils/mockData";
+import DocumentChat from "./DocumentChat";
+import NewDocumentUploader from "./NewDocumentUploader";
+import DocumentChatWrapper from "./DocumentChat";
 
 // Memoized Chat Header Component
 const ChatHeader = React.memo(
@@ -449,6 +454,10 @@ const ChattingPage = ({ onLogout }) => {
   const [showChatSearch, setShowChatSearch] = useState(false);
   const [showThreeDotsMenu, setShowThreeDotsMenu] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState({});
+  
+  const [selectedDocument, setSelectedDocument] = useState(null);
+
+  const [isNewDocumentChat, setIsNewDocumentChat] = useState(false);
   const [showFloatingMenu, setShowFloatingMenu] = useState(false);
   const [lastClickTime, setLastClickTime] = useState(0);
   const [showGroupCreation, setShowGroupCreation] = useState(false);
@@ -521,34 +530,10 @@ const ChattingPage = ({ onLogout }) => {
     setSelectedContact(chat); // just open the chat
   };
 
-  //Handle Accept button
-  const handleAcceptChat = async (senderEmail) => {
-  try {
-    const token = localStorage.getItem("token");
 
-    const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ senderEmail }),
-    });
-
-    const data = await res.json();
-    if (!res.ok)
-      throw new Error(data.message || "Failed to accept chat request");
-
-    // Remove from receiver’s received chat requests
-    setReceivedChats((prev) => prev.filter((r) => r.email !== senderEmail));
-
-    console.log("Chat request accepted! (sender will see it)");
-
-    
-  } catch (error) {
-    console.error("Error accepting chat request:", error);
-  }
+const handleAcceptChat = async (senderEmail) => {
 };
+
 
 
 //Fetch all accepted chats sent by sender under his Accepted chat section
@@ -1006,6 +991,201 @@ useEffect(() => {
     [messages]
   );
 
+  // Ref for chat search container (click-outside functionality)
+ 
+  // Fetch contacts from APi
+ 
+
+  const [documentChats, setDocumentChats] = useState([]);
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  // ✅ Create a new chat/document
+  const handleNewChatdoc = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE_URL}/api/document/new`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ fileName: "Untitled Document" }),
+      });
+
+      if (!res.ok) throw new Error("Failed to create new chat");
+      const newDoc = await res.json();
+
+      setDocumentChats((prev) => [newDoc, ...prev]);
+      setSelectedDocument(newDoc);
+    } catch (error) {
+      console.error("Error creating new document chat:", error);
+    }
+  };
+
+  useEffect(() => {
+    const fetchDocumentHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`${API_BASE_URL}/api/document`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error("Failed to fetch document history");
+
+        const data = await res.json();
+        setDocumentChats(data);
+      } catch (error) {
+        console.error("Error fetching document history:", error);
+      }
+    };
+
+    fetchDocumentHistory();
+  }, []);
+
+  // 🔹 Message input state
+  const [messageInput, setMessageInput] = useState("");
+
+  // 🔹 Theme object example (you can replace with your real theme)
+
+  // 🔹 Function to send message (triggered by Enter key or Send button)
+  const handleSendClick = useCallback(() => {
+    if (!messageInput.trim() || !selectedDocument) return;
+
+    // Here, send the message to your backend or append to chat array
+    console.log(
+      `📩 Sending message: "${messageInput}" for document:`,
+      selectedDocument
+    );
+
+    // Clear input after sending
+    setMessageInput("");
+  }, [messageInput, selectedDocument]);
+
+  // Fetch recent chats
+  useEffect(() => {
+    const fetchRecentChats = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) throw new Error("No token found.");
+
+        const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) throw new Error("Failed to fetch recent chats");
+
+        const data = await res.json();
+
+        const formatted = data.map((chat) => {
+          const otherUser = chat.participants.find(
+            (p) => p._id !== data.loggedInUserId
+          );
+          return {
+            id: otherUser._id,
+            name: otherUser.email,
+            avatar: otherUser.avatar,
+            lastMessage: chat.lastMessage,
+            timestamp: chat.timestamp,
+            isOnline: otherUser.isOnline || false,
+            unreadCount: chat.unreadCount || 0,
+          };
+        });
+
+        setRecentChats(formatted);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecentChats();
+  }, []);
+
+  // Handle responsive design
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileView(window.innerWidth < 768);
+      if (window.innerWidth >= 768) {
+        setShowSidebar(true);
+      } else {
+        setShowSidebar(!selectedContact);
+      }
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [selectedContact]);
+  // Close chat search bar and three dots menu when switching chats
+  useEffect(() => {
+    setShowChatSearch(false);
+    setShowThreeDotsMenu(false);
+    setChatSearchTerm("");
+  }, [selectedContact]);
+
+  // Handle click outside chat search and three dots menu to close them
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        chatSearchRef.current &&
+        !chatSearchRef.current.contains(event.target) &&
+        showChatSearch
+      ) {
+        setShowChatSearch(false);
+        setChatSearchTerm("");
+      }
+      if (
+        threeDotsMenuRef.current &&
+        !threeDotsMenuRef.current.contains(event.target) &&
+        showThreeDotsMenu
+      ) {
+        setShowThreeDotsMenu(false);
+      }
+      if (
+        floatingMenuRef.current &&
+        !floatingMenuRef.current.contains(event.target) &&
+        showFloatingMenu
+      ) {
+        setShowFloatingMenu(false);
+      }
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(event.target) &&
+        showUserMenu
+      ) {
+        setShowUserMenu(false);
+      }
+    };
+
+    if (
+      showChatSearch ||
+      showThreeDotsMenu ||
+      showFloatingMenu ||
+      showUserMenu
+    ) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showChatSearch, showThreeDotsMenu, showFloatingMenu, showUserMenu]);
+
+ 
+
+ 
+
+ 
+
+ 
+
+
+
+
+
+
+
+
+ 
+
   const [cosmicTheme, setCosmicTheme] = useState(() =>
     getTimeBasedCosmicTheme()
   );
@@ -1198,10 +1378,11 @@ useEffect(() => {
 
         {/* Vertical Navigation Bar */}
         <div
-          className={`w-16 ${effectiveTheme.secondary} border-r ${effectiveTheme.border} flex flex-col justify-between py-4`}
+          className={`w-16 z-50 ${effectiveTheme.secondary} border-r ${effectiveTheme.border} flex flex-col justify-between py-4`}
+          style={{ borderRightWidth: '1px' }}
         >
           {/* Top Navigation Items */}
-          <div className="flex flex-col space-y-4">
+          <div className="flex flex-col space-y-4 items-center">
             {/* Single Chats */}
             <motion.button
               whileHover={{ scale: 1.1 }}
@@ -1264,7 +1445,7 @@ useEffect(() => {
           </div>
 
           {/* Bottom Navigation Items */}
-          <div className="flex flex-col space-y-4">
+          <div className="flex flex-col space-y-4 items-center">
             {/* Profile */}
             <motion.button
               whileHover={{ scale: 1.1 }}
@@ -1365,96 +1546,6 @@ useEffect(() => {
                         Chasmos
                       </h1>
                     </div>
-
-                    {/* User Menu */}
-                    <div className="relative" ref={userMenuRef}>
-                      <motion.button
-                        onClick={() => setShowUserMenu(!showUserMenu)}
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.95 }}
-                        className={`p-2 rounded-lg ${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text} transition-all duration-200`}
-                        title="User Menu"
-                      >
-                        <MoreHorizontal className="w-5 h-5 transition-transform duration-200" />
-                      </motion.button>
-
-                      {/* Dropdown Menu */}
-                      <AnimatePresence>
-                        {showUserMenu && (
-                          <motion.div
-                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                            transition={{ duration: 0.2 }}
-                            className={`absolute right-0 top-12 w-48 rounded-lg shadow-lg z-50 overflow-hidden ${currentTheme.secondary} border ${currentTheme.border}`}
-                          >
-                            {/* Dropdown Options */}
-                            <div className={`py-2 relative z-10`}>
-                              {/* Profile */}
-                              <motion.button
-                                whileHover={{ scale: 0.97 }}
-                                className={`w-full px-4 py-3 text-left flex items-center space-x-3 ${currentTheme.hover} transition-colors duration-200`}
-                                onClick={() => {
-                                  setShowUserMenu(false);
-                                  setShowProfile(true);
-                                }}
-                              >
-                                <FaUser
-                                  className="w-5 h-5"
-                                  style={{ color: "#60A5FA" }}
-                                />
-                                <span
-                                  className={`text-sm ${currentTheme.text}`}
-                                >
-                                  Profile
-                                </span>
-                              </motion.button>
-
-                              {/* Settings */}
-                              <motion.button
-                                whileHover={{ scale: 0.97 }}
-                                className={`w-full px-4 py-3 text-left flex items-center space-x-3 ${currentTheme.hover} transition-colors duration-200`}
-                                onClick={() => {
-                                  setShowUserMenu(false);
-                                  setShowSettings(true);
-                                }}
-                              >
-                                <FaCog
-                                  className="w-5 h-5"
-                                  style={{ color: "#3B82F6" }}
-                                />
-                                <span
-                                  className={`text-sm ${currentTheme.text}`}
-                                >
-                                  Settings
-                                </span>
-                              </motion.button>
-
-                              {/* Divider */}
-                              <div
-                                className={`my-2 h-px ${currentTheme.border}`}
-                              ></div>
-
-                              {/* Logout */}
-                              <motion.button
-                                whileHover={{ scale: 0.97 }}
-                                className={`w-full px-4 py-3 text-left flex items-center space-x-3 ${currentTheme.hover} transition-colors duration-200 text-red-600 dark:text-red-400`}
-                                onClick={() => {
-                                  setShowUserMenu(false);
-                                  onLogout();
-                                }}
-                              >
-                                <FaSignOutAlt
-                                  className="w-5 h-5"
-                                  style={{ color: "#60A5FA" }}
-                                />
-                                <span className="text-sm">Logout</span>
-                              </motion.button>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
                   </div>
 
                   <div
@@ -1465,7 +1556,13 @@ useEffect(() => {
                     />
                     <input
                       type="text"
-                      placeholder="Search conversations..."
+                      placeholder={
+                        activeNavItem === "chats"
+                          ? "Search conversations..."
+                          : activeNavItem === "documents"
+                            ? "Search documents..."
+                            : "Search..."
+                      }
                       value={searchTerm}
                       onChange={handleSearchTermChange}
                       className={`w-full pl-10 pr-4 py-3 bg-transparent ${effectiveTheme.text} placeholder-gray-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300`}
@@ -1853,7 +1950,7 @@ useEffect(() => {
 
         {/* Main Chat Area */}
         <div
-          key={selectedContact?.id || "no-contact"}
+          key={selectedContact?.id || selectedDocument?._id || "no-contact"}
           className="flex-1 flex flex-col relative h-full overflow-hidden"
         >
           {showGroupCreation ? (
@@ -1880,9 +1977,25 @@ useEffect(() => {
               effectiveTheme={effectiveTheme}
               onClose={() => setShowSettings(false)}
             />
+          ) : isNewDocumentChat ? (
+            <NewDocumentUploader
+              onUploadComplete={(doc) => {
+                setSelectedDocument(doc);
+                setIsNewDocumentChat(false);
+              }}
+              onCancel={() => setIsNewDocumentChat(false)}
+              effectiveTheme={effectiveTheme}
+            />
+          ) : selectedDocument ? (
+            <DocumentChatWrapper
+              key={selectedDocument._id}
+              selectedDocument={selectedDocument}
+              setSelectedDocument={setSelectedDocument}
+              effectiveTheme={effectiveTheme}
+            />
           ) : selectedContact ? (
+            // CASE 3: Normal person/group chat
             <>
-              {/* Chat Header */}
               <ChatHeader
                 selectedContact={selectedContact}
                 effectiveTheme={effectiveTheme}
@@ -1896,35 +2009,20 @@ useEffect(() => {
                 onCloseChatSearch={closeChatSearch}
                 pinnedMessages={pinnedMessages}
               />
-
-              {/* Messages Area */}
               <div className="flex-1 overflow-hidden relative">
                 <MessagesArea
-                  key={
-                    selectedContact.id ||
-                    selectedContact._id ||
-                    selectedContact.email
-                  }
-                  filteredMessages={
-                    messages[
-                      selectedContact.id ||
-                        selectedContact._id ||
-                        selectedContact.email
-                    ] || []
-                  }
+                  key={selectedContact.id}
+                  filteredMessages={getMessagesForContact(
+                    selectedContact.id,
+                    chatSearchTerm
+                  )}
                   pinnedMessages={pinnedMessages}
                   onPinMessage={handlePinMessage}
                   effectiveTheme={effectiveTheme}
                   isTyping={isTyping}
-                  selectedContactId={
-                    selectedContact.id ||
-                    selectedContact._id ||
-                    selectedContact.email
-                  }
+                  selectedContactId={selectedContact.id}
                 />
               </div>
-
-              {/* Message Input */}
               <MessageInput
                 onSendMessage={handleSendMessageFromInput}
                 selectedContact={selectedContact}
@@ -1932,7 +2030,7 @@ useEffect(() => {
               />
             </>
           ) : !isMobileView ? (
-            /* Welcome Screen */
+            // CASE 4: Empty welcome screen
             <div className="flex-1 flex items-center justify-center p-4">
               <div className="text-center max-w-sm w-full">
                 <motion.div
@@ -1984,32 +2082,8 @@ useEffect(() => {
                 </motion.p>
               </div>
             </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center p-4">
-              <div className="text-center space-y-4">
-                <motion.h2
-                  initial={{ y: -20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ delay: 0.2, duration: 0.5 }}
-                  className={`text-2xl sm:text-3xl font-bold ${effectiveTheme.text} mb-4`}
-                  style={{
-                    fontFamily: "'Orbitron', sans-serif",
-                    letterSpacing: "2px",
-                  }}
-                >
-                  Welcome to Chasmos
-                </motion.h2>
-                <motion.p
-                  initial={{ y: 20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ delay: 0.4, duration: 0.5 }}
-                  className={`text-sm sm:text-base ${effectiveTheme.textSecondary}`}
-                >
-                  Select a conversation to start messaging
-                </motion.p>
-              </div>
-            </div>
-          )}
+          ) : // CASE 5: Default null (mobile or undefined)
+          null}
         </div>
       </div>
     </>

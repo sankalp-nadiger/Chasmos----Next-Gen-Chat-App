@@ -351,6 +351,15 @@ export const getAcceptedChatRequestsSentByUser = asyncHandler(
 );
 
 // Get list of received chat requests for current user
+// export const getReceivedChatRequests = asyncHandler(async (req, res) => {
+//   const user = await User.findById(req.user._id).select("receivedChatRequests");
+//   if (!user) {
+//     res.status(404);
+//     throw new Error("User not found");
+//   }
+
+//   res.status(200).json(user.receivedChatRequests || []);
+// });
 export const getReceivedChatRequests = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id).select("receivedChatRequests");
   if (!user) {
@@ -358,7 +367,23 @@ export const getReceivedChatRequests = asyncHandler(async (req, res) => {
     throw new Error("User not found");
   }
 
-  res.status(200).json(user.receivedChatRequests || []);
+  // Populate each sender's profile info
+  const detailedRequests = await Promise.all(
+    user.receivedChatRequests.map(async (reqItem) => {
+      const sender = await User.findOne({ email: reqItem.email }).select("name email avatar");
+      return {
+        email: reqItem.email,
+        name: sender?.name || reqItem.email.split("@")[0],
+        avatar:
+          sender?.avatar ||
+          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+        message: reqItem.message || "",
+        date: reqItem.date,
+      };
+    })
+  );
+
+  res.status(200).json(detailedRequests);
 });
 
 //Withdraw invite request
