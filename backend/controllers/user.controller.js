@@ -152,55 +152,150 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
 });
 
 // Send a chat/invite request to another user (adds sender's email to recipient.receivedChatRequests)
+// export const sendChatRequest = asyncHandler(async (req, res) => {
+//   const { recipientEmail } = req.body;
+
+//   if (!recipientEmail) {
+//     res.status(400);
+//     throw new Error("Please provide recipientEmail");
+//   }
+
+//   // Prevent sending request to self
+//   if (
+//     recipientEmail.toLowerCase().trim() === req.user.email.toLowerCase().trim()
+//   ) {
+//     res.status(400);
+//     throw new Error("You cannot send a chat request to yourself");
+//   }
+
+//   const recipient = await User.findOne({
+//     email: recipientEmail.toLowerCase().trim(),
+//   });
+//   if (!recipient) {
+//     res.status(404);
+//     throw new Error("Recipient user not found");
+//   }
+
+//   recipient.receivedChatRequests = recipient.receivedChatRequests || [];
+
+//   // Avoid duplicate requests
+//   if (recipient.receivedChatRequests.includes(req.user.email)) {
+//     res.status(400);
+//     throw new Error("Chat request already sent to this user");
+//   }
+
+//   recipient.receivedChatRequests.push(req.user.email);
+//   await recipient.save();
+
+//   // Also record the sent request for the sender
+//   const sender = await User.findById(req.user._id);
+//   if (sender) {
+//     sender.sentChatRequests = sender.sentChatRequests || [];
+//     if (!sender.sentChatRequests.includes(recipientEmail)) {
+//       sender.sentChatRequests.push(recipientEmail);
+//       await sender.save();
+//     }
+//   }
+
+//   res.status(200).json({ message: "Chat request sent" });
+// });
+
 export const sendChatRequest = asyncHandler(async (req, res) => {
-  const { recipientEmail } = req.body;
+  const { recipientEmail, inviteMessage } = req.body;
 
   if (!recipientEmail) {
     res.status(400);
     throw new Error("Please provide recipientEmail");
   }
 
-  // Prevent sending request to self
-  if (
-    recipientEmail.toLowerCase().trim() === req.user.email.toLowerCase().trim()
-  ) {
+  // Prevent sending to yourself
+  if (recipientEmail.toLowerCase().trim() === req.user.email.toLowerCase().trim()) {
     res.status(400);
     throw new Error("You cannot send a chat request to yourself");
   }
 
-  const recipient = await User.findOne({
-    email: recipientEmail.toLowerCase().trim(),
-  });
+  const recipient = await User.findOne({ email: recipientEmail.toLowerCase().trim() });
   if (!recipient) {
     res.status(404);
     throw new Error("Recipient user not found");
   }
 
-  recipient.receivedChatRequests = recipient.receivedChatRequests || [];
-
-  // Avoid duplicate requests
-  if (recipient.receivedChatRequests.includes(req.user.email)) {
+  // Prevent duplicate
+  const alreadySent = recipient.receivedChatRequests?.some(
+    (r) => r.email.toLowerCase() === req.user.email.toLowerCase()
+  );
+  if (alreadySent) {
     res.status(400);
     throw new Error("Chat request already sent to this user");
   }
 
-  recipient.receivedChatRequests.push(req.user.email);
+  // Save in recipient’s list
+  recipient.receivedChatRequests.push({
+    email: req.user.email,
+    message: inviteMessage || "",
+    date: new Date(),
+  });
   await recipient.save();
 
-  // Also record the sent request for the sender
+  // Save in sender’s list
   const sender = await User.findById(req.user._id);
   if (sender) {
-    sender.sentChatRequests = sender.sentChatRequests || [];
-    if (!sender.sentChatRequests.includes(recipientEmail)) {
-      sender.sentChatRequests.push(recipientEmail);
-      await sender.save();
-    }
+    sender.sentChatRequests.push({
+      email: recipientEmail,
+      message: inviteMessage || "",
+      date: new Date(),
+    });
+    await sender.save();
   }
 
-  res.status(200).json({ message: "Chat request sent" });
+  res.status(200).json({ message: "Chat request sent successfully" });
 });
 
 // Accept a received chat request: remove the sender's email from current user's receivedChatRequests
+// export const acceptChatRequest = asyncHandler(async (req, res) => {
+//   const { senderEmail } = req.body;
+
+//   if (!senderEmail) {
+//     res.status(400);
+//     throw new Error("Please provide senderEmail");
+//   }
+
+//   const receiver = await User.findById(req.user._id); // user who accepts
+//   const sender = await User.findOne({ email: senderEmail.toLowerCase().trim() });
+
+//   if (!sender || !receiver) {
+//     res.status(404);
+//     throw new Error("Sender or receiver not found");
+//   }
+
+//   //  Remove the sender's email from receiver's received requests
+//   receiver.receivedChatRequests = receiver.receivedChatRequests.filter(
+//     (email) => email !== senderEmail
+//   );
+//   await receiver.save();
+
+//   //  Update sender’s records
+//   sender.sentChatRequests = sender.sentChatRequests || [];
+//   sender.acceptedChatRequests = sender.acceptedChatRequests || [];
+
+//   // Remove receiver from sender’s sentChatRequests
+//   sender.sentChatRequests = sender.sentChatRequests.filter(
+//     (email) => email !== receiver.email
+//   );
+
+//   // Add receiver’s email (string only)
+//   if (!sender.acceptedChatRequests.includes(receiver.email)) {
+//     sender.acceptedChatRequests.push(receiver.email);
+//   }
+
+//   await sender.save();
+
+  
+//   res.status(200).json({
+//     message: "Chat request accepted",
+//     receivedChatRequests: receiver.receivedChatRequests,
+//   });
+// });
 export const acceptChatRequest = asyncHandler(async (req, res) => {
   const { senderEmail } = req.body;
 
@@ -209,7 +304,7 @@ export const acceptChatRequest = asyncHandler(async (req, res) => {
     throw new Error("Please provide senderEmail");
   }
 
-  const receiver = await User.findById(req.user._id); // user who accepts
+  const receiver = await User.findById(req.user._id);
   const sender = await User.findOne({ email: senderEmail.toLowerCase().trim() });
 
   if (!sender || !receiver) {
@@ -217,29 +312,23 @@ export const acceptChatRequest = asyncHandler(async (req, res) => {
     throw new Error("Sender or receiver not found");
   }
 
-  //  Remove the sender's email from receiver's received requests
+  // Remove sender from receiver’s received list
   receiver.receivedChatRequests = receiver.receivedChatRequests.filter(
-    (email) => email !== senderEmail
+    (r) => r.email.toLowerCase() !== senderEmail.toLowerCase()
   );
   await receiver.save();
 
-  //  Update sender’s records
-  sender.sentChatRequests = sender.sentChatRequests || [];
-  sender.acceptedChatRequests = sender.acceptedChatRequests || [];
-
-  // Remove receiver from sender’s sentChatRequests
+  // Remove receiver from sender’s sent list
   sender.sentChatRequests = sender.sentChatRequests.filter(
-    (email) => email !== receiver.email
+    (r) => r.email.toLowerCase() !== receiver.email.toLowerCase()
   );
 
-  // Add receiver’s email (string only)
   if (!sender.acceptedChatRequests.includes(receiver.email)) {
     sender.acceptedChatRequests.push(receiver.email);
   }
 
   await sender.save();
 
-  
   res.status(200).json({
     message: "Chat request accepted",
     receivedChatRequests: receiver.receivedChatRequests,
@@ -272,6 +361,44 @@ export const getReceivedChatRequests = asyncHandler(async (req, res) => {
   res.status(200).json(user.receivedChatRequests || []);
 });
 
+//Withdraw invite request
+// export const withdrawChatRequest = asyncHandler(async (req, res) => {
+//   const { recipientEmail } = req.body;
+
+//   if (!recipientEmail) {
+//     res.status(400);
+//     throw new Error("Please provide recipientEmail");
+//   }
+
+//   const recipient = await User.findOne({
+//     email: recipientEmail.toLowerCase().trim(),
+//   });
+//   if (!recipient) {
+//     res.status(404);
+//     throw new Error("Recipient not found");
+//   }
+
+//   // Remove sender’s email from recipient’s receivedChatRequests
+//   recipient.receivedChatRequests = (
+//     recipient.receivedChatRequests || []
+//   ).filter(
+//     (email) =>
+//       email.toLowerCase().trim() !== req.user.email.toLowerCase().trim()
+//   );
+//   await recipient.save();
+
+//   // Remove recipient’s email from sender’s sentChatRequests
+//   const sender = await User.findById(req.user._id);
+//   if (sender) {
+//     sender.sentChatRequests = (sender.sentChatRequests || []).filter(
+//       (email) =>
+//         email.toLowerCase().trim() !== recipientEmail.toLowerCase().trim()
+//     );
+//     await sender.save();
+//   }
+
+//   res.status(200).json({ message: "Chat request withdrawn successfully" });
+// });
 export const withdrawChatRequest = asyncHandler(async (req, res) => {
   const { recipientEmail } = req.body;
 
@@ -280,29 +407,21 @@ export const withdrawChatRequest = asyncHandler(async (req, res) => {
     throw new Error("Please provide recipientEmail");
   }
 
-  const recipient = await User.findOne({
-    email: recipientEmail.toLowerCase().trim(),
-  });
+  const recipient = await User.findOne({ email: recipientEmail.toLowerCase().trim() });
   if (!recipient) {
     res.status(404);
     throw new Error("Recipient not found");
   }
 
-  // Remove sender’s email from recipient’s receivedChatRequests
-  recipient.receivedChatRequests = (
-    recipient.receivedChatRequests || []
-  ).filter(
-    (email) =>
-      email.toLowerCase().trim() !== req.user.email.toLowerCase().trim()
+  recipient.receivedChatRequests = recipient.receivedChatRequests.filter(
+    (r) => r.email.toLowerCase() !== req.user.email.toLowerCase()
   );
   await recipient.save();
 
-  // Remove recipient’s email from sender’s sentChatRequests
   const sender = await User.findById(req.user._id);
   if (sender) {
-    sender.sentChatRequests = (sender.sentChatRequests || []).filter(
-      (email) =>
-        email.toLowerCase().trim() !== recipientEmail.toLowerCase().trim()
+    sender.sentChatRequests = sender.sentChatRequests.filter(
+      (r) => r.email.toLowerCase() !== recipientEmail.toLowerCase()
     );
     await sender.save();
   }

@@ -9,6 +9,7 @@ import messageRoutes from "./routes/message.routes.js";
 import taskRoutes from "./routes/task.routes.js";
 import sprintRoutes from "./routes/sprint.routes.js";
 import contactRoutes from "./routes/contact.routes.js";
+import documentRoutes from "./routes/document.route.js";
 //import { notFound, errorHandler } from "./middleware/auth.middleware.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
 import cors from 'cors';
@@ -45,7 +46,7 @@ app.use("/api/message", messageRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/sprints", sprintRoutes); 
 app.use("/api/contacts", contactRoutes); // contact routes
-
+app.use("/api/document", documentRoutes);
 // Error Handling middlewares
 app.use(notFound);
 app.use(errorHandler);

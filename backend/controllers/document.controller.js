@@ -1,288 +1,219 @@
 import asyncHandler from "express-async-handler";
 import Document from "../models/document.model.js";
-import { supabase } from "../config/supabase.js";
-import axios from "axios";
+import supabase from "../utils/supabaseHelper.js";
+import { v4 as uuidv4 } from "uuid";
 
-const uploadToSupabase = async (file, userId) => {
-  const sanitizedFileName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-  const fileExtension = sanitizedFileName.split('.').pop();
-  const fileName = `documents/${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExtension}`;
-  
-  const { data, error } = await supabase.storage
-    .from('documents')
-    .upload(fileName, file.buffer, {
-      contentType: file.mimetype,
-      upsert: false
-    });
-
-  if (error) throw error;
-
-  const { data: { publicUrl } } = supabase.storage
-    .from('documents')
-    .getPublicUrl(fileName);
-
-  return {
-    fileUrl: publicUrl,
-    filePath: fileName,
-    fileType: file.mimetype.split('/')[1] || 'file',
-    mimeType: file.mimetype
-  };
-};
-
-const deleteFromSupabase = async (filePath) => {
-  if (!filePath) return;
-  
-  const { error } = await supabase.storage
-    .from('documents')
-    .remove([filePath]);
-
-  if (error) {
-    console.error('Error deleting file:', error);
-  }
-};
-
-const processWithFlaskAI = async (question, context = '', documentUrl = null) => {
-  try {
-    const formData = new FormData();
-    formData.append('question', question);
-    formData.append('context', context);
-    if (documentUrl) {
-      formData.append('document_url', documentUrl);
-    }
-
-    const response = await axios.post(`http://localhost:${process.env.FLASK_PORT || 5001}/process-document`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      timeout: 45000
-    });
-
-    return response.data;
-  } catch (error) {
-    if (error.code === 'ECONNREFUSED') {
-      throw new Error('AI service is unavailable. Please ensure Flask server is running.');
-    } else if (error.response?.data?.error) {
-      throw new Error(`AI processing error: ${error.response.data.error}`);
-    } else {
-      throw new Error(`AI service error: ${error.message}`);
-    }
-  }
-};
 
 export const uploadDocument = asyncHandler(async (req, res) => {
-  if (!req.file) {
-    res.status(400);
-    throw new Error("Please upload a file");
-  }
-
-  const { question, emotion = 'neutral', depth = 'detailed', clarity = 'clear' } = req.body;
-
-  const uploadResult = await uploadToSupabase(req.file, req.user._id);
-
-  const document = await Document.create({
-    fileUrl: uploadResult.fileUrl,
-    filePath: uploadResult.filePath,
-    fileType: uploadResult.fileType,
-    originalName: req.file.originalname,
-    fileSize: req.file.size,
-    mimeType: req.file.mimetype,
-    settings: { emotion, depth, clarity },
-    context: "",
-    questions: [],
-    processingStatus: "pending",
-    isProcessed: false,
-    createdBy: req.user._id
-  });
-
-  let aiResult = null;
-  if (question) {
-    document.processingStatus = "processing";
-    await document.save();
-
-    try {
-      aiResult = await processWithFlaskAI(question, "", uploadResult.fileUrl);
-      
-      document.context = aiResult.updated_context || "";
-      document.questions.push({
-        question,
-        answer: aiResult.response,
-        askedAt: new Date()
-      });
-
-      if (aiResult.extracted_text) {
-        document.ocrData = {
-          extracted_text: aiResult.extracted_text,
-          word_count: aiResult.extracted_text.split(/\s+/).length,
-          character_count: aiResult.extracted_text.length,
-          method: "llm_vision"
-        };
-      }
-
-      document.processingStatus = "completed";
-      document.isProcessed = true;
-    } catch (aiError) {
-      document.processingStatus = "failed";
-      document.questions.push({
-        question,
-        answer: `Error: ${aiError.message}`,
-        askedAt: new Date()
-      });
-    }
-  }
-
-  await document.save();
-
-  const populatedDocument = await Document.findById(document._id)
-    .populate("createdBy", "name email avatar");
-
-  res.status(201).json({
-    success: true,
-    message: "Document uploaded successfully",
-    response: aiResult?.response,
-    document: populatedDocument
-  });
-});
-
-export const processDocument = asyncHandler(async (req, res) => {
-  const { question } = req.body;
-  const { documentId } = req.params;
-
-  if (!question) {
-    res.status(400);
-    throw new Error("Question is required");
-  }
-
-  const document = await Document.findById(documentId);
-  
-  if (!document) {
-    res.status(404);
-    throw new Error("Document not found");
-  }
-
-  if (document.createdBy.toString() !== req.user._id.toString()) {
-    res.status(403);
-    throw new Error("Not authorized to access this document");
-  }
-
-  document.processingStatus = "processing";
-  await document.save();
-
   try {
-    const aiResult = await processWithFlaskAI(question, document.context, document.fileUrl);
+    const { id: userId } = req.user; // assuming JWT middleware sets req.user
+    const file = req.file;
 
-    document.context = aiResult.updated_context || document.context;
-    document.questions.push({
-      question,
-      answer: aiResult.response,
-      askedAt: new Date()
-    });
-
-    if (aiResult.extracted_text && !document.ocrData) {
-      document.ocrData = {
-        extracted_text: aiResult.extracted_text,
-        word_count: aiResult.extracted_text.split(/\s+/).length,
-        character_count: aiResult.extracted_text.length,
-        method: "llm_vision"
-      };
+    if (!file) {
+      return res.status(400).json({ message: "No file uploaded" });
     }
 
-    document.processingStatus = "completed";
-    document.isProcessed = true;
+    const uniqueFileName = `${Date.now()}_${file.originalname}`;
+    const bucketName = "documents";
+    const filePath = `${uuidv4()}/${uniqueFileName}`;
 
-    await document.save();
+    console.log(`📁 Uploading to bucket: ${bucketName}`);
 
-    const updatedDocument = await Document.findById(document._id)
-      .populate("createdBy", "name email avatar");
+    // 🧩 Upload file to Supabase storage
+    const { data, error } = await supabase.storage
+      .from(bucketName)
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false,
+      });
 
-    res.status(200).json({
-      success: true,
-      response: aiResult.response,
-      document: updatedDocument
+    if (error) {
+      console.error("🔥 Supabase upload error:", error.message);
+      return res.status(500).json({ message: "Supabase upload failed" });
+    }
+
+    // ✅ Generate public URL
+    const { data: publicData } = supabase.storage
+      .from(bucketName)
+      .getPublicUrl(filePath);
+
+    const fileUrl = publicData.publicUrl;
+    console.log("✅ Uploaded file URL:", fileUrl);
+
+    // 🧾 Save document metadata to MongoDB
+    const newDocument = new Document({
+      fileUrl,
+      filePath,
+      fileType: file.mimetype.split("/")[1],
+      originalName: file.originalname,
+      fileSize: file.size,
+      mimeType: file.mimetype,
+      createdBy: userId,
+      settings: {
+        emotion: "neutral",
+        depth: "detailed",
+        clarity: "clear",
+      },
     });
-  } catch (error) {
-    document.processingStatus = "failed";
-    document.questions.push({
-      question,
-      answer: `Error: ${error.message}`,
-      askedAt: new Date()
+
+    const savedDoc = await newDocument.save();
+    console.log("📄 Document metadata saved to MongoDB");
+
+    // ✅ Convert to plain object to ensure timestamps are included
+    const docData = savedDoc.toObject({ getters: true, virtuals: false });
+
+    console.log(
+      "🕓 Saved document timestamps:",
+      docData.createdAt,
+      docData.updatedAt
+    );
+
+    // ✅ Send full document to frontend
+    return res.status(200).json({
+      message: "Document uploaded successfully",
+      document: docData,
     });
-    await document.save();
-    
-    res.status(500);
-    throw new Error(error.message);
+  } catch (err) {
+    console.error("🔥 uploadDocument error:", err);
+    return res.status(500).json({
+      message: "Document upload failed",
+      error: err.message,
+    });
   }
 });
 
+
+// 🧩 Ask a question on an existing document
+export const processDocument = asyncHandler(async (req, res) => {
+  const { documentId } = req.params;
+  const { question } = req.body;
+  const userId = req.user._id;
+
+  const doc = await Document.findOne({ _id: documentId, createdBy: userId });
+  if (!doc) {
+    res.status(404);
+    throw new Error("Document not found or unauthorized");
+  }
+
+  // Send question to Flask AI server
+  const response = await axios.post(`${process.env.FLASK_SERVER_URL}/process`, {
+    file_url: doc.fileUrl,
+    question,
+  });
+
+  const aiAnswer = response.data.answer || "No answer received from AI";
+
+  // Append Q&A to document history
+  doc.questions.push({ question, answer: aiAnswer });
+  await doc.save();
+
+  res.status(200).json({ question, answer: aiAnswer });
+});
+
+// 🧩 Get all documents for the logged-in user (chat history list)
 export const getUserDocuments = asyncHandler(async (req, res) => {
-  const documents = await Document.find({ createdBy: req.user._id })
-    .populate("createdBy", "name email avatar")
+  const userId = req.user._id;
+
+  const documents = await Document.find({ createdBy: userId })
+    .select("originalName questions updatedAt createdAt")
     .sort({ updatedAt: -1 });
 
-  res.status(200).json({
-    success: true,
-    documents
-  });
+  const result = documents.map((doc) => ({
+    _id: doc._id,
+    fileName: doc.originalName,
+    questionCount: doc.questions?.length || 0,
+    updatedAt: doc.updatedAt, // ✅ renamed key
+    lastQuestion: doc.questions?.[doc.questions.length - 1]?.question || null,
+    lastAnswer: doc.questions?.[doc.questions.length - 1]?.answer || null,
+  }));
+
+  res.status(200).json(result);
 });
 
+
+// 🧩 Get one document with its full chat history
 export const getDocument = asyncHandler(async (req, res) => {
-  const document = await Document.findById(req.params.documentId)
-    .populate("createdBy", "name email avatar");
+  const { documentId } = req.params;
+  const userId = req.user._id;
+
+  const document = await Document.findOne({ _id: documentId, createdBy: userId })
+    .select("originalName fileUrl questions createdAt updatedAt");
 
   if (!document) {
     res.status(404);
-    throw new Error("Document not found");
+    throw new Error("Document not found or unauthorized");
   }
 
-  if (document.createdBy._id.toString() !== req.user._id.toString()) {
-    res.status(403);
-    throw new Error("Not authorized to access this document");
-  }
-
-  res.status(200).json({
-    success: true,
-    document
-  });
+  res.status(200).json(document);
 });
 
+// 🧩 Delete a document and its file from Supabase
 export const deleteDocument = asyncHandler(async (req, res) => {
-  const document = await Document.findById(req.params.documentId);
+  const { documentId } = req.params;
+  const userId = req.user._id;
 
+  const document = await Document.findOne({ _id: documentId, createdBy: userId });
   if (!document) {
     res.status(404);
-    throw new Error("Document not found");
+    throw new Error("Document not found or unauthorized");
   }
 
-  if (document.createdBy.toString() !== req.user._id.toString()) {
-    res.status(403);
-    throw new Error("Not authorized to delete this document");
-  }
+  await deleteFromSupabase(document.fileUrl);
+  await document.deleteOne();
 
-  await deleteFromSupabase(document.filePath);
-
-  await Document.findByIdAndDelete(req.params.documentId);
-
-  res.status(200).json({
-    success: true,
-    message: "Document deleted successfully"
-  });
+  res.status(200).json({ message: "Document deleted successfully" });
 });
 
+// 🧩 Test Flask AI connection
 export const testFlaskConnection = asyncHandler(async (req, res) => {
   try {
-    const response = await axios.get(`http://localhost:${process.env.FLASK_PORT || 5001}/health`, {
-      timeout: 10000
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Flask AI server is running",
-      data: response.data
-    });
+    const response = await axios.get(`${process.env.FLASK_SERVER_URL}/ping`);
+    res.status(200).json({ message: "Flask server reachable", data: response.data });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Flask AI server is not reachable",
-      error: error.message
-    });
+    res.status(500).json({ message: "Flask server not reachable", error: error.message });
   }
+});
+
+// 🆕 NEW: Get all previously chatted documents
+export const getAllDocumentChats = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+
+  const docs = await Document.find({ createdBy: userId })
+    .select("originalName questions updatedAt createdAt")
+    .sort({ updatedAt: -1 });
+
+  const history = docs.map((doc) => ({
+    _id: doc._id,
+    fileName: doc.originalName,
+    lastQuestion: doc.questions?.[doc.questions.length - 1]?.question || null,
+    lastAnswer: doc.questions?.[doc.questions.length - 1]?.answer || null,
+    questionCount: doc.questions?.length || 0,
+    updatedAt: doc.updatedAt,
+  }));
+
+  res.status(200).json(history);
+});
+
+// 🆕 NEW: Get full chat for a specific document
+export const getDocumentChatById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user._id;
+
+  const doc = await Document.findOne({ _id: id, createdBy: userId }).select(
+    "originalName fileUrl questions createdAt updatedAt"
+  );
+
+  if (!doc) {
+    res.status(404);
+    throw new Error("Document not found or unauthorized");
+  }
+
+  res.status(200).json({
+    _id: doc._id,
+    fileName: doc.originalName,
+    fileUrl: doc.fileUrl,
+    questions: doc.questions,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  });
 });

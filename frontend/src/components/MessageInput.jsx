@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Send, Paperclip, Image, FileText, Camera, MapPin, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -199,4 +201,4 @@ const MessageInput = React.memo(({
   return prevProps.selectedContact?.id === nextProps.selectedContact?.id;
 });
 
-export default MessageInput;
+export default MessageInput; 
