@@ -454,7 +454,7 @@ const ChattingPage = ({ onLogout }) => {
   const [showChatSearch, setShowChatSearch] = useState(false);
   const [showThreeDotsMenu, setShowThreeDotsMenu] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState({});
-  
+
   const [selectedDocument, setSelectedDocument] = useState(null);
 
   const [isNewDocumentChat, setIsNewDocumentChat] = useState(false);
@@ -486,96 +486,153 @@ const ChattingPage = ({ onLogout }) => {
 
   // Fetch both received and accepted requests
   useEffect(() => {
-  const fetchRequests = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        console.error("No token found — user might not be logged in.");
-        return;
+    const fetchRequests = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) {
+          console.error("No token found — user might not be logged in.");
+          return;
+        }
+
+        // 1️⃣ Fetch received chat requests
+        const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const receivedData = await resReceived.json();
+        console.log("Received Emails:", receivedData);
+        const receivedEmails = Array.isArray(receivedData) ? receivedData : [];
+
+        // 2️⃣ Fetch accepted chat requests
+        const resAccepted = await fetch(
+          `${API_BASE_URL}/api/user/requests/accepted`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        const acceptedData = await resAccepted.json();
+        const acceptedEmails = Array.isArray(acceptedData) ? acceptedData : [];
+
+        // 3️⃣ Helper: fetch user profiles by email
+        const fetchUsersByEmails = async (emails) => {
+          if (!Array.isArray(emails) || emails.length === 0) return [];
+          const results = await Promise.all(
+            emails.map(async (email) => {
+              const res = await fetch(
+                `${API_BASE_URL}/api/user?search=${email}`,
+                {
+                  headers: { Authorization: `Bearer ${token}` },
+                }
+              );
+              const data = await res.json();
+              return Array.isArray(data) ? data[0] : data; // handle array response
+            })
+          );
+          return results.filter(Boolean);
+        };
+
+        // 4️⃣ Fetch both user lists
+        const [receivedUsers, acceptedUsers] = await Promise.all([
+          fetchUsersByEmails(receivedEmails),
+          fetchUsersByEmails(acceptedEmails),
+        ]);
+
+        // 5️⃣ Update states
+        setReceivedChats(receivedUsers);
+        setAcceptedChats(acceptedUsers);
+      } catch (err) {
+        console.error("Error fetching chat requests:", err);
       }
+    };
 
-      // 1️⃣ Fetch received chat requests (already enriched with name, avatar, message)
-      const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const receivedData = await resReceived.json();
-      console.log("✅ Received Requests:", receivedData);
-
-      const receivedList = Array.isArray(receivedData) ? receivedData : [];
-
-      // 2️⃣ Fetch accepted chat requests (we’ll enrich backend similarly)
-      const resAccepted = await fetch(`${API_BASE_URL}/api/user/accepted`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const acceptedData = await resAccepted.json();
-      console.log("✅ Accepted Chats:", acceptedData);
-
-      const acceptedList = Array.isArray(acceptedData) ? acceptedData : [];
-
-      // 3️⃣ Update local state directly
-      setReceivedChats(receivedList);
-      setAcceptedChats(acceptedList);
-    } catch (err) {
-      console.error("Error fetching chat requests:", err);
-    }
-  };
-
-  fetchRequests();
-}, []);
+    fetchRequests();
+  }, []);
 
   //After chatting with accepted chats
   const handleOpenChat = (chat) => {
     setSelectedContact(chat); // just open the chat
   };
 
-
-const handleAcceptChat = async (senderEmail) => {
-};
-
-
-
-//Fetch all accepted chats sent by sender under his Accepted chat section
-useEffect(() => {
-  const fetchAcceptedChats = async () => {
+  //handle on clicking accept button
+  // ✅ Accept Chat Request
+  const handleAcceptChat = async (senderEmail) => {
     try {
       const token = localStorage.getItem("token");
+      if (!token) throw new Error("No token found.");
 
-      // Step 1️⃣ — Get list of accepted emails from backend
-      const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
+      const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
+        method: "PUT",
         headers: {
+          "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({ senderEmail }),
       });
-      const acceptedEmails = await res.json(); // e.g. ["john@gmail.com", "priya@gmail.com"]
 
-      if (!acceptedEmails.length) {
-        setAcceptedChats([]);
-        return;
-      }
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(data.message || "Failed to accept chat request");
 
-      // Step 2️⃣ — Fetch all users, filter only accepted ones
-      const allUsersRes = await fetch(`${API_BASE_URL}/api/user`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const allUsers = await allUsersRes.json();
+      // ✅ Remove the accepted chat from 'Received' section
+      setReceivedChats((prev) => prev.filter((r) => r.email !== senderEmail));
 
-      // Step 3️⃣ — Filter users whose email is in accepted list
-      const acceptedUsers = allUsers.filter((user) =>
-        acceptedEmails.includes(user.email)
-      );
+      console.log("✅ Chat request accepted! Sender will see it.");
 
-      setAcceptedChats(acceptedUsers);
-    } catch (err) {
-      console.error("Error fetching accepted chats:", err);
+      // ✅ Optionally refresh accepted chats after accepting
+      fetchAcceptedChats();
+    } catch (error) {
+      console.error("❌ Error accepting chat request:", error);
     }
   };
 
-  fetchAcceptedChats();
-}, []);
+  // Fetch accepted chats on component mount
+  // Fetch all accepted chats
+  useEffect(() => {
+    const fetchAcceptedChats = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) return console.error("No token found — user not logged in");
+
+        // Step 1️⃣ — Get list of accepted emails
+        const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const acceptedEmails = await res.json();
+        console.log("✅ Accepted Chats:", acceptedEmails);
+
+        if (!Array.isArray(acceptedEmails) || acceptedEmails.length === 0) {
+          setAcceptedChats([]);
+          return;
+        }
+
+        // Step 2️⃣ — Fetch full user profiles for each accepted email
+        const users = await Promise.all(
+          acceptedEmails.map(async (email) => {
+            const resUser = await fetch(
+              `${API_BASE_URL}/api/user?search=${email}`,
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            );
+            const data = await resUser.json();
+            return Array.isArray(data) ? data[0] : data; // sometimes backend sends array
+          })
+        );
+
+        // Step 3️⃣ — Filter out invalid responses
+        const validUsers = users.filter(Boolean);
+        setAcceptedChats(validUsers);
+      } catch (err) {
+        console.error("Error fetching accepted chats:", err);
+      }
+    };
+
+    fetchAcceptedChats();
+  }, []);
+
+  // ✅ Run once when the component mounts (and on mobile view change if needed)
+  // useEffect(() => {
+  //   fetchAcceptedChats();
+  // }, [isMobileView]);
 
   // Fetch contacts from APi
   const handleContactSelect = useCallback(
@@ -992,9 +1049,8 @@ useEffect(() => {
   );
 
   // Ref for chat search container (click-outside functionality)
- 
+
   // Fetch contacts from APi
- 
 
   const [documentChats, setDocumentChats] = useState([]);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -1168,23 +1224,6 @@ useEffect(() => {
         document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [showChatSearch, showThreeDotsMenu, showFloatingMenu, showUserMenu]);
-
- 
-
- 
-
- 
-
- 
-
-
-
-
-
-
-
-
- 
 
   const [cosmicTheme, setCosmicTheme] = useState(() =>
     getTimeBasedCosmicTheme()
@@ -1379,7 +1418,7 @@ useEffect(() => {
         {/* Vertical Navigation Bar */}
         <div
           className={`w-16 z-50 ${effectiveTheme.secondary} border-r ${effectiveTheme.border} flex flex-col justify-between py-4`}
-          style={{ borderRightWidth: '1px' }}
+          style={{ borderRightWidth: "1px" }}
         >
           {/* Top Navigation Items */}
           <div className="flex flex-col space-y-4 items-center">
@@ -1572,243 +1611,257 @@ useEffect(() => {
 
                 {/* Chat Sidebar Area */}
                 <div className="flex-1 flex flex-col">
-  {/* 🔔 Alerts Section: Chat Requests & Accepted */}
-  <div>
-    {/* 🔹 Chat Requests Dropdown */}
-    <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
-      <button
-        onClick={() => setShowReceivedDropdown(!showReceivedDropdown)}
-        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-          effectiveTheme.hover
-            ? effectiveTheme.hover
-            : "hover:bg-blue-100 dark:hover:bg-blue-900"
-        } transition-colors text-blue-800 dark:text-blue-200 font-medium`}
-      >
-        <span className="flex items-center gap-2 text-gray-200">
-          <img
-            src={chatReqIcon}
-            alt="Chat Requests"
-            className="w-4 h-4"
-          />
-          Chat Requests Received ({receivedChats.length})
-        </span>
-        {showReceivedDropdown ? (
-          <ChevronUp className="w-4 h-4" />
-        ) : (
-          <ChevronDown className="w-4 h-4" />
-        )}
-      </button>
-
-      {showReceivedDropdown && (
-        <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
-          {receivedChats.length > 0 ? (
-            receivedChats.map((req) => (
-              <div
-                key={req._id || req.email}
-                className={`flex justify-between items-center p-2 rounded-md ${
-                  effectiveTheme.hover
-                    ? effectiveTheme.hover
-                    : "hover:bg-gray-100 dark:hover:bg-gray-700"
-                } transition-colors`}
-              >
-                {/* Left side: profile + info */}
-                <div className="flex items-center gap-3 flex-1">
-                  <img
-                    src={
-                      req.avatar ||
-                      "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-                    }
-                    alt={req.name || "User"}
-                    className="w-10 h-10 rounded-full object-cover"
-                  />
+                  {/*  Alerts Section: Chat Requests & Accepted */}
                   <div>
-                    <p className="font-medium text-gray-100 truncate">
-                      {req.name || req.email?.split("@")[0] || "Unknown User"}
-                    </p>
-                    {/* ✅ Show initial invite message */}
-                    {req.message ? (
-                      <p className="text-sm text-gray-400 italic truncate">
-                        “{req.message}”
-                      </p>
-                    ) : (
-                      <p className="text-sm text-gray-500 truncate">
-                        No message
-                      </p>
+                    {/* 🔹 Chat Requests Dropdown */}
+                    <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
+                      <button
+                        onClick={() =>
+                          setShowReceivedDropdown(!showReceivedDropdown)
+                        }
+                        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
+                          effectiveTheme.hover
+                            ? effectiveTheme.hover
+                            : "hover:bg-blue-100 dark:hover:bg-blue-900"
+                        } transition-colors text-blue-800 dark:text-blue-200 font-medium`}
+                      >
+                        <span className="flex items-center gap-2 text-gray-200">
+                          <img
+                            src={chatReqIcon}
+                            alt="Chat Requests"
+                            className="w-4 h-4"
+                          />
+                          Chat Requests Received ({receivedChats.length})
+                        </span>
+                        {showReceivedDropdown ? (
+                          <ChevronUp className="w-4 h-4" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4" />
+                        )}
+                      </button>
+
+                      {showReceivedDropdown && (
+                        <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
+                          {receivedChats.length > 0 ? (
+                            receivedChats.map((req) => (
+                              <div
+                                key={req._id || req.email}
+                                className={`flex justify-between items-center p-2 rounded-md ${
+                                  effectiveTheme.hover
+                                    ? effectiveTheme.hover
+                                    : "hover:bg-gray-100 dark:hover:bg-gray-700"
+                                } transition-colors`}
+                              >
+                                {/* Left side: profile + info */}
+                                <div className="flex items-center gap-3 flex-1">
+                                  <img
+                                    src={
+                                      req.avatar ||
+                                      "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+                                    }
+                                    alt={req.name || "User"}
+                                    className="w-10 h-10 rounded-full object-cover"
+                                  />
+                                  <div>
+                                    <p className="font-medium text-gray-100 truncate">
+                                      {req.name ||
+                                        req.email?.split("@")[0] ||
+                                        "Unknown User"}
+                                    </p>
+                                    {/*  Show initial invite message */}
+                                    {req.message ? (
+                                      <p className="text-sm text-gray-400 truncate">
+                                        “{req.message}”
+                                      </p>
+                                    ) : (
+                                      <p className="text-sm text-gray-500 truncate">
+                                        No message
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Right side: Accept button */}
+                                <button
+                                  onClick={() => handleAcceptChat(req.email)}
+                                  className="px-3 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition"
+                                >
+                                  Accept
+                                </button>
+                              </div>
+                            ))
+                          ) : (
+                            <div
+                              className={`w-full flex items-center px-4 py-3 rounded-lg ${
+                                effectiveTheme.searchBg
+                                  ? effectiveTheme.searchBg
+                                  : "bg-gray-100 dark:bg-gray-800"
+                              } text-gray-400`}
+                            >
+                              No new requests
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 🔹 Accepted Chats Dropdown */}
+                    <div className="rounded-md justify-between items-center px-2 py-1">
+                      <button
+                        onClick={() =>
+                          setShowAcceptedDropdown(!showAcceptedDropdown)
+                        }
+                        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
+                          effectiveTheme.hover
+                            ? effectiveTheme.hover
+                            : "hover:bg-green-100 dark:hover:bg-green-900"
+                        } transition-colors text-green-800 dark:text-green-200 font-medium`}
+                      >
+                        <span className="flex items-center gap-2 text-gray-200">
+                          <img
+                            src={chatAcceptIcon}
+                            alt="Chats Accepted"
+                            className="w-4 h-4"
+                          />
+                          Chats Accepted ({acceptedChats?.length || 0})
+                        </span>
+                        {showAcceptedDropdown ? (
+                          <ChevronUp className="w-4 h-4" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4" />
+                        )}
+                      </button>
+
+                      {showAcceptedDropdown && (
+                        <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
+                          {acceptedChats && acceptedChats.length > 0 ? (
+                            acceptedChats.map((chat, index) => (
+                              <motion.div
+                                key={
+                                  chat._id || chat.email || `accepted-${index}`
+                                } // ✅ ensures unique key
+                                whileHover={{ scale: 0.98 }}
+                                className={`flex justify-between items-center p-2 rounded-md ${
+                                  effectiveTheme.hover
+                                    ? effectiveTheme.hover
+                                    : "hover:bg-gray-100 dark:hover:bg-gray-700"
+                                } transition-colors`}
+                              >
+                                {/* Left side: profile + info */}
+                                <div className="flex items-center gap-3 flex-1 overflow-hidden">
+                                  <div className="relative flex-shrink-0">
+                                    <img
+                                      src={
+                                        chat.avatar ||
+                                        "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+                                      }
+                                      alt={chat.name || chat.email || "User"}
+                                      className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
+                                    />
+                                  </div>
+
+                                  <div className="overflow-hidden">
+                                    <p className="font-medium text-gray-100 truncate">
+                                      {/* ✅ Fixed name handling */}
+                                      {chat.name?.trim() &&
+                                      chat.name !== "Unknown User"
+                                        ? chat.name
+                                        : chat.email?.split("@")[0] ||
+                                          "Unknown User"}
+                                    </p>
+
+                                    {/* ✅ WhatsApp-like normal message preview */}
+                                    {chat.message ? (
+                                      <p className="text-sm text-gray-300 truncate">
+                                        {chat.message}
+                                      </p>
+                                    ) : (
+                                      <p className="text-sm text-gray-500 truncate">
+                                        No message
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Right side: open chat button */}
+                                <motion.button
+                                  whileHover={{ scale: 0.95 }}
+                                  onClick={() => handleOpenChat(chat)}
+                                  className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
+                                  title="Open Chat"
+                                >
+                                  <MessageCircle className="w-5 h-5 text-white" />
+                                </motion.button>
+                              </motion.div>
+                            ))
+                          ) : (
+                            <div
+                              className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
+                                effectiveTheme.searchBg
+                                  ? effectiveTheme.searchBg
+                                  : "bg-gray-100 dark:bg-gray-800"
+                              } text-gray-400`}
+                            >
+                              No accepted chats yet
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 🧭 Contacts List */}
+                  <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col p-4 space-y-4">
+                    {/* Recent Chats */}
+                    {recentChats.length > 0 && (
+                      <div className="flex flex-col gap-2">
+                        <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
+                          Recent Chats
+                        </h4>
+                        {recentChats.map((chat) => (
+                          <ContactItem
+                            key={chat.id}
+                            contact={chat}
+                            effectiveTheme={effectiveTheme}
+                            onSelect={(c) => setSelectedContact(c)}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {/* All Contacts */}
+                    {contacts.length > 0 && (
+                      <div className="flex flex-col gap-2 mt-4">
+                        <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
+                          Contacts
+                        </h4>
+                        {contacts.map((contact) => (
+                          <ContactItem
+                            key={contact.id}
+                            contact={contact}
+                            effectiveTheme={effectiveTheme}
+                            onSelect={(c) => setSelectedContact(c)}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Empty State */}
+                    {recentChats.length === 0 && contacts.length === 0 && (
+                      <div className="text-center space-y-4 mt-10">
+                        <p className="text-gray-500 dark:text-gray-400">
+                          Start chatting with Chasmos!
+                        </p>
+                        <button
+                          onClick={() => setShowNewChat(true)}
+                          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+                        >
+                          New Chat
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
-
-                {/* Right side: Accept button */}
-                <button
-                  onClick={() => handleAcceptChat(req.email)}
-                  className="px-3 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition"
-                >
-                  Accept
-                </button>
-              </div>
-            ))
-          ) : (
-            <div
-              className={`w-full flex items-center px-4 py-3 rounded-lg ${
-                effectiveTheme.searchBg
-                  ? effectiveTheme.searchBg
-                  : "bg-gray-100 dark:bg-gray-800"
-              } text-gray-400`}
-            >
-              No new requests
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-
-    {/* 🔹 Accepted Chats Dropdown */}
-    <div className="rounded-md justify-between items-center px-2 py-1">
-      <button
-        onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
-        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-          effectiveTheme.hover
-            ? effectiveTheme.hover
-            : "hover:bg-green-100 dark:hover:bg-green-900"
-        } transition-colors text-green-800 dark:text-green-200 font-medium`}
-      >
-        <span className="flex items-center gap-2 text-gray-200">
-          <img
-            src={chatAcceptIcon}
-            alt="Chats Accepted"
-            className="w-4 h-4"
-          />
-          Chats Accepted ({acceptedChats?.length || 0})
-        </span>
-        {showAcceptedDropdown ? (
-          <ChevronUp className="w-4 h-4" />
-        ) : (
-          <ChevronDown className="w-4 h-4" />
-        )}
-      </button>
-
-      {showAcceptedDropdown && (
-        <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
-          {acceptedChats && acceptedChats.length > 0 ? (
-            acceptedChats.map((chat) => (
-              <motion.div
-                key={chat._id || chat.email}
-                whileHover={{ scale: 0.98 }}
-                className={`flex justify-between items-center p-2 rounded-md ${
-                  effectiveTheme.hover
-                    ? effectiveTheme.hover
-                    : "hover:bg-gray-100 dark:hover:bg-gray-700"
-                } transition-colors`}
-              >
-                {/* Left side: profile + info */}
-                <div className="flex items-center gap-3 flex-1 overflow-hidden">
-                  <div className="relative flex-shrink-0">
-                    <img
-                      src={
-                        chat.avatar ||
-                        "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-                      }
-                      alt={chat.name || chat.email || "User"}
-                      className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
-                    />
-                  </div>
-                  <div className="overflow-hidden">
-                    <p className="font-medium text-gray-100 truncate">
-                      {chat.name || chat.email?.split("@")[0] || "Unknown User"}
-                    </p>
-                    {/* ✅ Show the initial message */}
-                    {chat.message ? (
-                      <p className="text-sm text-gray-400 italic truncate">
-                        “{chat.message}”
-                      </p>
-                    ) : (
-                      <p className="text-sm text-gray-500 truncate">
-                        No message
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right side: chat icon to open messages */}
-                <motion.button
-                  whileHover={{ scale: 0.95 }}
-                  onClick={() => handleOpenChat(chat)}
-                  className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
-                  title="Open Chat"
-                >
-                  <MessageCircle className="w-5 h-5 text-white" />
-                </motion.button>
-              </motion.div>
-            ))
-          ) : (
-            <div
-              className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
-                effectiveTheme.searchBg
-                  ? effectiveTheme.searchBg
-                  : "bg-gray-100 dark:bg-gray-800"
-              } text-gray-400`}
-            >
-              No accepted chats yet
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  </div>
-
-  {/* 🧭 Contacts List */}
-  <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col p-4 space-y-4">
-    {/* Recent Chats */}
-    {recentChats.length > 0 && (
-      <div className="flex flex-col gap-2">
-        <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
-          Recent Chats
-        </h4>
-        {recentChats.map((chat) => (
-          <ContactItem
-            key={chat.id}
-            contact={chat}
-            effectiveTheme={effectiveTheme}
-            onSelect={(c) => setSelectedContact(c)}
-          />
-        ))}
-      </div>
-    )}
-
-    {/* All Contacts */}
-    {contacts.length > 0 && (
-      <div className="flex flex-col gap-2 mt-4">
-        <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
-          Contacts
-        </h4>
-        {contacts.map((contact) => (
-          <ContactItem
-            key={contact.id}
-            contact={contact}
-            effectiveTheme={effectiveTheme}
-            onSelect={(c) => setSelectedContact(c)}
-          />
-        ))}
-      </div>
-    )}
-
-    {/* Empty State */}
-    {recentChats.length === 0 && contacts.length === 0 && (
-      <div className="text-center space-y-4 mt-10">
-        <p className="text-gray-500 dark:text-gray-400">
-          Start chatting with Chasmos!
-        </p>
-        <button
-          onClick={() => setShowNewChat(true)}
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
-        >
-          New Chat
-        </button>
-      </div>
-    )}
-  </div>
-</div>
-
 
                 {/* Floating Add Button with Menu */}
                 <div className="relative">
