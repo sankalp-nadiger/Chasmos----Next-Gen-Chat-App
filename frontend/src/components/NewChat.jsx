@@ -1045,7 +1045,7 @@ const ContactItem = ({
             </div>
 
             {/* Message Input */}
-            {/* <textarea
+            <textarea
               rows="3"
               value={inviteMessage}
               onChange={(e) => setInviteMessage(e.target.value)}
@@ -1057,7 +1057,7 @@ const ContactItem = ({
                 placeholder-gray-400
                 text-gray-900 dark:text-gray-100
                 dark:bg-gray-800 dark:placeholder-gray-500`}
-            /> */}
+            />
 
             {/* Feedback */}
             {feedback.message && (

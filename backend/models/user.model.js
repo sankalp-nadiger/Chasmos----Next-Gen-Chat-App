@@ -24,13 +24,22 @@ const userSchema = new mongoose.Schema(
       default: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
     },
     // Stores emails of users who have sent a chat/invite request to this user
-    receivedChatRequests: [{
-      type: String
-    }],
-    // Stores emails of users to whom this user has sent chat requests (pending)
-    sentChatRequests: [{
-      type: String
-    }],
+  receivedChatRequests: [
+  {
+    email: { type: String },
+    message: { type: String, default: "" },
+    date: { type: Date, default: Date.now },
+  },
+],
+
+sentChatRequests: [
+  {
+    email: { type: String },
+    message: { type: String, default: "" },
+    date: { type: Date, default: Date.now },
+  },
+],
+
     // Stores emails of users who accepted this user's chat requests
     acceptedChatRequests: [{
       type: String
