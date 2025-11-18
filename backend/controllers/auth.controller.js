@@ -4,17 +4,19 @@ import generateToken from "../config/generatetoken.js";
 import { google } from "googleapis";
 
 export const handleGoogleAuth = asyncHandler(async (req, res) => {
-  const { idToken } = req.body;
+  // Accept either `idToken` or `credential` (frontend may send `credential`)
+  const { idToken, credential } = req.body;
+  const token = idToken || credential;
 
   // Verify the token and get user info
   const client = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID);
   const ticket = await client.verifyIdToken({
-    idToken,
+    idToken: token,
     audience: process.env.GOOGLE_CLIENT_ID
   });
 
   const payload = ticket.getPayload();
-  const { email, name, picture: avatar } = payload;
+  const { email, name, picture: avatar } = payload || {};
 
   // Check if user exists
   let user = await User.findOne({ email: email.toLowerCase() });
@@ -29,15 +31,19 @@ export const handleGoogleAuth = asyncHandler(async (req, res) => {
       avatar: user.avatar,
       phoneNumber: user.phoneNumber,
       token: generateToken(user._id),
-      isExistingUser: true
+      isExistingUser: true,
+      isNewUser: false
     });
   } else {
     // If user doesn't exist, return Google data for signup completion
+    // The frontend will show the completion form (phone/password/avatar optional)
+    // and call `/api/auth/google/complete-signup` to create the account.
     res.status(200).json({
       email,
       name,
       avatar,
       isExistingUser: false,
+      isNewUser: true,
       googleData: payload
     });
   }

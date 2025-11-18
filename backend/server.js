@@ -5,6 +5,7 @@ import connectDB from "./config/db.js";
 import Chat from "./models/chat.model.js";
 import colors from "colors";
 import userRoutes from "./routes/user.routes.js";
+import authRoutes from "./routes/auth.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import messageRoutes from "./routes/message.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
@@ -43,6 +44,7 @@ app.use(express.json());
 
 // Routes
 app.use("/api/user", userRoutes);
+app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
 app.use("/api/tasks", taskRoutes);

@@ -119,7 +119,7 @@ const GoogleLoginButton = ({ onSuccess, onError }) => {
     script.async = true;
     script.defer = true;
     document.body.appendChild(script);
-
+    
     script.onload = () => {
       window.google?.accounts.id.initialize({
         client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
@@ -132,19 +132,19 @@ const GoogleLoginButton = ({ onSuccess, onError }) => {
           theme: 'outline',
           size: 'large',
           width: '100%',
-          type: 'standard'
+          text: 'continue_with'
         }
       );
     };
-
+    
     return () => {
       if (document.body.contains(script)) {
         document.body.removeChild(script);
       }
     };
   }, [onSuccess]);
-
-  return <div id="googleLoginButton" className="w-full" />;
+  
+  return <div id="googleLoginButton"></div>;
 };
 
 // Features data
