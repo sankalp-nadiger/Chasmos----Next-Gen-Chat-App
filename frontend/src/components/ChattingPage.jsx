@@ -7,6 +7,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
+import { io } from "socket.io-client";
 
 import { motion, AnimatePresence } from "framer-motion";
 import chatReqIcon from "../assets/Chat-reuest.png";
@@ -484,6 +485,10 @@ const ChattingPage = ({ onLogout }) => {
   const API_BASE_URL =
     import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
+  // Socket reference
+  const socketRef = useRef(null);
+  const [socketConnected, setSocketConnected] = useState(false);
+
   // Fetch both received and accepted requests
   useEffect(() => {
     const fetchRequests = async () => {
@@ -549,7 +554,82 @@ const ChattingPage = ({ onLogout }) => {
 
   //After chatting with accepted chats
   const handleOpenChat = (chat) => {
-    setSelectedContact(chat); // just open the chat
+    // When opening a chat with a contact, ensure a chat exists on backend
+    (async () => {
+      try {
+        const token = localStorage.getItem("token") || localStorage.getItem("chasmos_auth_token");
+        if (!token) {
+          console.error("No token found — cannot access chat");
+          setSelectedContact(chat);
+          return;
+        }
+
+        // Determine user id to open chat with
+        const userId = chat._id || chat.id || chat.userId || chat.email;
+
+        // Access or create chat on backend
+        const res = await fetch(`${API_BASE_URL}/api/chat`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ userId }),
+        });
+
+        if (!res.ok) {
+          console.error("Failed to access chat");
+          setSelectedContact(chat);
+          return;
+        }
+
+        const chatObj = await res.json();
+
+        // Find the other participant for display
+        const localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+        const otherUser = (chatObj.users || []).find(
+          (u) => String(u._id) !== String(localUser._id)
+        );
+
+        const contactForUI = {
+          id: chatObj._id,
+          chatId: chatObj._id,
+          name: otherUser?.name || chat.name || otherUser?.email || "Unknown",
+          avatar: otherUser?.pic || otherUser?.avatar || null,
+          participants: chatObj.users || [],
+          isGroup: chatObj.isGroupChat || false,
+        };
+
+        setSelectedContact(contactForUI);
+
+        // Join socket room
+        if (socketRef.current && socketRef.current.emit) {
+          socketRef.current.emit("join chat", chatObj._id);
+        }
+
+        // Fetch messages for this chat
+        const msgsRes = await fetch(`${API_BASE_URL}/api/message/${chatObj._id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (msgsRes.ok) {
+          const msgs = await msgsRes.json();
+          const formatted = msgs.map((m) => ({
+            id: m._id,
+            type: "text",
+            content: m.content || m.text || "",
+            sender: m.sender?._id || m.sender,
+            timestamp: new Date(m.createdAt).getTime(),
+            isRead: true,
+          }));
+
+          setMessages((prev) => ({ ...prev, [chatObj._id]: formatted }));
+        }
+      } catch (err) {
+        console.error("Error opening chat:", err);
+        setSelectedContact(chat);
+      }
+    })();
   };
 
   //handle on clicking accept button
@@ -825,59 +905,153 @@ const ChattingPage = ({ onLogout }) => {
     (messageText) => {
       if (!messageText.trim() || !selectedContact) return;
 
-      // 1️⃣ Create a consistent key for the contact
-      const chatKey =
-        selectedContact.id || selectedContact._id || selectedContact.email;
+      (async () => {
+        const token = localStorage.getItem("token") || localStorage.getItem('chasmos_auth_token');
+        const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
 
-      const newMessage = {
-        id: Date.now(),
-        type: "text",
-        content: messageText,
-        sender: "me",
-        timestamp: Date.now(),
-        isRead: true,
-      };
+        // If we don't have a chatId or token, fall back to local append
+        if (!chatId || !token) {
+          const chatKey = chatId || selectedContact.email || selectedContact.id;
+          const newMessage = {
+            id: Date.now(),
+            type: "text",
+            content: messageText,
+            sender: "me",
+            timestamp: Date.now(),
+            isRead: true,
+          };
 
-      // 2️⃣ Update messages
-      setMessages((prevMessages) => ({
-        ...prevMessages,
-        [chatKey]: [...(prevMessages[chatKey] || []), newMessage],
-      }));
+          setMessages((prevMessages) => ({
+            ...prevMessages,
+            [chatKey]: [...(prevMessages[chatKey] || []), newMessage],
+          }));
 
-      // 3️⃣ Update recentChats
-      setRecentChats((prevChats) => {
-        const exists = prevChats.find(
-          (c) => (c.id || c._id || c.email) === chatKey
-        );
-        if (exists) {
-          return prevChats.map((c) =>
-            (c.id || c._id || c.email) === chatKey
-              ? { ...c, lastMessage: messageText, timestamp: Date.now() }
-              : c
-          );
-        } else {
-          return [
-            {
-              id: chatKey,
-              name: selectedContact.name,
-              avatar: selectedContact.avatar || "/default-avatar.png",
-              isOnline: selectedContact.isOnline,
-              lastMessage: messageText,
-              timestamp: Date.now(),
-              unreadCount: 0,
-            },
-            ...prevChats,
-          ];
+          return;
         }
-      });
 
-      // 4️⃣ Remove from acceptedChats after first message
-      setAcceptedChats((prev) =>
-        prev.filter((c) => (c.id || c._id || c.email) !== chatKey)
-      );
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/message`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ content: messageText, chatId }),
+          });
+
+          if (!res.ok) throw new Error("Failed to send message");
+
+          const sent = await res.json();
+
+          const formatted = {
+            id: sent._id || sent.id || Date.now(),
+            type: "text",
+            content: sent.content || sent.text || messageText,
+            sender: sent.sender?._id || sent.sender || "me",
+            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            isRead: true,
+          };
+
+          setMessages((prevMessages) => ({
+            ...prevMessages,
+            [chatId]: [...(prevMessages[chatId] || []), formatted],
+          }));
+
+          // Emit socket event for realtime delivery
+          if (socketRef.current && socketRef.current.emit) {
+            socketRef.current.emit("new message", sent);
+          }
+
+          // Update recentChats
+          setRecentChats((prevChats) => {
+            const exists = prevChats.find((c) => c.id === chatId || c.chatId === chatId);
+            if (exists) {
+              return prevChats.map((c) => (c.id === chatId || c.chatId === chatId ? { ...c, lastMessage: messageText, timestamp: Date.now() } : c));
+            } else {
+              return [
+                {
+                  id: chatId,
+                  chatId,
+                  name: selectedContact.name,
+                  avatar: selectedContact.avatar || "/default-avatar.png",
+                  lastMessage: messageText,
+                  timestamp: Date.now(),
+                  unreadCount: 0,
+                },
+                ...prevChats,
+              ];
+            }
+          });
+        } catch (err) {
+          console.error("Error sending message:", err);
+        }
+      })();
     },
     [selectedContact]
   );
+
+  // Initialize socket connection once
+  useEffect(() => {
+    const initSocket = () => {
+      try {
+        const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+        socketRef.current = io(API_BASE_URL, {
+          transports: ['websocket'],
+          withCredentials: true,
+        });
+
+        socketRef.current.on('connect', () => {
+          socketRef.current.emit('setup', userData);
+          setSocketConnected(true);
+        });
+
+        socketRef.current.on('connected', () => setSocketConnected(true));
+
+        socketRef.current.on('message recieved', (newMessage) => {
+          try {
+            const chatId = newMessage.chat?._id || newMessage.chat;
+            const senderId = newMessage.sender?._id || newMessage.sender;
+            const key = chatId || senderId;
+
+            const formatted = {
+              id: newMessage._id || newMessage.id || Date.now(),
+              type: 'text',
+              content: newMessage.content || newMessage.text || '',
+              sender: newMessage.sender?._id || newMessage.sender,
+              timestamp: new Date(newMessage.createdAt || Date.now()).getTime(),
+              isRead: false,
+            };
+
+            setMessages((prev) => ({
+              ...prev,
+              [key]: [...(prev[key] || []), formatted],
+            }));
+
+            // update recentChats/unread when not currently selected
+            setRecentChats((prev) => {
+              const exists = prev.find((c) => c.chatId === key || c.id === key);
+              if (exists) {
+                return prev.map((c) => (c.chatId === key || c.id === key ? { ...c, lastMessage: formatted.content, unreadCount: (c.unreadCount || 0) + 1 } : c));
+              }
+              return prev;
+            });
+          } catch (err) {
+            console.error('Error processing incoming socket message', err);
+          }
+        });
+      } catch (err) {
+        console.error('Socket init error', err);
+      }
+    };
+
+    initSocket();
+
+    return () => {
+      try {
+        if (socketRef.current) socketRef.current.disconnect();
+      } catch (err) {}
+    };
+  }, [API_BASE_URL]);
 
   const handleBackToContacts = useCallback(() => {
     if (isMobileView) {
@@ -2077,7 +2251,7 @@ const ChattingPage = ({ onLogout }) => {
                 />
               </div>
               <MessageInput
-                onSendMessage={handleSendMessageFromInput}
+                    onSendMessage={handleSendMessageFromInput}
                 selectedContact={selectedContact}
                 effectiveTheme={effectiveTheme}
               />

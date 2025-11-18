@@ -2,10 +2,12 @@ import express from "express";
 import dotenv from "dotenv";
 import { Server } from "socket.io";
 import connectDB from "./config/db.js";
+import Chat from "./models/chat.model.js";
 import colors from "colors";
 import userRoutes from "./routes/user.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import messageRoutes from "./routes/message.routes.js";
+import uploadRoutes from "./routes/upload.routes.js";
 import taskRoutes from "./routes/task.routes.js";
 import sprintRoutes from "./routes/sprint.routes.js";
 import contactRoutes from "./routes/contact.routes.js";
@@ -47,6 +49,7 @@ app.use("/api/tasks", taskRoutes);
 app.use("/api/sprints", sprintRoutes); 
 app.use("/api/contacts", contactRoutes); // contact routes
 app.use("/api/document", documentRoutes);
+app.use("/api/upload", uploadRoutes);
 // Error Handling middlewares
 app.use(notFound);
 app.use(errorHandler);
@@ -81,19 +84,45 @@ io.on("connection", (socket) => {
   socket.on("stop typing", (room) => socket.in(room).emit("stop typing"));
 
   socket.on("new message", (newMessageRecieved) => {
-    var chat = newMessageRecieved.chat;
+    (async () => {
+      try {
+        let chat = newMessageRecieved.chat;
 
-    if (!chat.users) return console.log("chat.users not defined");
+        // If chat is an id (string) or not populated, try fetching it from DB
+        if (!chat || typeof chat === "string" || (!chat.users && !chat.participants)) {
+          try {
+            chat = await Chat.findById(newMessageRecieved.chat || chat)
+              .select("users participants")
+              .lean();
+          } catch (e) {
+            console.error("Failed to load chat from DB in socket handler", e);
+            return;
+          }
+        }
 
-    chat.users.forEach((user) => {
-      if (user._id == newMessageRecieved.sender._id) return;
+        const users = chat.users || chat.participants || [];
 
-      socket.in(user._id).emit("message recieved", newMessageRecieved);
-    });
+        if (!users || users.length === 0) {
+          return console.log("chat has no participants to notify");
+        }
+
+        users.forEach((user) => {
+          const userId = user._id ? String(user._id) : String(user);
+          const senderId = newMessageRecieved.sender?._id
+            ? String(newMessageRecieved.sender._id)
+            : String(newMessageRecieved.sender);
+
+          if (userId === senderId) return;
+
+          socket.in(userId).emit("message recieved", newMessageRecieved);
+        });
+      } catch (err) {
+        console.error("Error in socket 'new message' handler:", err);
+      }
+    })();
   });
 
-  socket.off("setup", () => {
-    console.log("USER DISCONNECTED");
-    socket.leave(userData._id);
+  socket.on("disconnect", () => {
+    console.log("USER DISCONNECTED", socket.id);
   });
 });

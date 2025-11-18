@@ -204,10 +204,8 @@ if (supabaseUrl && supabaseAnonKey) {
 }
 
 /* --------------------------------------------
-   📁 Upload a file to Supabase Storage
+  📁 Upload a file to Supabase Storage
 --------------------------------------------- */
-import { supabase } from "../config/supabaseClient.js";
-
 export const uploadFileToSupabase = async (file, bucketName, folderPath = "") => {
   try {
     console.log("📁 Uploading to bucket:", bucketName);

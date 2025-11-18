@@ -50,10 +50,36 @@ const MessageInput = React.memo(({
   const handleFileChange = useCallback((e, type) => {
     const file = e.target.files[0];
     if (file) {
-      // Here you would typically handle file upload
-      // For now, just send a message indicating the file
-      const fileMessage = `${type === 'image' ? '📷' : '📄'} ${file.name}`;
-      onSendMessage(fileMessage);
+      // Upload file to backend then send message with attachment
+      (async () => {
+        try {
+          const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+          const form = new FormData();
+          form.append('file', file);
+
+          const uploadRes = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/upload`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            body: form,
+          });
+
+          if (!uploadRes.ok) throw new Error('Upload failed');
+          const { attachment } = await uploadRes.json();
+
+          // Send message with attachment id (backend will populate attachments)
+          if (attachment && selectedContact) {
+            onSendMessage({
+              text: '',
+              attachments: [attachment._id],
+              type: type === 'image' ? 'image' : 'file',
+            });
+          }
+        } catch (err) {
+          console.error('File upload error', err);
+        }
+      })();
     }
   }, [onSendMessage]);
 

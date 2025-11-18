@@ -28,17 +28,47 @@ export const sendMessage = asyncHandler(async (req, res) => {
     chat: chatId,
   };
 
+  // If attachments passed as array of ids include them
+  if (req.body.attachments && Array.isArray(req.body.attachments)) {
+    newMessage.attachments = req.body.attachments;
+  }
+  if (req.body.type) newMessage.type = req.body.type;
+
   try {
     var message = await Message.create(newMessage);
 
     message = await message.populate("sender", "name pic");
     message = await message.populate("chat");
+    // populate attachments so clients receive URLs immediately
+    message = await message.populate({ path: 'attachments' });
+    // Ensure chat participants are populated. Some codebases use `users` instead of `participants`.
     message = await User.populate(message, {
       path: "chat.participants",
       select: "name pic email",
     });
 
-    await Chat.findByIdAndUpdate(req.body.chatId, { latestMessage: message });
+    // If participants were empty (older chats might use `users` field), try populating `chat.users`
+    if (!message.chat.participants || message.chat.participants.length === 0) {
+      try {
+        const chatWithUsers = await Chat.findById(message.chat._id).populate(
+          "users",
+          "name pic email"
+        );
+        if (chatWithUsers && chatWithUsers.users && chatWithUsers.users.length > 0) {
+          // Attach users as participants for downstream consumers
+          message.chat.participants = chatWithUsers.users;
+        }
+      } catch (e) {
+        // ignore populate fallback errors
+      }
+    }
+
+    // update chat lastMessage reference
+    try {
+      await Chat.findByIdAndUpdate(req.body.chatId, { lastMessage: message._id });
+    } catch (e) {
+      // ignore
+    }
 
     res.json(message);
   } catch (error) {

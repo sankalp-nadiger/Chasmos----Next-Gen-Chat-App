@@ -31,6 +31,7 @@ export const accessChat = asyncHandler(async (req, res) => {
       chatName: "sender",
       isGroupChat: false,
       users: [req.user._id, userId],
+      participants: [req.user._id, userId],
     };
 
     try {
@@ -85,6 +86,7 @@ export const createGroupChat = asyncHandler(async (req, res) => {
     const groupChat = await Chat.create({
       chatName: req.body.name,
       users: users,
+      participants: users,
       isGroupChat: true,
       groupAdmin: req.user,
     });
@@ -122,6 +124,7 @@ export const renameGroup = asyncHandler(async (req, res) => {
     res.json(updatedChat);
   }
 });
+
 export const removeFromGroup = asyncHandler(async (req, res) => {
   const { chatId, userId } = req.body;
 
