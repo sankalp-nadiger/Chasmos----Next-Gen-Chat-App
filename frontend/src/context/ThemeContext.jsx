@@ -114,13 +114,15 @@ export const ThemeProvider = ({ children }) => {
     <ThemeContext.Provider value={value}>
       <div className="relative w-full h-screen">
         <CosmosBackground 
-          opacity={0.3} 
-          theme={theme}
-          showStars={true}
-          showNebula={true}
-          showParticles={true}
-          className="cosmos-background"
-        />
+  opacity={0.3} 
+  theme={theme}
+  showStars={true}
+  showNebula={true}
+  showParticles={true}
+  showComets={true}  
+  cometCount={10}    
+  className="cosmos-background"
+/>
         <div className="relative z-10 w-full h-full">
           {children}
         </div>

@@ -5,15 +5,24 @@ import Chat from "../models/chat.model.js";
 
 export const allMessages = asyncHandler(async (req, res) => {
   try {
+    console.log("Fetching messages for chatId:", req.params.chatId);
     const messages = await Message.find({ chat: req.params.chatId })
-      .populate("sender", "name pic email")
+      .populate("sender", "name avatar email")
+      .populate({ path: 'attachments' })
       .populate("chat");
+    // Ensure chat participants are populated so frontend can identify users
+    await User.populate(messages, {
+      path: 'chat.participants',
+      select: 'name avatar email',
+    });
+      console.log("Populating messages with chat participants:", messages);
     res.json(messages);
   } catch (error) {
     res.status(400);
     throw new Error(error.message);
   }
 });
+
 export const sendMessage = asyncHandler(async (req, res) => {
   const { content, chatId } = req.body;
 
@@ -37,14 +46,14 @@ export const sendMessage = asyncHandler(async (req, res) => {
   try {
     var message = await Message.create(newMessage);
 
-    message = await message.populate("sender", "name pic");
+    message = await message.populate("sender", "name avatar email");
     message = await message.populate("chat");
     // populate attachments so clients receive URLs immediately
     message = await message.populate({ path: 'attachments' });
     // Ensure chat participants are populated. Some codebases use `users` instead of `participants`.
     message = await User.populate(message, {
       path: "chat.participants",
-      select: "name pic email",
+      select: "name avatar email",
     });
 
     // If participants were empty (older chats might use `users` field), try populating `chat.users`
@@ -52,7 +61,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
       try {
         const chatWithUsers = await Chat.findById(message.chat._id).populate(
           "users",
-          "name pic email"
+          "name avatar email"
         );
         if (chatWithUsers && chatWithUsers.users && chatWithUsers.users.length > 0) {
           // Attach users as participants for downstream consumers

@@ -7,6 +7,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
+import { createPortal } from 'react-dom';
 import { io } from "socket.io-client";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -18,6 +19,7 @@ import {
   Plus,
   FileText,
   Download,
+  Eye,
   Check,
   CheckCheck,
   Pin,
@@ -264,55 +266,13 @@ const MessageBubble = React.memo(
             />
           </motion.button>
 
-          {message.type === "document" ? (
-            <motion.div
-              className="flex items-center space-x-3"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.2 }}
-            >
-              <motion.div
-                className={`w-10 h-10 rounded-full ${
-                  isOwnMessage ? "bg-blue-400" : "bg-gray-300"
-                } flex items-center justify-center`}
-                whileHover={{
-                  rotate: 360,
-                  transition: { duration: 0.8 },
-                }}
-              >
-                <FileText className="w-5 h-5" />
-              </motion.div>
-              <div className="flex-1">
-                <motion.p
-                  className="font-medium"
-                  initial={{ x: -10, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: 0.3 }}
-                >
-                  {message.content}
-                </motion.p>
-                {message.documentSize && (
-                  <motion.p
-                    className="text-sm opacity-75"
-                    initial={{ x: -10, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    transition={{ delay: 0.4 }}
-                  >
-                    {message.documentSize}
-                  </motion.p>
-                )}
-              </div>
-              <motion.div
-                whileHover={{
-                  scale: 1.2,
-                  rotate: [0, -10, 10, 0],
-                  transition: { duration: 0.3 },
-                }}
-                whileTap={{ scale: 0.9 }}
-              >
-                <Download className="w-5 h-5 cursor-pointer transition-transform" />
-              </motion.div>
-            </motion.div>
+          {/* Attachment-aware rendering: images, video, and other files */}
+          {message.attachments && message.attachments.length > 0 ? (
+            <AttachmentRenderer
+              message={message}
+              isOwnMessage={isOwnMessage}
+              effectiveTheme={effectiveTheme}
+            />
           ) : (
             <motion.p
               initial={{ opacity: 0 }}
@@ -365,6 +325,196 @@ const MessageBubble = React.memo(
     );
   }
 ); // Messages Area Component
+
+/* --------------------------------------------
+   AttachmentRenderer Component
+   Renders inline images (with lightbox), video player, and file download UI.
+--------------------------------------------- */
+const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }) => {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState(null);
+  const [zoomed, setZoomed] = useState(false);
+
+  // Download helper: fetch file as blob and trigger download with the provided filename.
+  const handleDownload = async (e, url, filename) => {
+    try {
+      e && e.preventDefault();
+      // Try to fetch the resource as a blob to force filename on download
+      const resp = await fetch(url, { mode: 'cors' });
+      if (!resp.ok) throw new Error('Network response not ok');
+      const blob = await resp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename || 'download';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoke after a short delay to ensure download started
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    } catch (err) {
+      console.error('Download failed, falling back to direct open', err);
+      // Fallback: open in new tab (browser may handle download)
+      window.open(url, '_blank');
+    }
+  };
+
+  const openLightbox = (src) => {
+    setLightboxSrc(src);
+    setLightboxOpen(true);
+    setZoomed(false);
+  };
+
+  const closeLightbox = () => {
+    setLightboxOpen(false);
+    setLightboxSrc(null);
+    setZoomed(false);
+  };
+
+  const stripTimestampPrefix = (filename) => {
+    if (!filename) return '';
+    let base = filename.split('/').pop();
+    base = base.replace(/^\d+_+/, '');
+    return base;
+  };
+
+  const renderAttachment = (att, idx) => {
+    const url = att.fileUrl || att.url || att.publicUrl;
+    const mime = att.mimeType || att.fileType || '';
+    const rawName = att.fileName || (url ? url.split('/').pop() : `file-${idx}`);
+    const name = stripTimestampPrefix(rawName);
+
+    if (!url) return null;
+
+    // image
+    if (mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(url)) {
+      return (
+        <div key={idx} className="mb-2">
+          <img
+            src={url}
+            alt={name}
+            className="w-64 max-w-full rounded cursor-pointer object-cover"
+            onClick={() => openLightbox(url)}
+          />
+          {/* filenames hidden for images (preview only) */}
+        </div>
+      );
+    }
+
+    // video
+    if (mime.startsWith('video/') || /\.(mp4|webm|ogg)$/i.test(url)) {
+      return (
+        <div key={idx} className="mb-2">
+          <video controls className="w-80 max-w-full rounded bg-black">
+            <source src={url} />
+            Your browser does not support the video tag.
+          </video>
+          {/* <div className="flex items-center justify-end mt-1 text-xs text-gray-500">
+            <a
+              href={url}
+              onClick={(e) => handleDownload(e, url, name)}
+              title={`Download ${name}`}
+              aria-label={`Download ${name}`}
+              tabIndex={0}
+              className="text-blue-500"
+            >
+              Download
+            </a>
+          </div> */}
+        </div>
+      );
+    }
+
+    // other files (pdf, docx, etc.)
+    return (
+      <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded mb-2">
+        <div className="flex items-center space-x-3 w-full">
+          <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center flex-shrink-0">
+            <FileText className="w-5 h-5 text-gray-600" />
+          </div>
+
+          <div className="relative w-full">
+            <div className="text-sm font-medium truncate pr-16">{name}</div>
+            {att.fileSize && (
+              <div className="text-xs text-gray-500">{(att.fileSize / 1024).toFixed(1)} KB</div>
+            )}
+
+            {/* Icon overlay: hidden by default, appears when parent message bubble is hovered (uses parent's `group` class).
+                Each icon uses `peer` so its tooltip only shows when that icon is hovered. */}
+            <div className="absolute right-0 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
+              <div className="bg-white rounded-lg p-1 shadow-sm flex items-center space-x-1">
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open"
+                  aria-label="Open attachment"
+                  tabIndex={0}
+                  className="relative flex items-center justify-center p-1 rounded hover:bg-gray-100 peer"
+                >
+                  <Eye className="w-4 h-4 text-gray-600" />
+                  <span className="absolute -top-8 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-xs bg-black text-white px-2 py-0.5 rounded opacity-0 peer-hover:opacity-100 transition-opacity z-50 pointer-events-none">Open</span>
+                </a>
+
+                <a
+                  href={url}
+                  onClick={(e) => handleDownload(e, url, name)}
+                  title="Download"
+                  aria-label={`Download ${name}`}
+                  tabIndex={0}
+                  className="relative flex items-center justify-center p-1 rounded hover:bg-gray-100 peer"
+                >
+                  <Download className="w-4 h-4 text-gray-600" />
+                  <span className="absolute -top-8 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-xs bg-black text-white px-2 py-0.5 rounded opacity-0 peer-hover:opacity-100 transition-opacity z-50 pointer-events-none">Download</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {/* If there are attachments, render them first and show the message text below (WhatsApp-style).
+          Otherwise show the text above attachments as usual. */}
+      <div className="flex flex-col">
+        {(message.attachments || []).map((att, idx) => renderAttachment(att, idx))}
+      </div>
+      {message.attachments && message.attachments.length > 0 ? (
+        message.content ? (
+          <div className="mt-2 text-sm text-gray-800 bg-transparent">{message.content}</div>
+        ) : null
+      ) : (
+        message.content && <div className="mb-2">{message.content}</div>
+      )}
+
+      {lightboxOpen && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-95" onClick={closeLightbox}>
+          <div className="relative max-w-4xl max-h-full p-4" onClick={(e)=>e.stopPropagation()}>
+            <img src={lightboxSrc} alt="preview" className={`max-h-[80vh] max-w-full ${zoomed ? 'scale-125' : 'scale-100'} transition-transform`} />
+            <div className="flex items-center justify-between mt-2">
+              <div className="space-x-2">
+                <button onClick={() => setZoomed(z => !z)} className="bg-white px-3 py-1 rounded">{zoomed ? 'Reset' : 'Zoom'}</button>
+                <button
+                  onClick={(e) => handleDownload(e, lightboxSrc, (lightboxSrc || '').split('/').pop())}
+                  title="Download image"
+                  aria-label={`Download image`}
+                  className="bg-white px-3 py-1 rounded"
+                >
+                  Download
+                </button>
+              </div>
+              <button onClick={closeLightbox} className="bg-white px-3 py-1 rounded">Close</button>
+            </div>
+          </div>
+        </div>, document.body
+      )}
+    </div>
+  );
+});
+
 const MessagesArea = ({
   filteredMessages,
   pinnedMessages,
@@ -378,6 +528,13 @@ const MessagesArea = ({
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
+    try {
+      console.debug("MessagesArea: filteredMessages updated", {
+        length: filteredMessages?.length || 0,
+        selectedContactId,
+      });
+    } catch (e) {}
+
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
@@ -583,47 +740,68 @@ const ChattingPage = ({ onLogout }) => {
           return;
         }
 
+        console.debug("handleOpenChat: opening chat", { chat });
+
         const chatObj = await res.json();
+        console.debug("handleOpenChat: chatObj response", { chatObj });
+
+        // Normalize chat id to string so keys match when storing/fetching messages
+        const normalizedChatId = String(chatObj._id || chatObj.chatId || chatObj.id);
+        console.debug("handleOpenChat: normalizedChatId", { normalizedChatId });
 
         // Find the other participant for display
         const localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
-        const otherUser = (chatObj.users || []).find(
+        const otherUser = (chatObj.users || chatObj.participants || []).find(
           (u) => String(u._id) !== String(localUser._id)
         );
 
         const contactForUI = {
-          id: chatObj._id,
-          chatId: chatObj._id,
-          name: otherUser?.name || chat.name || otherUser?.email || "Unknown",
-          avatar: otherUser?.pic || otherUser?.avatar || null,
-          participants: chatObj.users || [],
+          id: normalizedChatId,
+          chatId: normalizedChatId,
+          name: otherUser?.name || chatObj.chatName || otherUser?.email || "Unknown",
+          avatar: otherUser?.pic || otherUser?.avatar || otherUser?.avatar || "/default-avatar.png",
+          participants: chatObj.users || chatObj.participants || [],
           isGroup: chatObj.isGroupChat || false,
         };
 
         setSelectedContact(contactForUI);
+        console.debug("handleOpenChat: selectedContact set", { contactForUI });
 
         // Join socket room
         if (socketRef.current && socketRef.current.emit) {
-          socketRef.current.emit("join chat", chatObj._id);
+          socketRef.current.emit("join chat", normalizedChatId);
         }
 
-        // Fetch messages for this chat
-        const msgsRes = await fetch(`${API_BASE_URL}/api/message/${chatObj._id}`, {
+        // Fetch messages for this chat (use normalized id)
+        const msgsUrl = `${API_BASE_URL}/api/message/${normalizedChatId}`;
+        console.debug("handleOpenChat: fetching messages", { msgsUrl });
+        const msgsRes = await fetch(msgsUrl, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        if (msgsRes.ok) {
+        if (!msgsRes.ok) {
+          console.warn("handleOpenChat: messages fetch failed", { status: msgsRes.status });
+        } else {
           const msgs = await msgsRes.json();
+          console.debug("handleOpenChat: raw messages response", { count: msgs.length, msgsSample: msgs.slice(0,3) });
+
           const formatted = msgs.map((m) => ({
             id: m._id,
-            type: "text",
+            type: m.type || "text",
             content: m.content || m.text || "",
             sender: m.sender?._id || m.sender,
-            timestamp: new Date(m.createdAt).getTime(),
+            timestamp: new Date(m.createdAt || m.createdAt || m.timestamp || Date.now()).getTime(),
             isRead: true,
+            attachments: Array.isArray(m.attachments) ? m.attachments : [],
           }));
 
-          setMessages((prev) => ({ ...prev, [chatObj._id]: formatted }));
+          console.debug("handleOpenChat: formatted messages", { formattedSample: formatted.slice(0,3) });
+
+          setMessages((prev) => {
+            const next = { ...prev, [normalizedChatId]: formatted };
+            console.debug("handleOpenChat: setMessages updated for chat", { normalizedChatId, newCount: formatted.length });
+            return next;
+          });
         }
       } catch (err) {
         console.error("Error opening chat:", err);
@@ -748,18 +926,37 @@ const ChattingPage = ({ onLogout }) => {
 
         const data = await res.json();
 
-        const formatted = data.map((chat) => {
-          const otherUser = chat.participants.find(
-            (p) => p._id !== data.loggedInUserId
-          );
+        const localUser = JSON.parse(
+          localStorage.getItem("chasmos_user_data") || "{}"
+        );
+        const loggedInUserId = localUser._id || localUser.id || null;
+
+        const formatted = (Array.isArray(data) ? data : []).map((chat) => {
+          // Backend may already provide an `otherUser` helper; prefer that.
+          const otherUser =
+            chat.otherUser ||
+            (chat.participants &&
+              chat.participants.find(
+                (p) => String(p._id) !== String(loggedInUserId)
+              )) ||
+            (Array.isArray(chat.participants) ? chat.participants[0] : null);
+
+          const otherId = otherUser?._id || otherUser?.id || null;
+          const displayName =
+            otherUser?.email || otherUser?.username || otherUser?.name || "Unknown";
+
           return {
-            id: otherUser._id,
-            name: otherUser.email,
-            avatar: otherUser.avatar,
-            lastMessage: chat.lastMessage,
-            timestamp: chat.timestamp,
-            isOnline: otherUser.isOnline || false,
-            unreadCount: chat.unreadCount || 0,
+            id: otherId,
+            chatId: chat.chatId || chat._id,
+            name: displayName,
+            avatar: otherUser?.avatar || otherUser?.pic || null,
+            lastMessage: chat.lastMessage || (chat.lastMessage && chat.lastMessage.text) || "",
+            timestamp: chat.timestamp || chat.updatedAt,
+            isOnline: otherUser?.isOnline || false,
+            unreadCount:
+              typeof chat.unreadCount === "number"
+                ? chat.unreadCount
+                : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
           };
         });
 
@@ -902,54 +1099,22 @@ const ChattingPage = ({ onLogout }) => {
 
   // Handle sending message from the MessageInput component-Updated
   const handleSendMessageFromInput = useCallback(
-    (messageText) => {
-      if (!messageText.trim() || !selectedContact) return;
+    (payload) => {
+      // payload can be a string (text) or an object (server message or attachment payload)
+      if (!payload || !selectedContact) return;
 
-      (async () => {
-        const token = localStorage.getItem("token") || localStorage.getItem('chasmos_auth_token');
-        const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
-
-        // If we don't have a chatId or token, fall back to local append
-        if (!chatId || !token) {
-          const chatKey = chatId || selectedContact.email || selectedContact.id;
-          const newMessage = {
-            id: Date.now(),
-            type: "text",
-            content: messageText,
-            sender: "me",
-            timestamp: Date.now(),
-            isRead: true,
-          };
-
-          setMessages((prevMessages) => ({
-            ...prevMessages,
-            [chatKey]: [...(prevMessages[chatKey] || []), newMessage],
-          }));
-
-          return;
-        }
-
+      // If payload is a server-created message object (has _id), append directly
+      if (typeof payload === 'object' && (payload._id || payload.id || payload.createdAt)) {
         try {
-          const res = await fetch(`${API_BASE_URL}/api/message`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ content: messageText, chatId }),
-          });
-
-          if (!res.ok) throw new Error("Failed to send message");
-
-          const sent = await res.json();
-
+          const chatId = payload.chat?._id || payload.chat || selectedContact.chatId || selectedContact.id || selectedContact._id;
           const formatted = {
-            id: sent._id || sent.id || Date.now(),
-            type: "text",
-            content: sent.content || sent.text || messageText,
-            sender: sent.sender?._id || sent.sender || "me",
-            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            id: payload._id || payload.id || Date.now(),
+            type: payload.type || 'file',
+            content: payload.content || payload.text || '',
+            sender: payload.sender?._id || payload.sender || 'me',
+            timestamp: new Date(payload.createdAt || payload.createdAt || Date.now()).getTime(),
             isRead: true,
+            attachments: payload.attachments || payload.files || [],
           };
 
           setMessages((prevMessages) => ({
@@ -957,24 +1122,24 @@ const ChattingPage = ({ onLogout }) => {
             [chatId]: [...(prevMessages[chatId] || []), formatted],
           }));
 
-          // Emit socket event for realtime delivery
+          // emit socket event if available
           if (socketRef.current && socketRef.current.emit) {
-            socketRef.current.emit("new message", sent);
+            socketRef.current.emit('new message', payload);
           }
 
-          // Update recentChats
+          // update recentChats
           setRecentChats((prevChats) => {
             const exists = prevChats.find((c) => c.id === chatId || c.chatId === chatId);
             if (exists) {
-              return prevChats.map((c) => (c.id === chatId || c.chatId === chatId ? { ...c, lastMessage: messageText, timestamp: Date.now() } : c));
+              return prevChats.map((c) => (c.id === chatId || c.chatId === chatId ? { ...c, lastMessage: payload.content || payload.text || '', timestamp: Date.now() } : c));
             } else {
               return [
                 {
                   id: chatId,
                   chatId,
                   name: selectedContact.name,
-                  avatar: selectedContact.avatar || "/default-avatar.png",
-                  lastMessage: messageText,
+                  avatar: selectedContact.avatar || '/default-avatar.png',
+                  lastMessage: payload.content || payload.text || '',
                   timestamp: Date.now(),
                   unreadCount: 0,
                 },
@@ -982,10 +1147,243 @@ const ChattingPage = ({ onLogout }) => {
               ];
             }
           });
+
+          return;
         } catch (err) {
-          console.error("Error sending message:", err);
+          console.error('Error appending server message payload', err);
+          return;
         }
-      })();
+      }
+
+      // If payload is an object with attachments but not a server message, send via API
+      if (typeof payload === 'object' && payload.attachments) {
+        (async () => {
+          const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+          const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
+          if (!chatId || !token) {
+            // local fallback
+            const chatKey = chatId || selectedContact.email || selectedContact.id;
+            const newMessage = {
+              id: Date.now(),
+              type: payload.type || 'file',
+              content: payload.text || '',
+              sender: 'me',
+              timestamp: Date.now(),
+              attachments: payload.attachments,
+            };
+
+            setMessages((prevMessages) => ({
+              ...prevMessages,
+              [chatKey]: [...(prevMessages[chatKey] || []), newMessage],
+            }));
+            // Update recentChats preview for local fallback: prefer text, else attachment filename
+            setRecentChats((prevChats) => {
+              const previewFromAttachments = (atts) => {
+                if (!Array.isArray(atts) || atts.length === 0) return '';
+                const a = atts[0];
+                const possibleName = a.fileName || a.file_name || a.filename || a.name || a.url || a.fileUrl || '';
+                if (typeof possibleName === 'string' && possibleName.length > 0) {
+                  return possibleName.replace(/^[\d\-:.]+_/, '');
+                }
+                return 'Attachment';
+              };
+
+              return prevChats.map((c) => {
+                if (c.id === chatKey || c.chatId === chatKey) {
+                  const newLast = newMessage.content && newMessage.content.trim() ? newMessage.content : previewFromAttachments(newMessage.attachments);
+                  return {
+                    ...c,
+                    lastMessage: newLast || 'Attachment',
+                    timestamp: Date.now(),
+                    hasAttachment: Array.isArray(newMessage.attachments) && newMessage.attachments.length > 0,
+                    attachmentName: Array.isArray(newMessage.attachments) && newMessage.attachments[0]?.fileName ? newMessage.attachments[0].fileName.replace(/^[\d\-:.]+_/, '') : undefined,
+                    attachmentMime: Array.isArray(newMessage.attachments) && (newMessage.attachments[0]?.mimeType || newMessage.attachments[0]?.fileType) ? (newMessage.attachments[0].mimeType || newMessage.attachments[0].fileType) : undefined,
+                  };
+                }
+                return c;
+              });
+            });
+            return;
+          }
+
+          try {
+            const res = await fetch(`${API_BASE_URL}/api/message`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ content: payload.text || '', chatId, attachments: payload.attachments, type: payload.type }),
+            });
+
+            if (!res.ok) throw new Error('Failed to send message with attachments');
+
+            const sent = await res.json();
+            const formatted = {
+              id: sent._id || sent.id || Date.now(),
+              type: sent.type || payload.type || 'file',
+              content: sent.content || sent.text || payload.text || '',
+              sender: sent.sender?._id || sent.sender || 'me',
+              timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+              isRead: true,
+              attachments: sent.attachments || payload.attachments,
+            };
+
+            setMessages((prevMessages) => ({
+              ...prevMessages,
+              [chatId]: [...(prevMessages[chatId] || []), formatted],
+            }));
+
+            if (socketRef.current && socketRef.current.emit) {
+              socketRef.current.emit('new message', sent);
+            }
+
+            // Compute preview: prefer text, else first attachment filename (stripped)
+            const computePreview = (fmt) => {
+              const text = (fmt.content || fmt.text || '').toString().trim();
+              const atts = fmt.attachments || [];
+              if (text.length > 0) {
+                return atts.length > 0 ? `${text} 📎` : text;
+              }
+              if (atts.length > 0) {
+                const a = atts[0];
+                const name = a.fileName || a.file_name || a.filename || a.name || (a.fileUrl ? a.fileUrl.split('/').pop() : '') || '';
+                const stripped = (name || '').replace(/^[\d\-:.]+_/, '');
+                return stripped || 'Attachment';
+              }
+              return '';
+            };
+
+            const previewText = computePreview(formatted);
+
+            setRecentChats((prevChats) => {
+              const exists = prevChats.find((c) => c.id === chatId || c.chatId === chatId);
+              if (exists) {
+                return prevChats.map((c) =>
+                  c.id === chatId || c.chatId === chatId
+                    ? {
+                        ...c,
+                        lastMessage: previewText,
+                        timestamp: Date.now(),
+                        hasAttachment: Array.isArray(formatted.attachments) && formatted.attachments.length > 0,
+                        attachmentName: Array.isArray(formatted.attachments) && formatted.attachments[0]?.fileName ? formatted.attachments[0].fileName.replace(/^[\d\-:.]+_/, '') : undefined,
+                        attachmentMime: Array.isArray(formatted.attachments) && (formatted.attachments[0]?.mimeType || formatted.attachments[0]?.fileType) ? (formatted.attachments[0].mimeType || formatted.attachments[0].fileType) : undefined,
+                      }
+                    : c
+                );
+              } else {
+                return [
+                  {
+                    id: chatId,
+                    chatId,
+                    name: selectedContact.name,
+                    avatar: selectedContact.avatar || '/default-avatar.png',
+                    lastMessage: previewText,
+                    timestamp: Date.now(),
+                    unreadCount: 0,
+                    hasAttachment: Array.isArray(formatted.attachments) && formatted.attachments.length > 0,
+                    attachmentName: Array.isArray(formatted.attachments) && formatted.attachments[0]?.fileName ? formatted.attachments[0].fileName.replace(/^[\d\-:.]+_/, '') : undefined,
+                    attachmentMime: Array.isArray(formatted.attachments) && (formatted.attachments[0]?.mimeType || formatted.attachments[0]?.fileType) ? (formatted.attachments[0].mimeType || formatted.attachments[0].fileType) : undefined,
+                  },
+                  ...prevChats,
+                ];
+              }
+            });
+          } catch (err) {
+            console.error('Error sending attachment message:', err);
+          }
+        })();
+
+        return;
+      }
+
+      // Otherwise treat payload as text message string
+      if (typeof payload === 'string') {
+        const messageText = payload;
+        if (!messageText.trim()) return;
+
+        (async () => {
+          const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+          const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
+
+          // If we don't have a chatId or token, fall back to local append
+          if (!chatId || !token) {
+            const chatKey = chatId || selectedContact.email || selectedContact.id;
+            const newMessage = {
+              id: Date.now(),
+              type: 'text',
+              content: messageText,
+              sender: 'me',
+              timestamp: Date.now(),
+              isRead: true,
+            };
+
+            setMessages((prevMessages) => ({
+              ...prevMessages,
+              [chatKey]: [...(prevMessages[chatKey] || []), newMessage],
+            }));
+
+            return;
+          }
+
+          try {
+            const res = await fetch(`${API_BASE_URL}/api/message`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ content: messageText, chatId }),
+            });
+
+            if (!res.ok) throw new Error('Failed to send message');
+
+            const sent = await res.json();
+
+            const formatted = {
+              id: sent._id || sent.id || Date.now(),
+              type: 'text',
+              content: sent.content || sent.text || messageText,
+              sender: sent.sender?._id || sent.sender || 'me',
+              timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+              isRead: true,
+            };
+
+            setMessages((prevMessages) => ({
+              ...prevMessages,
+              [chatId]: [...(prevMessages[chatId] || []), formatted],
+            }));
+
+            // Emit socket event for realtime delivery
+            if (socketRef.current && socketRef.current.emit) {
+              socketRef.current.emit('new message', sent);
+            }
+
+            // Update recentChats
+            setRecentChats((prevChats) => {
+              const exists = prevChats.find((c) => c.id === chatId || c.chatId === chatId);
+              if (exists) {
+                return prevChats.map((c) => (c.id === chatId || c.chatId === chatId ? { ...c, lastMessage: messageText, timestamp: Date.now() } : c));
+              } else {
+                return [
+                  {
+                    id: chatId,
+                    chatId,
+                    name: selectedContact.name,
+                    avatar: selectedContact.avatar || '/default-avatar.png',
+                    lastMessage: messageText,
+                    timestamp: Date.now(),
+                    unreadCount: 0,
+                  },
+                  ...prevChats,
+                ];
+              }
+            });
+          } catch (err) {
+            console.error('Error sending message:', err);
+          }
+        })();
+      }
     },
     [selectedContact]
   );
@@ -1013,13 +1411,21 @@ const ChattingPage = ({ onLogout }) => {
             const senderId = newMessage.sender?._id || newMessage.sender;
             const key = chatId || senderId;
 
+            const attachments = Array.isArray(newMessage.attachments) ? newMessage.attachments : [];
+
+            const inferredType = newMessage.type || (attachments.length ? (
+              (attachments[0].mimeType && attachments[0].mimeType.startsWith('image/')) ? 'image' :
+              (attachments[0].mimeType && attachments[0].mimeType.startsWith('video/')) ? 'video' : 'file'
+            ) : 'text');
+
             const formatted = {
               id: newMessage._id || newMessage.id || Date.now(),
-              type: 'text',
+              type: inferredType,
               content: newMessage.content || newMessage.text || '',
               sender: newMessage.sender?._id || newMessage.sender,
               timestamp: new Date(newMessage.createdAt || Date.now()).getTime(),
               isRead: false,
+              attachments: attachments,
             };
 
             setMessages((prev) => ({
@@ -1227,6 +1633,26 @@ const ChattingPage = ({ onLogout }) => {
   // Fetch contacts from APi
 
   const [documentChats, setDocumentChats] = useState([]);
+  // Filter accepted chats to exclude users already present in recentChats
+  const filteredAcceptedChats = React.useMemo(() => {
+    if (!Array.isArray(acceptedChats) || acceptedChats.length === 0) return [];
+    if (!Array.isArray(recentChats) || recentChats.length === 0) return acceptedChats;
+
+    const recentIds = new Set(
+      recentChats
+        .map((r) => r.id || (r.otherUser && r.otherUser.id) || r.chatId || r.email)
+        .filter(Boolean)
+        .map((v) => String(v))
+    );
+
+    return acceptedChats.filter((a) => {
+      const aid = String(a._id || a.id || a.email || a.userId || a.emailAddress || '')
+        .trim();
+      // if any recent id matches accepted user's id/email, exclude
+      if (!aid) return true; // keep if we can't determine id
+      return !recentIds.has(aid);
+    });
+  }, [acceptedChats, recentChats]);
   const [isExpanded, setIsExpanded] = useState(true);
 
   // ✅ Create a new chat/document
@@ -1305,18 +1731,65 @@ const ChattingPage = ({ onLogout }) => {
 
         const data = await res.json();
 
-        const formatted = data.map((chat) => {
-          const otherUser = chat.participants.find(
-            (p) => p._id !== data.loggedInUserId
-          );
+        const localUser = JSON.parse(
+          localStorage.getItem("chasmos_user_data") || "{}"
+        );
+        const loggedInUserId = localUser._id || localUser.id || null;
+
+        const formatted = (Array.isArray(data) ? data : []).map((chat) => {
+          const otherUser =
+            chat.otherUser ||
+            (chat.participants &&
+              chat.participants.find(
+                (p) => String(p._id) !== String(loggedInUserId)
+              )) ||
+            (Array.isArray(chat.participants) ? chat.participants[0] : null);
+
+          const otherId = otherUser?._id || otherUser?.id || null;
+          const displayName =
+            otherUser?.email || otherUser?.username || otherUser?.name || "Unknown";
+
+          // Determine if lastMessage indicates attachments and extract preview text
+          let preview = "";
+          let hasAttachment = false;
+          let attachmentMime = null;
+
+          if (chat.lastMessage) {
+            if (typeof chat.lastMessage === "string") {
+              // backend may append a paperclip emoji for attachments
+              hasAttachment = chat.lastMessage.includes("📎");
+              preview = chat.lastMessage.replace(/📎/g, "").trim();
+            } else if (typeof chat.lastMessage === "object") {
+              const lm = chat.lastMessage;
+              const text = (lm.content || lm.text || "").toString().trim();
+              const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
+              hasAttachment = atts.length > 0;
+              if (text) {
+                preview = text.split(/\s+/).slice(0, 8).join(" ") + (hasAttachment ? " 📎" : "");
+              } else if (hasAttachment) {
+                const first = atts[0] || {};
+                preview = first.fileName || first.file_name || first.filename || (first.fileUrl ? first.fileUrl.split('/').pop() : "Attachment");
+                // strip paperclip or timestamp if present
+                preview = preview.replace(/^[\d\-:.]+_/, "");
+                attachmentMime = first.mimeType || first.type || null;
+              }
+            }
+          }
+
           return {
-            id: otherUser._id,
-            name: otherUser.email,
-            avatar: otherUser.avatar,
-            lastMessage: chat.lastMessage,
-            timestamp: chat.timestamp,
-            isOnline: otherUser.isOnline || false,
-            unreadCount: chat.unreadCount || 0,
+            id: otherId,
+            chatId: chat.chatId || chat._id,
+            name: displayName,
+            avatar: otherUser?.avatar || otherUser?.pic || null,
+            lastMessage: preview || "",
+            hasAttachment,
+            attachmentMime,
+            timestamp: chat.timestamp || chat.updatedAt,
+            isOnline: otherUser?.isOnline || false,
+            unreadCount:
+              typeof chat.unreadCount === "number"
+                ? chat.unreadCount
+                : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
           };
         });
 
@@ -1897,7 +2370,7 @@ const ChattingPage = ({ onLogout }) => {
                             alt="Chats Accepted"
                             className="w-4 h-4"
                           />
-                          Chats Accepted ({acceptedChats?.length || 0})
+                          Chat Invites Accepted ({filteredAcceptedChats?.length || 0})
                         </span>
                         {showAcceptedDropdown ? (
                           <ChevronUp className="w-4 h-4" />
@@ -1908,8 +2381,8 @@ const ChattingPage = ({ onLogout }) => {
 
                       {showAcceptedDropdown && (
                         <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
-                          {acceptedChats && acceptedChats.length > 0 ? (
-                            acceptedChats.map((chat, index) => (
+                          {filteredAcceptedChats && filteredAcceptedChats.length > 0 ? (
+                            filteredAcceptedChats.map((chat, index) => (
                               <motion.div
                                 key={
                                   chat._id || chat.email || `accepted-${index}`
@@ -1976,7 +2449,7 @@ const ChattingPage = ({ onLogout }) => {
                                   : "bg-gray-100 dark:bg-gray-800"
                               } text-gray-400`}
                             >
-                              No accepted chats yet
+                              No new accepted invites yet
                             </div>
                           )}
                         </div>
@@ -1997,7 +2470,7 @@ const ChattingPage = ({ onLogout }) => {
                             key={chat.id}
                             contact={chat}
                             effectiveTheme={effectiveTheme}
-                            onSelect={(c) => setSelectedContact(c)}
+                            onSelect={(c) => handleOpenChat(c)}
                           />
                         ))}
                       </div>
@@ -2014,7 +2487,7 @@ const ChattingPage = ({ onLogout }) => {
                             key={contact.id}
                             contact={contact}
                             effectiveTheme={effectiveTheme}
-                            onSelect={(c) => setSelectedContact(c)}
+                            onSelect={(c) => handleOpenChat(c)}
                           />
                         ))}
                       </div>

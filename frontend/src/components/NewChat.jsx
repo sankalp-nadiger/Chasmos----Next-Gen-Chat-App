@@ -869,7 +869,6 @@ const ContactItem = ({
 
       setFeedback({ type: "success", message: "Invite sent successfully!" });
       setInviteMessage("");
-      setTimeout(() => setShowInviteModal(false), 1200);
     } catch (err) {
       setFeedback({ type: "error", message: err.message });
     } finally {
@@ -894,7 +893,6 @@ const ContactItem = ({
       if (!res.ok) throw new Error(data.message || "Failed to withdraw invite");
 
       setFeedback({ type: "info", message: "Invite withdrawn successfully." });
-      setTimeout(() => setShowInviteModal(false), 1000);
     } catch (err) {
       setFeedback({ type: "error", message: err.message });
     }

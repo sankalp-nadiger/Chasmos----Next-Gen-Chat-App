@@ -1,5 +1,5 @@
+import 'dotenv/config';
 import express from "express";
-import dotenv from "dotenv";
 import { Server } from "socket.io";
 import connectDB from "./config/db.js";
 import Chat from "./models/chat.model.js";
@@ -19,8 +19,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-dotenv.config();
-//dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+// dotenv is loaded via the top-level import 'dotenv/config'
 connectDB();
 const app = express();
 
