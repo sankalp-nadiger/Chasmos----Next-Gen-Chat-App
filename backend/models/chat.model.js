@@ -9,6 +9,28 @@ const chatSchema = new Schema(
     users: [{ type: Schema.Types.ObjectId, ref: "User" }],
     participants: [{ type: Schema.Types.ObjectId, ref: "User" }],
     admins: [{ type: Schema.Types.ObjectId, ref: "User" }], // multiple admins
+
+    //Archive functionality (for group admins)
+    isArchived: {
+      type: Boolean,
+      default: false
+    },
+    archivedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User"
+    },
+    archivedAt: Date,
+    
+    // For soft deletion
+    isDeleted: {
+      type: Boolean,
+      default: false
+    },
+    deletedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User"
+    },
+    deletedAt: Date
   },
   { timestamps: true }
 );

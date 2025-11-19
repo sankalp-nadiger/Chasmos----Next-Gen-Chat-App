@@ -10,12 +10,14 @@ export const allMessages = asyncHandler(async (req, res) => {
       .populate("sender", "name avatar email")
       .populate({ path: 'attachments' })
       .populate("chat");
+    
     // Ensure chat participants are populated so frontend can identify users
     await User.populate(messages, {
       path: 'chat.participants',
       select: 'name avatar email',
     });
-      console.log("Populating messages with chat participants:", messages);
+    
+    console.log("Populating messages with chat participants:", messages);
     res.json(messages);
   } catch (error) {
     res.status(400);
@@ -29,6 +31,28 @@ export const sendMessage = asyncHandler(async (req, res) => {
   if (!content || !chatId) {
     console.log("Invalid data passed into request");
     return res.sendStatus(400);
+  }
+
+  // NEW: Check if chat exists and user is participant
+  const chat = await Chat.findById(chatId)
+    .populate("users", "blockedUsers")
+    .populate("participants", "blockedUsers");
+
+  if (!chat) {
+    res.status(404);
+    throw new Error("Chat not found");
+  }
+
+  // NEW: Check block status for one-on-one chats
+  if (!chat.isGroupChat) {
+    const otherUser = chat.users.find(user => 
+      user._id.toString() !== req.user._id.toString()
+    );
+    
+    if (otherUser && otherUser.blockedUsers.includes(req.user._id)) {
+      res.status(403);
+      throw new Error("You cannot send messages to this user as you have been blocked");
+    }
   }
 
   var newMessage = {

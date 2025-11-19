@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import mongoose, { Schema } from "mongoose";
 import bcrypt from "bcryptjs";
 
 const userSchema = new mongoose.Schema(
@@ -23,27 +23,29 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
     },
-    // Stores emails of users who have sent a chat/invite request to this user
-  receivedChatRequests: [
-  {
-    email: { type: String },
-    message: { type: String, default: "" },
-    date: { type: Date, default: Date.now },
-  },
-],
+    
+    // Chat request fields
+    receivedChatRequests: [
+      {
+        email: { type: String },
+        message: { type: String, default: "" },
+        date: { type: Date, default: Date.now },
+      },
+    ],
 
-sentChatRequests: [
-  {
-    email: { type: String },
-    message: { type: String, default: "" },
-    date: { type: Date, default: Date.now },
-  },
-],
+    sentChatRequests: [
+      {
+        email: { type: String },
+        message: { type: String, default: "" },
+        date: { type: Date, default: Date.now },
+      },
+    ],
 
     // Stores emails of users who accepted this user's chat requests
     acceptedChatRequests: [{
       type: String
     }],
+    
     password: {
       type: String,
       required: true,
@@ -53,7 +55,8 @@ sentChatRequests: [
       type: Boolean,
       default: false,
     },
- //Fields for Google Contacts Integration
+    
+    // Fields for Google Contacts Integration
     googleId: { 
       type: String, 
       unique: true, 
@@ -71,7 +74,25 @@ sentChatRequests: [
     googleContactsSyncEnabled: {
       type: Boolean,
       default: false
-    }
+    },
+
+    // Block functionality
+    blockedUsers: [{
+      type: Schema.Types.ObjectId,
+      ref: "User"
+    }],
+    
+    //Archive functionality for chats
+    archivedChats: [{
+      chat: {
+        type: Schema.Types.ObjectId,
+        ref: "Chat"
+      },
+      archivedAt: {
+        type: Date,
+        default: Date.now
+      }
+    }]
 
   },
   { timestamps: true }
