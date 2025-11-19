@@ -16,94 +16,11 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import GoogleSignupComplete from './GoogleSignupComplete.jsx';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
-// Mock GoogleSignupComplete component
-const GoogleSignupComplete = ({ googleData, currentTheme, onSuccess }) => {
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/google/complete`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: googleData.email,
-          name: googleData.name,
-          avatar: googleData.avatar,
-          phoneNumber: phoneNumber
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to complete signup');
-      }
-
-      localStorage.setItem('userInfo', JSON.stringify(data));
-      localStorage.setItem('token', data.token);
-      onSuccess(data);
-    } catch (err) {
-      setError(err.message || 'Failed to complete signup');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className={`min-h-screen flex items-center justify-center ${currentTheme.primary}`}>
-      <div className={`max-w-md w-full p-8 ${currentTheme.secondary} rounded-2xl shadow-xl`}>
-        <h2 className={`text-2xl font-bold ${currentTheme.text} mb-4`}>Complete Your Profile</h2>
-        <p className={`${currentTheme.textSecondary} mb-6`}>Just one more step to get started!</p>
-        
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-            <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className={`block text-sm font-medium ${currentTheme.text} mb-2`}>
-              Phone Number
-            </label>
-            <div className="relative">
-              <div className={`absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none ${currentTheme.textSecondary}`}>
-                <Phone className="h-5 w-5" />
-              </div>
-              <input
-                type="tel"
-                placeholder="Enter your phone number"
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                className={`w-full pl-10 pr-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 ${currentTheme.text}`}
-                required
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full py-3 px-4 rounded-lg font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-50"
-          >
-            {isLoading ? 'Completing...' : 'Complete Signup'}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-};
+// Use the full `GoogleSignupComplete` component from its file (imported above)
 
 // Mock Cloudinary upload
 const uploadToCloudinary = async (file) => {
@@ -318,7 +235,7 @@ const ErrorAlert = ({ message, onClose }) => {
 };
 
 // Login Form Component
-const LoginForm = ({ currentTheme, onLogin }) => {
+const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
   const [formData, setFormData] = useState({
     emailOrPhone: "",
     password: "",
@@ -346,8 +263,19 @@ const LoginForm = ({ currentTheme, onLogin }) => {
           throw new Error(data.message || "Google login failed");
         }
 
-        localStorage.setItem("userInfo", JSON.stringify(data.user || data));
-        localStorage.setItem("token", data.token || data.accessToken || "");
+        // If backend indicates this is a new user, let parent show completion form
+        if (data.isNewUser) {
+          onGoogleNewUser?.({
+            email: data.email || data.googleData?.email,
+            name: data.name || data.googleData?.name,
+            avatar: data.avatar || data.googleData?.picture || data.googleData?.avatar,
+            raw: data,
+          });
+          return;
+        }
+
+        localStorage.setItem('userInfo', JSON.stringify(data.user || data));
+        localStorage.setItem('token', data.token || data.accessToken || "");
         onLogin?.(data);
       } catch (err) {
         setError(err.message || "Google login failed. Try again.");
@@ -355,7 +283,7 @@ const LoginForm = ({ currentTheme, onLogin }) => {
         setIsLoading(false);
       }
     },
-    [onLogin]
+    [onLogin, onGoogleNewUser]
   );
 
   const handleSubmit = useCallback(
@@ -963,6 +891,13 @@ const AuthPage = ({ onAuthenticated }) => {
                         <LoginForm
                           currentTheme={currentTheme}
                           onLogin={handleLogin}
+                          onGoogleNewUser={(data) => {
+                            setGoogleData({
+                              email: data.email,
+                              name: data.name,
+                              avatar: data.avatar
+                            });
+                          }}
                         />
                       </motion.div>
                     </motion.div>

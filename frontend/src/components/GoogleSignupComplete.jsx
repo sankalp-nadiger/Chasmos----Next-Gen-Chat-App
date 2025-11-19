@@ -24,9 +24,9 @@ const GoogleSignupComplete = ({ googleData, onSuccess, currentTheme }) => {
     e.preventDefault();
     setError("");
     
-    // Validate phone number
+    // Validate phone number only if provided (phone is optional)
     const phoneRegex = /^\+?[\d\s-]{10,}$/;
-    if (!phoneRegex.test(formData.phoneNumber.trim())) {
+    if (formData.phoneNumber && formData.phoneNumber.trim() && !phoneRegex.test(formData.phoneNumber.trim())) {
       setError("Please enter a valid phone number");
       return;
     }
@@ -152,7 +152,7 @@ const GoogleSignupComplete = ({ googleData, onSuccess, currentTheme }) => {
         {/* Phone Number */}
         <div className="space-y-2">
           <label className={`block text-sm font-medium ${currentTheme.text}`}>
-            Phone Number <span className="text-red-500">*</span>
+            Phone Number <span className="text-gray-400">(Optional)</span>
           </label>
           <div className="relative">
             <div className={`absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none ${currentTheme.textSecondary}`}>
@@ -160,8 +160,7 @@ const GoogleSignupComplete = ({ googleData, onSuccess, currentTheme }) => {
             </div>
             <input
               type="tel"
-              required
-              placeholder="Enter your phone number"
+              placeholder="Enter your phone number (optional)"
               value={formData.phoneNumber}
               onChange={(e) => setFormData(prev => ({ ...prev, phoneNumber: e.target.value }))}
               className={`w-full pl-10 pr-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
