@@ -2,12 +2,22 @@ import asyncHandler from "express-async-handler";
 import Chat from "../models/chat.model.js";
 import User from "../models/user.model.js";
 import path from "path";
+
 export const accessChat = asyncHandler(async (req, res) => {
   const { userId } = req.body;
 
   if (!userId) {
     console.log("UserId param not sent with request");
     return res.sendStatus(400);
+  }
+
+  // NEW: Check block status
+  const currentUser = await User.findById(req.user._id);
+  const targetUser = await User.findById(userId);
+  
+  if (currentUser.blockedUsers.includes(userId) || targetUser.blockedUsers.includes(req.user._id)) {
+    res.status(403);
+    throw new Error("Cannot access chat with blocked user");
   }
 
   var isChat = await Chat.find({
@@ -51,7 +61,31 @@ export const accessChat = asyncHandler(async (req, res) => {
 
 export const fetchChats = asyncHandler(async (req, res) => {
   try {
-    const results = await Chat.find({ users: { $elemMatch: { $eq: req.user._id } } })
+    const userId = req.user._id;
+    
+    // NEW: Get user's blocked users and archived chats
+    const user = await User.findById(userId).select("blockedUsers archivedChats");
+    const blockedUserIds = user.blockedUsers || [];
+    const archivedChatIds = user.archivedChats.map(archived => archived.chat.toString());
+
+    const results = await Chat.find({ 
+      users: { $elemMatch: { $eq: userId } },
+      _id: { $nin: archivedChatIds }, // Exclude archived chats
+      // Exclude chats with blocked users for one-on-one chats
+      $or: [
+        { isGroupChat: true },
+        { 
+          isGroupChat: false,
+          users: { 
+            $not: { 
+              $elemMatch: { 
+                $in: blockedUserIds 
+              } 
+            } 
+          } 
+        }
+      ]
+    })
       .populate("users", "-password")
       .populate("groupAdmin", "-password")
       .populate("lastMessage")
@@ -61,6 +95,7 @@ export const fetchChats = asyncHandler(async (req, res) => {
       path: "lastMessage.sender",
       select: "name avatar email",
     });
+    
     res.status(200).send(populatedResults);
   } catch (error) {
     res.status(400);
@@ -148,6 +183,7 @@ export const removeFromGroup = asyncHandler(async (req, res) => {
     res.json(removed);
   }
 });
+
 export const addToGroup = asyncHandler(async (req, res) => {
   const { chatId, userId } = req.body;
 
@@ -172,20 +208,22 @@ export const addToGroup = asyncHandler(async (req, res) => {
 });
 
 //Fetch recent chats
-// GET /api/chat/recent
 export const getRecentChats = async (req, res) => {
   try {
     const userId = req.user._id; 
 
-    // Find all chats where the user is a participant
-    const chats = await Chat.find({ participants: userId })
+    // NEW: Get user's archived chats to exclude them
+    const user = await User.findById(userId).select("archivedChats");
+    const archivedChatIds = user.archivedChats.map(archived => archived.chat.toString());
+
+    // Find all chats where the user is a participant, excluding archived ones
+    const chats = await Chat.find({ 
+      participants: userId,
+      _id: { $nin: archivedChatIds } // Exclude archived chats
+    })
       .sort({ updatedAt: -1 }) // recent chats first
-      // populate useful user fields that actually exist on the User model
       .populate('participants', '_id name email avatar')
-      // ensure lastMessage (Message doc) is populated so we can read its content
-      // and also populate attachments inside lastMessage so we can show filenames
       .populate({ path: 'lastMessage', populate: { path: 'attachments' } })
-      // then populate the sender inside lastMessage if present
       .populate({ path: 'lastMessage.sender', select: '_id email name' })
       .lean();
 
@@ -204,8 +242,7 @@ export const getRecentChats = async (req, res) => {
         unread = chat.unreadCount[String(userId)] || chat.unreadCount[userId] || 0;
       }
 
-      // Determine last message preview. Prefer textual content; if none,
-      // fall back to filename from first attachment (stripping timestamp_ prefixes).
+      // Determine last message preview
       let lastMessageText = "";
       if (chat.lastMessage) {
         const msg = chat.lastMessage;
@@ -214,12 +251,10 @@ export const getRecentChats = async (req, res) => {
         const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
 
         if (text && text.length > 0) {
-          // show first few words (up to 8) and append a paperclip indicator if attachments exist
           const preview = text.split(/\s+/).slice(0, 8).join(" ");
           lastMessageText = hasAttachments ? `${preview} 📎` : preview;
         } else if (hasAttachments) {
           const att = msg.attachments[0];
-          // try common filename fields, fall back to basename of URL
           let filename = att.fileName || att.file_name || att.filename || "";
           if (!filename && att.fileUrl) {
             try {
@@ -229,7 +264,6 @@ export const getRecentChats = async (req, res) => {
             }
           }
 
-          // strip common timestamp prefixes like 1687452345_ or 20230703_ etc
           filename = filename.replace(/^[\d\-:.]+_/, "");
           lastMessageText = filename || "Attachment";
         }
@@ -250,6 +284,7 @@ export const getRecentChats = async (req, res) => {
         },
       };
     });
+    
     console.log("Formatted Recent Chats:", formattedChats);
     res.status(200).json(formattedChats);
   } catch (err) {
