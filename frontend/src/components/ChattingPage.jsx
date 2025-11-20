@@ -185,8 +185,15 @@ const ChatHeader = React.memo(
 
 // MessageBubble component definition (moved before MessagesArea)
 const MessageBubble = React.memo(
-  ({ message, isPinned, onPinToggle, effectiveTheme }) => {
-    const isOwnMessage = message.sender === "me";
+  ({ message, isPinned, onPinToggle, effectiveTheme, currentUserId }) => {
+    const sender = message.sender;
+    const isOwnMessage = (() => {
+      if (!sender) return false;
+      if (sender === "me") return true;
+      if (typeof sender === "string") return String(sender) === String(currentUserId);
+      if (typeof sender === "object") return String(sender._id || sender.id) === String(currentUserId);
+      return false;
+    })();
 
     const handlePinClick = useCallback(() => {
       onPinToggle(message.id);
@@ -211,15 +218,21 @@ const MessageBubble = React.memo(
         } group relative`}
       >
         <motion.div
-          className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg relative ${
-            isOwnMessage
-              ? effectiveTheme.message?.sent || "bg-blue-500 text-white"
-              : effectiveTheme.message?.received || "bg-gray-200 text-gray-800"
-          } ${isPinned ? "ring-2 ring-yellow-400" : ""}`}
-          whileHover={{
-            boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
-            transition: { duration: 0.3 },
-          }}
+  className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg relative ${
+    isOwnMessage
+      ? `
+          backdrop-blur-md 
+          bg-gradient-to-br from-purple-400/20 to-blue-400/20 
+          border border-white/30 
+          shadow-lg shadow-purple-500/10
+          text-white
+        `
+      : effectiveTheme.message?.received || "bg-gray-200 text-gray-800"
+  } ${isPinned ? "ring-2 ring-yellow-400" : ""}`}
+  whileHover={{
+    boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
+    transition: { duration: 0.3 },
+  }}
           animate={
             isPinned
               ? {
@@ -321,7 +334,8 @@ const MessageBubble = React.memo(
     return (
       prevProps.message.id === nextProps.message.id &&
       prevProps.isPinned === nextProps.isPinned &&
-      prevProps.currentTheme === nextProps.currentTheme
+      String(prevProps.currentUserId || '') === String(nextProps.currentUserId || '') &&
+      JSON.stringify(prevProps.effectiveTheme) === JSON.stringify(nextProps.effectiveTheme)
     );
   }
 ); // Messages Area Component
@@ -522,6 +536,7 @@ const MessagesArea = ({
   effectiveTheme,
   isTyping,
   selectedContactId,
+  currentUserId,
 }) => {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -562,6 +577,7 @@ const MessagesArea = ({
               isPinned={pinnedMessages[message.id] || false}
               onPinToggle={onPinMessage}
               effectiveTheme={effectiveTheme}
+              currentUserId={currentUserId}
             />
           ))}
         </AnimatePresence>
@@ -645,6 +661,9 @@ const ChattingPage = ({ onLogout }) => {
   // Socket reference
   const socketRef = useRef(null);
   const [socketConnected, setSocketConnected] = useState(false);
+  // Current user id (used for message alignment)
+  const _localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+  const currentUserId = _localUser._id || _localUser.id || null;
 
   // Fetch both received and accepted requests
   useEffect(() => {
@@ -986,6 +1005,7 @@ const ChattingPage = ({ onLogout }) => {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, [selectedContact]);
+  
   // Close chat search bar and three dots menu when switching chats
   useEffect(() => {
     setShowChatSearch(false);
@@ -2192,8 +2212,8 @@ const ChattingPage = ({ onLogout }) => {
                   },
                 }}
                 className={`${
-                  isMobileView ? "absolute z-20 w-full" : "w-1/3 min-w-80"
-                } ${effectiveTheme.sidebar} flex flex-col backdrop-blur-sm`}
+    isMobileView ? "absolute z-20 w-full" : "w-1/3 min-w-80"
+  } backdrop-blur-xl bg-gray-900/30 border-r border-white/10 flex flex-col`}
               >
                 {/* Search Header */}
                 <div className="p-4">
@@ -2721,6 +2741,7 @@ const ChattingPage = ({ onLogout }) => {
                   effectiveTheme={effectiveTheme}
                   isTyping={isTyping}
                   selectedContactId={selectedContact.id}
+                  currentUserId={currentUserId}
                 />
               </div>
               <MessageInput
