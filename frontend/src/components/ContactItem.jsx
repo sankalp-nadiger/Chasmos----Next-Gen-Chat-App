@@ -16,7 +16,6 @@ const formatTimestamp = (timestamp) => {
 };
 
 const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
-  // ✅ Clean preview text - remove any emojis or extra symbols
   const cleanText = (text) => {
     if (!text || typeof text !== 'string') return '';
     return text.replace(/📎/g, '').replace(/🔗/g, '').trim();
@@ -26,12 +25,14 @@ const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
   const hasAttachment = contact.hasAttachment || false;
   const attachmentMime = contact.attachmentMime || '';
 
+  // ✅ Dynamic icon color based on theme
+  const iconColor = effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-600';
+
   return (
     <div
       className={`flex items-center justify-between p-3 cursor-pointer border-b ${effectiveTheme.border || "border-gray-200"} hover:${effectiveTheme.hover || "bg-gray-100"} transition`}
       onClick={() => onSelect(contact)}
     >
-      {/* Left: Avatar and info */}
       <div className="flex items-center space-x-3 flex-1 min-w-0">
         <div className="relative flex-shrink-0">
           {contact.avatar ? (
@@ -52,33 +53,28 @@ const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <h3
-              className={`font-semibold truncate ${effectiveTheme.text || "text-gray-900"}`}
-            >
+            <h3 className={`font-semibold truncate ${effectiveTheme.text || "text-gray-900"}`}>
               {contact.name || contact.username}
             </h3>
-            <span
-              className={`text-xs flex-shrink-0 ${effectiveTheme.textSecondary || "text-gray-500"}`}
-            >
+            <span className={`text-xs flex-shrink-0 ${effectiveTheme.textSecondary || "text-gray-500"}`}>
               {formatTimestamp(contact.timestamp)}
             </span>
           </div>
           
-          {/* ✅ Preview with icon only when attachment exists */}
           <div className="flex items-center gap-2 min-w-0">
             {hasAttachment && (
               <div className="flex-shrink-0">
                 {(() => {
                   if (attachmentMime.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp)$/i.test(previewText)) {
-                    return <Image className="w-4 h-4" />;
+                    return <Image className={`w-4 h-4 ${iconColor}`} />;
                   }
                   if (attachmentMime.startsWith("video/") || /\.(mp4|webm|ogg)$/i.test(previewText)) {
-                    return <Video className="w-4 h-4" />;
+                    return <Video className={`w-4 h-4 ${iconColor}`} />;
                   }
                   if (attachmentMime.includes("pdf") || /\.pdf$/i.test(previewText)) {
-                    return <FileText className="w-4 h-4" />;
+                    return <FileText className={`w-4 h-4 ${iconColor}`} />;
                   }
-                  return <File className="w-4 h-4" />;
+                  return <File className={`w-4 h-4 ${iconColor}`} />;
                 })()}
               </div>
             )}
@@ -89,7 +85,6 @@ const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
         </div>
       </div>
 
-      {/* ✅ Right: Only unread badge, NO chat icon */}
       {contact.unreadCount > 0 && (
         <div className="flex-shrink-0 ml-3">
           <div className="w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center font-semibold">
