@@ -199,6 +199,10 @@ const MessageBubble = React.memo(
       onPinToggle(message.id);
     }, [message.id, onPinToggle]);
 
+    const messageText = message.content || '';
+    const hasAttachments = message.attachments && message.attachments.length > 0;
+    const isShortMessage = messageText.length < 30 && !hasAttachments;
+
     return (
       <motion.div
         initial={{ opacity: 0, y: 20, scale: 0.8 }}
@@ -218,7 +222,16 @@ const MessageBubble = React.memo(
         } group relative`}
       >
         <motion.div
-          className={`max-w-xs lg:max-w-md px-4 py-2 pb-7 rounded-lg relative ${
+          className={`${
+            isShortMessage ? 'inline-flex flex-col' : 'max-w-xs lg:max-w-md'
+          } px-4 ${
+            // ✅ FIX: More padding for ticks - different for short/long messages
+            isShortMessage 
+              ? 'py-2' 
+              : isOwnMessage 
+                ? 'pt-2 pb-8 pr-4' 
+                : 'py-2'
+          } rounded-lg relative ${
             isOwnMessage
               ? `backdrop-blur-md bg-gradient-to-br from-purple-400/20 to-blue-400/20 border border-white/30 shadow-lg shadow-purple-500/10 text-white`
               : effectiveTheme.mode === 'dark'
@@ -274,59 +287,76 @@ const MessageBubble = React.memo(
             />
           </motion.button>
 
-          {message.attachments && message.attachments.length > 0 ? (
+          {hasAttachments ? (
             <AttachmentRenderer
               message={message}
               isOwnMessage={isOwnMessage}
               effectiveTheme={effectiveTheme}
             />
           ) : (
-            <motion.p
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.1 }}
+              className={isShortMessage ? 'flex items-end gap-2' : ''}
             >
-              {message.content}
-            </motion.p>
+              <span>{message.content}</span>
+              
+              {/* For short messages, show timestamp inline */}
+              {isShortMessage && isOwnMessage && (
+                <span className="text-xs opacity-75 text-white whitespace-nowrap flex items-center gap-1 ml-2 flex-shrink-0">
+                  {formatMessageTime(message.timestamp)}
+                  {message.isRead ? (
+                    <CheckCheck className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                  ) : (
+                    <Check className="w-4 h-4 opacity-75 flex-shrink-0" />
+                  )}
+                </span>
+              )}
+              {isShortMessage && !isOwnMessage && (
+                <span className={`text-xs opacity-75 whitespace-nowrap ml-2 flex-shrink-0 ${
+                  effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-600'
+                }`}>
+                  {formatMessageTime(message.timestamp)}
+                </span>
+              )}
+            </motion.div>
           )}
 
-          <motion.div
-            className="absolute bottom-2 right-3 flex items-center justify-end space-x-1"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-          >
-            <span className={`text-xs opacity-75 ${isOwnMessage ? 'text-white' : effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-600'}`}>
-              {formatMessageTime(message.timestamp)}
-            </span>
-            {isOwnMessage && (
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.4, type: "spring", stiffness: 400 }}
-              >
-                {message.isRead ? (
-                  <motion.div
-                    animate={{
-                      color: ["#60A5FA", "#3B82F6", "#60A5FA"],
-                      transition: { duration: 2, repeat: Infinity },
-                    }}
-                  >
+          {/* ✅ FIX: Timestamp at bottom with MORE space */}
+          {!isShortMessage && (
+            <motion.div
+              className={`flex items-center justify-end space-x-1 mt-1 ${
+                isOwnMessage ? 'absolute bottom-2 right-3' : 'mt-2'
+              }`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+            >
+              <span className={`text-xs opacity-75 ${isOwnMessage ? 'text-white' : effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-600'}`}>
+                {formatMessageTime(message.timestamp)}
+              </span>
+              {isOwnMessage && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: 0.4, type: "spring", stiffness: 400 }}
+                  className="flex-shrink-0"
+                >
+                  {message.isRead ? (
                     <CheckCheck className="w-4 h-4 text-blue-400" />
-                  </motion.div>
-                ) : (
-                  <Check className="w-4 h-4 opacity-75" />
-                )}
-              </motion.div>
-            )}
-          </motion.div>
+                  ) : (
+                    <Check className="w-4 h-4 opacity-75 text-white" />
+                  )}
+                </motion.div>
+              )}
+            </motion.div>
+          )}
         </motion.div>
       </motion.div>
     );
   }
 );
-
-// Messages Area Component
 
 /* --------------------------------------------
    AttachmentRenderer Component
@@ -506,6 +536,7 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
   );
 });
 
+// Messages Area Component
 const MessagesArea = ({
   filteredMessages,
   pinnedMessages,
@@ -518,8 +549,13 @@ const MessagesArea = ({
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const shouldAutoScrollRef = useRef(true); // ✅ Track if we should auto-scroll
 
-  const scrollToBottom = () => {
+  const scrollToBottom = (e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
@@ -529,17 +565,23 @@ const MessagesArea = ({
     const element = e.target;
     const isNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 200;
     setShowScrollButton(!isNearBottom);
+    
+    // ✅ Only auto-scroll if user is near bottom
+    shouldAutoScrollRef.current = isNearBottom;
   };
 
+  // ✅ FIX: Only auto-scroll when NEW messages arrive AND user is at bottom
   useEffect(() => {
-    if (messagesEndRef.current) {
+    if (shouldAutoScrollRef.current && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [filteredMessages, isTyping]);
 
+  // ✅ Always scroll on contact change
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "auto" });
+      shouldAutoScrollRef.current = true;
     }
   }, [selectedContactId]);
 
@@ -576,7 +618,13 @@ const MessagesArea = ({
       <div
         ref={messagesContainerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto p-4 space-y-4 scrollbar-hide relative"
+        className="h-full overflow-y-auto p-4 space-y-4 relative"
+        style={{
+          scrollbarWidth: 'thin',
+          scrollbarColor: effectiveTheme.mode === 'dark' 
+            ? '#667eea transparent' // Blue-purple for dark mode
+            : '#8b5cf6 transparent' // Purple for light mode
+        }}
       >
         <div className="relative z-10">
           <AnimatePresence mode="popLayout">
@@ -625,7 +673,7 @@ const MessagesArea = ({
         </div>
       </div>
 
-      {/* Cosmic Scroll to Bottom Button */}
+      {/* Cosmic Scroll Button */}
       <AnimatePresence>
         {showScrollButton && (
           <motion.button
@@ -635,14 +683,16 @@ const MessagesArea = ({
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
             onClick={scrollToBottom}
-            className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-30 w-12 h-12 rounded-full flex items-center justify-center shadow-2xl"
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-50 w-12 h-12 rounded-full flex items-center justify-center shadow-2xl cursor-pointer"
             style={{
               background: effectiveTheme.mode === 'dark'
                 ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
                 : 'linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%)',
+              pointerEvents: 'auto',
             }}
           >
-            {/* Comet tail effect */}
             <motion.div
               className="absolute inset-0 rounded-full"
               animate={{
@@ -659,7 +709,6 @@ const MessagesArea = ({
               }}
             />
             
-            {/* Star icon */}
             <motion.div
               animate={{
                 rotate: [0, 360],
@@ -671,8 +720,8 @@ const MessagesArea = ({
               }}
             >
               <svg
-                width="24"
-                height="24"
+                width="28"
+                height="28"
                 viewBox="0 0 24 24"
                 fill="none"
                 xmlns="http://www.w3.org/2000/svg"
@@ -682,25 +731,10 @@ const MessagesArea = ({
                   fill="white"
                 />
                 <path
-                  d="M12 8L13 11L16 12L13 13L12 16L11 13L8 12L11 11L12 8Z"
+                  d="M12 6L13 10L17 11L13 12L12 16L11 12L7 11L11 10L12 6Z"
                   fill={effectiveTheme.mode === 'dark' ? '#fbbf24' : '#f59e0b'}
                 />
               </svg>
-            </motion.div>
-
-            {/* Down arrow */}
-            <motion.div
-              className="absolute"
-              animate={{
-                y: [0, 5, 0],
-              }}
-              transition={{
-                duration: 1.5,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-            >
-              <ChevronDown className="w-6 h-6 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" />
             </motion.div>
           </motion.button>
         )}
@@ -2023,6 +2057,24 @@ const ChattingPage = ({ onLogout }) => {
     return () => clearInterval(interval);
   }, [getTimeBasedCosmicTheme, lastUpdateTime, cosmicTheme.period]);
 
+  // Add this useEffect near the top of ChattingPage component
+useEffect(() => {
+  const root = document.documentElement;
+  
+  if (effectiveTheme.mode === 'dark' || cosmicTheme.isNightMode) {
+    root.classList.add('dark');
+    root.setAttribute('data-theme', 'dark');
+  } else {
+    root.classList.remove('dark');
+    root.setAttribute('data-theme', 'light');
+  }
+  
+  return () => {
+    root.classList.remove('dark');
+    root.removeAttribute('data-theme');
+  };
+}, [effectiveTheme.mode, cosmicTheme.isNightMode]);
+
   return (
     <>
       <style>
@@ -2376,44 +2428,44 @@ const ChattingPage = ({ onLogout }) => {
                 </div>
 
                 {/* Chat Sidebar Area */}
-                <div className="flex-1 flex flex-col">
-                  {/*  Alerts Section: Chat Requests & Accepted */}
-                  <div>
-                    {/* 🔹 Chat Requests Dropdown */}
-                    <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
-                     <button
-  onClick={() => setShowReceivedDropdown(!showReceivedDropdown)}
-  className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-    effectiveTheme.mode === 'dark'
-      ? 'hover:bg-blue-900/30 text-blue-200'
-      : 'hover:bg-blue-50 text-blue-800'
-  } transition-colors font-medium`}
->
-  <span className="flex items-center gap-2">
-    <img
-      src={chatReqIcon}
-      alt="Chat Requests"
-      className="w-4 h-4"
-    />
-    Chat Requests Received ({receivedChats.length})
-  </span>
-  {showReceivedDropdown ? (
-    <ChevronUp className="w-4 h-4" />
-  ) : (
-    <ChevronDown className="w-4 h-4" />
-  )}
-</button>
+                <div className="flex-1 flex flex-col overflow-hidden">
+  {/* Alerts Section: Chat Requests & Accepted */}
+  <div className="flex-shrink-0">
+    {/* Chat Requests Dropdown */}
+    <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
+      <button
+        onClick={() => setShowReceivedDropdown(!showReceivedDropdown)}
+        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
+          effectiveTheme.mode === 'dark'
+            ? 'hover:bg-blue-900/30 text-blue-200'
+            : 'hover:bg-blue-50 text-blue-800'
+        } transition-colors font-medium`}
+      >
+        <span className="flex items-center gap-2">
+          <img src={chatReqIcon} alt="Chat Requests" className="w-4 h-4" />
+          Chat Requests Received ({receivedChats.length})
+        </span>
+        {showReceivedDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+      </button>
 
 <AnimatePresence>
                       {showReceivedDropdown && (
                         <motion.div
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height: "auto", opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={{ duration: 0.3, ease: "easeInOut" }}
-      className="overflow-hidden"
-    >
-                        <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
+  initial={{ height: 0, opacity: 0 }}
+  animate={{ height: "auto", opacity: 1 }}
+  exit={{ height: 0, opacity: 0 }}
+  transition={{ duration: 0.3, ease: "easeInOut" }}
+  className="overflow-hidden"
+>
+  <div 
+    className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto"
+    style={{
+      scrollbarWidth: 'thin',
+      scrollbarColor: effectiveTheme.mode === 'dark' 
+        ? '#667eea transparent'
+        : '#8b5cf6 transparent'
+    }}
+  >
                           {receivedChats.length > 0 ? (
                             receivedChats.map((req) => (
                               <div
@@ -2506,13 +2558,21 @@ const ChattingPage = ({ onLogout }) => {
 <AnimatePresence>
                       {showAcceptedDropdown && (
                             <motion.div
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height: "auto", opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={{ duration: 0.3, ease: "easeInOut" }}
-      className="overflow-hidden"
-    >
-                        <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
+  initial={{ height: 0, opacity: 0 }}
+  animate={{ height: "auto", opacity: 1 }}
+  exit={{ height: 0, opacity: 0 }}
+  transition={{ duration: 0.3, ease: "easeInOut" }}
+  className="overflow-hidden"
+>
+  <div 
+    className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto"
+    style={{
+      scrollbarWidth: 'thin',
+      scrollbarColor: effectiveTheme.mode === 'dark' 
+        ? '#667eea transparent'
+        : '#8b5cf6 transparent'
+    }}
+  >
                           {filteredAcceptedChats && filteredAcceptedChats.length > 0 ? (
                             filteredAcceptedChats.map((chat, index) => (
                               <motion.div
@@ -2589,7 +2649,15 @@ const ChattingPage = ({ onLogout }) => {
                   </div>
 
                   {/* 🧭 Contacts List */}
-                 <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col p-4 space-y-4">
+               <div 
+  className="flex-1 overflow-y-auto p-4 space-y-4 sidebar-scroll"
+  style={{
+    scrollbarWidth: 'thin',
+    scrollbarColor: effectiveTheme.mode === 'dark' 
+      ? '#667eea transparent' // Blue-purple for dark mode
+      : '#8b5cf6 transparent' // Purple for light mode
+  }}
+>
   {/* Recent Chats */}
   {recentChats.length > 0 && (
     <div className="flex flex-col gap-2">
