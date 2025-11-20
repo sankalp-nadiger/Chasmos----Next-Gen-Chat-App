@@ -183,7 +183,7 @@ const ChatHeader = React.memo(
   }
 );
 
-// MessageBubble component definition (moved before MessagesArea)
+// MessageBubble component definition
 const MessageBubble = React.memo(
   ({ message, isPinned, onPinToggle, effectiveTheme, currentUserId }) => {
     const sender = message.sender;
@@ -198,19 +198,6 @@ const MessageBubble = React.memo(
     const handlePinClick = useCallback(() => {
       onPinToggle(message.id);
     }, [message.id, onPinToggle]);
-
-    // ✅ FIX: Dynamic colors based on theme mode
-    const getMessageBubbleStyles = () => {
-      if (isOwnMessage) {
-        // Your messages - use dark/black in light mode, dark gray in dark mode
-        return effectiveTheme.mode === 'dark' 
-          ? 'bg-gray-700 text-white' 
-          : 'bg-gray-900 text-white';
-      } else {
-        // Opponent messages - purple gradient with white text for both modes
-        return 'bg-gradient-to-br from-purple-500 to-purple-600 text-white';
-      }
-    };
 
     return (
       <motion.div
@@ -232,7 +219,11 @@ const MessageBubble = React.memo(
       >
         <motion.div
           className={`max-w-xs lg:max-w-md px-4 py-2 pb-7 rounded-lg relative ${
-            getMessageBubbleStyles()
+            isOwnMessage
+              ? `backdrop-blur-md bg-gradient-to-br from-purple-400/20 to-blue-400/20 border border-white/30 shadow-lg shadow-purple-500/10 text-white`
+              : effectiveTheme.mode === 'dark'
+                ? 'bg-blue-500/80 backdrop-blur-md text-white'
+                : 'bg-white/90 backdrop-blur-md text-gray-800 border border-gray-200'
           } ${isPinned ? "ring-2 ring-yellow-400" : ""}`}
           whileHover={{
             boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
@@ -263,7 +254,6 @@ const MessageBubble = React.memo(
             )}
           </AnimatePresence>
 
-          {/* Pin button */}
           <motion.button
             initial={{ opacity: 0, scale: 0.8 }}
             whileHover={{
@@ -284,7 +274,6 @@ const MessageBubble = React.memo(
             />
           </motion.button>
 
-          {/* Message content */}
           {message.attachments && message.attachments.length > 0 ? (
             <AttachmentRenderer
               message={message}
@@ -296,20 +285,18 @@ const MessageBubble = React.memo(
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.1 }}
-              className="text-white"
             >
               {message.content}
             </motion.p>
           )}
 
-          {/* ✅ FIX: Timestamp and read status - proper positioning */}
           <motion.div
             className="absolute bottom-2 right-3 flex items-center justify-end space-x-1"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
           >
-            <span className="text-xs opacity-75 text-white">
+            <span className={`text-xs opacity-75 ${isOwnMessage ? 'text-white' : effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-600'}`}>
               {formatMessageTime(message.timestamp)}
             </span>
             {isOwnMessage && (
@@ -328,21 +315,13 @@ const MessageBubble = React.memo(
                     <CheckCheck className="w-4 h-4 text-blue-400" />
                   </motion.div>
                 ) : (
-                  <Check className="w-4 h-4 opacity-75 text-white" />
+                  <Check className="w-4 h-4 opacity-75" />
                 )}
               </motion.div>
             )}
           </motion.div>
         </motion.div>
       </motion.div>
-    );
-  },
-  (prevProps, nextProps) => {
-    return (
-      prevProps.message.id === nextProps.message.id &&
-      prevProps.isPinned === nextProps.isPinned &&
-      String(prevProps.currentUserId || '') === String(nextProps.currentUserId || '') &&
-      JSON.stringify(prevProps.effectiveTheme) === JSON.stringify(nextProps.effectiveTheme)
     );
   }
 );
@@ -397,7 +376,7 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
     return base;
   };
 
-  const renderAttachment = (att, idx) => {
+ const renderAttachment = (att, idx) => {
     const url = att.fileUrl || att.url || att.publicUrl;
     const mime = att.mimeType || att.fileType || '';
     const rawName = att.fileName || (url ? url.split('/').pop() : `file-${idx}`);
@@ -429,18 +408,23 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
       );
     }
 
-    // ✅ FIX: File attachment styling
+    const textColor = isOwnMessage 
+      ? 'text-white' 
+      : effectiveTheme.mode === 'dark' 
+        ? 'text-white' 
+        : 'text-gray-800';
+
     return (
-      <div key={idx} className="flex items-center justify-between bg-white/10 backdrop-blur-sm p-2 rounded mb-2">
+      <div key={idx} className={`flex items-center justify-between ${isOwnMessage ? 'bg-white/10' : effectiveTheme.mode === 'dark' ? 'bg-black/20' : 'bg-gray-100/50'} backdrop-blur-sm p-2 rounded mb-2`}>
         <div className="flex items-center space-x-3 w-full">
-          <div className="w-10 h-10 bg-white/20 rounded flex items-center justify-center flex-shrink-0">
-            <FileText className="w-5 h-5 text-white" />
+          <div className={`w-10 h-10 ${isOwnMessage ? 'bg-white/20' : effectiveTheme.mode === 'dark' ? 'bg-white/10' : 'bg-gray-200'} rounded flex items-center justify-center flex-shrink-0`}>
+            <FileText className={`w-5 h-5 ${textColor}`} />
           </div>
 
           <div className="relative w-full">
-            <div className="text-sm font-medium truncate pr-16 text-white">{name}</div>
+            <div className={`text-sm font-medium truncate pr-16 ${textColor}`}>{name}</div>
             {att.fileSize && (
-              <div className="text-xs text-white/70">{(att.fileSize / 1024).toFixed(1)} KB</div>
+              <div className={`text-xs ${textColor} opacity-70`}>{(att.fileSize / 1024).toFixed(1)} KB</div>
             )}
 
             <div className="absolute right-0 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
@@ -477,19 +461,24 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
     );
   };
 
+  const textColor = isOwnMessage 
+    ? 'text-white' 
+    : effectiveTheme.mode === 'dark' 
+      ? 'text-white' 
+      : 'text-gray-800';
+
   return (
     <div>
       <div className="flex flex-col">
         {(message.attachments || []).map((att, idx) => renderAttachment(att, idx))}
       </div>
       
-      {/* ✅ FIX: Caption text color - always white */}
       {message.attachments && message.attachments.length > 0 ? (
         message.content ? (
-          <div className="mt-2 text-sm text-white">{message.content}</div>
+          <div className={`mt-2 text-sm ${textColor}`}>{message.content}</div>
         ) : null
       ) : (
-        message.content && <div className="mb-2 text-white">{message.content}</div>
+        message.content && <div className={`mb-2 ${textColor}`}>{message.content}</div>
       )}
 
       {lightboxOpen && createPortal(
@@ -528,22 +517,26 @@ const MessagesArea = ({
 }) => {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
-  // Auto-scroll to bottom when messages change
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  const handleScroll = (e) => {
+    const element = e.target;
+    const isNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 200;
+    setShowScrollButton(!isNearBottom);
+  };
+
   useEffect(() => {
-    try {
-      console.debug("MessagesArea: filteredMessages updated", {
-        length: filteredMessages?.length || 0,
-        selectedContactId,
-      });
-    } catch (e) {}
-
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [filteredMessages, isTyping]);
 
-  // Auto-scroll to bottom when component mounts or contact changes
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "auto" });
@@ -551,53 +544,167 @@ const MessagesArea = ({
   }, [selectedContactId]);
 
   return (
-    <div
-      ref={messagesContainerRef}
-      className="h-full overflow-y-auto p-4 space-y-4 scrollbar-hide relative"
-    >
-      {/* Messages Content */}
-      <div className="relative z-10">
-        <AnimatePresence mode="popLayout">
-          {filteredMessages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              isPinned={pinnedMessages[message.id] || false}
-              onPinToggle={onPinMessage}
-              effectiveTheme={effectiveTheme}
-              currentUserId={currentUserId}
+    <div className="relative h-full overflow-hidden">
+      {/* Day mode diagonal comets */}
+      {effectiveTheme.mode !== 'dark' && (
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {[...Array(5)].map((_, i) => (
+            <motion.div
+              key={`day-comet-${i}`}
+              className="absolute w-1 h-16 bg-gradient-to-b from-blue-300 via-purple-300 to-transparent rounded-full"
+              style={{
+                left: `${Math.random() * 100}%`,
+                top: `-10%`,
+                transform: `rotate(45deg)`,
+              }}
+              animate={{
+                x: [0, 400],
+                y: [0, 400],
+                opacity: [0, 1, 0],
+              }}
+              transition={{
+                duration: 3 + Math.random() * 2,
+                repeat: Infinity,
+                delay: i * 1.5,
+                ease: "linear",
+              }}
             />
           ))}
-        </AnimatePresence>
+        </div>
+      )}
 
-        {isTyping[selectedContactId] && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="flex justify-start"
-          >
-            <div
-              className={`max-w-xs px-4 py-2 rounded-lg ${effectiveTheme.message?.received || "bg-gray-200 text-gray-800"}`}
+      <div
+        ref={messagesContainerRef}
+        onScroll={handleScroll}
+        className="h-full overflow-y-auto p-4 space-y-4 scrollbar-hide relative"
+      >
+        <div className="relative z-10">
+          <AnimatePresence mode="popLayout">
+            {filteredMessages.map((message) => (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                isPinned={pinnedMessages[message.id] || false}
+                onPinToggle={onPinMessage}
+                effectiveTheme={effectiveTheme}
+                currentUserId={currentUserId}
+              />
+            ))}
+          </AnimatePresence>
+
+          {isTyping[selectedContactId] && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="flex justify-start"
             >
-              <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-current rounded-full animate-bounce" />
-                <div
-                  className="w-2 h-2 bg-current rounded-full animate-bounce"
-                  style={{ animationDelay: "0.2s" }}
-                />
-                <div
-                  className="w-2 h-2 bg-current rounded-full animate-bounce"
-                  style={{ animationDelay: "0.4s" }}
-                />
+              <div
+                className={`max-w-xs px-4 py-2 rounded-lg ${
+                  effectiveTheme.mode === 'dark'
+                    ? 'bg-blue-500/80 backdrop-blur-md text-white'
+                    : 'bg-white/90 backdrop-blur-md text-gray-800 border border-gray-200'
+                }`}
+              >
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-current rounded-full animate-bounce" />
+                  <div
+                    className="w-2 h-2 bg-current rounded-full animate-bounce"
+                    style={{ animationDelay: "0.2s" }}
+                  />
+                  <div
+                    className="w-2 h-2 bg-current rounded-full animate-bounce"
+                    style={{ animationDelay: "0.4s" }}
+                  />
+                </div>
               </div>
-            </div>
-          </motion.div>
-        )}
+            </motion.div>
+          )}
 
-        {/* Scroll target - always scroll to this element */}
-        <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} />
+        </div>
       </div>
+
+      {/* Cosmic Scroll to Bottom Button */}
+      <AnimatePresence>
+        {showScrollButton && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0, y: 20 }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={scrollToBottom}
+            className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-30 w-12 h-12 rounded-full flex items-center justify-center shadow-2xl"
+            style={{
+              background: effectiveTheme.mode === 'dark'
+                ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                : 'linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%)',
+            }}
+          >
+            {/* Comet tail effect */}
+            <motion.div
+              className="absolute inset-0 rounded-full"
+              animate={{
+                boxShadow: [
+                  '0 0 20px rgba(139, 92, 246, 0.5)',
+                  '0 0 40px rgba(139, 92, 246, 0.8)',
+                  '0 0 20px rgba(139, 92, 246, 0.5)',
+                ],
+              }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: "easeInOut",
+              }}
+            />
+            
+            {/* Star icon */}
+            <motion.div
+              animate={{
+                rotate: [0, 360],
+              }}
+              transition={{
+                duration: 20,
+                repeat: Infinity,
+                ease: "linear",
+              }}
+            >
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"
+                  fill="white"
+                />
+                <path
+                  d="M12 8L13 11L16 12L13 13L12 16L11 13L8 12L11 11L12 8Z"
+                  fill={effectiveTheme.mode === 'dark' ? '#fbbf24' : '#f59e0b'}
+                />
+              </svg>
+            </motion.div>
+
+            {/* Down arrow */}
+            <motion.div
+              className="absolute"
+              animate={{
+                y: [0, 5, 0],
+              }}
+              transition={{
+                duration: 1.5,
+                repeat: Infinity,
+                ease: "easeInOut",
+              }}
+            >
+              <ChevronDown className="w-6 h-6 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" />
+            </motion.div>
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -2200,12 +2307,12 @@ const ChattingPage = ({ onLogout }) => {
     },
   }}
   className={`${
-    isMobileView ? "absolute z-20 w-full" : "w-1/3 min-w-80"
+    isMobileView ? "absolute z-20 w-full h-full" : "w-1/3 min-w-80 h-full"
   } ${
     effectiveTheme.mode === 'dark'
       ? 'backdrop-blur-xl bg-gray-900/30 border-r border-white/10'
       : 'bg-white/95 backdrop-blur-xl border-r border-gray-200 shadow-lg'
-  } flex flex-col`}
+  } flex flex-col overflow-hidden`}
 >
                 {/* Search Header */}
                 <div className="p-4">
@@ -2482,56 +2589,56 @@ const ChattingPage = ({ onLogout }) => {
                   </div>
 
                   {/* 🧭 Contacts List */}
-                  <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col p-4 space-y-4">
-                    {/* Recent Chats */}
-                    {recentChats.length > 0 && (
-                      <div className="flex flex-col gap-2">
-                        <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
-                          Recent Chats
-                        </h4>
-                        {recentChats.map((chat) => (
-                          <ContactItem
-                            key={chat.id}
-                            contact={chat}
-                            effectiveTheme={effectiveTheme}
-                            onSelect={(c) => handleOpenChat(c)}
-                          />
-                        ))}
-                      </div>
-                    )}
+                 <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col p-4 space-y-4">
+  {/* Recent Chats */}
+  {recentChats.length > 0 && (
+    <div className="flex flex-col gap-2">
+      <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+        Recent Chats
+      </h4>
+      {recentChats.map((chat) => (
+        <ContactItem
+          key={chat.id}
+          contact={chat}
+          effectiveTheme={effectiveTheme}
+          onSelect={(c) => handleOpenChat(c)}
+        />
+      ))}
+    </div>
+  )}
 
-                    {/* All Contacts */}
-                    {contacts.length > 0 && (
-                      <div className="flex flex-col gap-2 mt-4">
-                        <h4 className="text-gray-600 dark:text-gray-300 font-semibold">
-                          Contacts
-                        </h4>
-                        {contacts.map((contact) => (
-                          <ContactItem
-                            key={contact.id}
-                            contact={contact}
-                            effectiveTheme={effectiveTheme}
-                            onSelect={(c) => handleOpenChat(c)}
-                          />
-                        ))}
-                      </div>
-                    )}
+  {/* All Contacts */}
+  {contacts.length > 0 && (
+    <div className="flex flex-col gap-2 mt-4">
+      <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+        Contacts
+      </h4>
+      {contacts.map((contact) => (
+        <ContactItem
+          key={contact.id}
+          contact={contact}
+          effectiveTheme={effectiveTheme}
+          onSelect={(c) => handleOpenChat(c)}
+        />
+      ))}
+    </div>
+  )}
 
-                    {/* Empty State */}
-                    {recentChats.length === 0 && contacts.length === 0 && (
-                      <div className="text-center space-y-4 mt-10">
-                        <p className="text-gray-500 dark:text-gray-400">
-                          Start chatting with Chasmos!
-                        </p>
-                        <button
-                          onClick={() => setShowNewChat(true)}
-                          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
-                        >
-                          New Chat
-                        </button>
-                      </div>
-                    )}
-                  </div>
+  {/* Empty State */}
+  {recentChats.length === 0 && contacts.length === 0 && (
+    <div className="text-center space-y-4 mt-10">
+      <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+        Start chatting with Chasmos!
+      </p>
+      <button
+        onClick={() => setShowNewChat(true)}
+        className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+      >
+        New Chat
+      </button>
+    </div>
+  )}
+</div>
                 </div>
 
                 {/* Floating Add Button with Menu */}
