@@ -21,7 +21,7 @@ const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
     return text.replace(/📎/g, '').replace(/🔗/g, '').trim();
   };
 
-  const previewText = cleanText(contact.lastMessage || '');
+  const previewText = cleanText(contact.lastMessage || 'Attachment');
   const hasAttachment = contact.hasAttachment || false;
   const attachmentMime = contact.attachmentMime || '';
 
