@@ -738,6 +738,7 @@ const AuthPage = ({ onAuthenticated }) => {
         <GoogleSignupComplete 
           googleData={googleData}
           currentTheme={currentTheme}
+          onBack={() => setGoogleData(null)}
           onSuccess={(userData) => {
             setGoogleData(null);
             onAuthenticated?.(true, userData);
