@@ -199,6 +199,19 @@ const MessageBubble = React.memo(
       onPinToggle(message.id);
     }, [message.id, onPinToggle]);
 
+    // ✅ FIX: Dynamic colors based on theme mode
+    const getMessageBubbleStyles = () => {
+      if (isOwnMessage) {
+        // Your messages - use dark/black in light mode, dark gray in dark mode
+        return effectiveTheme.mode === 'dark' 
+          ? 'bg-gray-700 text-white' 
+          : 'bg-gray-900 text-white';
+      } else {
+        // Opponent messages - purple gradient with white text for both modes
+        return 'bg-gradient-to-br from-purple-500 to-purple-600 text-white';
+      }
+    };
+
     return (
       <motion.div
         initial={{ opacity: 0, y: 20, scale: 0.8 }}
@@ -218,21 +231,13 @@ const MessageBubble = React.memo(
         } group relative`}
       >
         <motion.div
-  className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg relative ${
-    isOwnMessage
-      ? `
-          backdrop-blur-md 
-          bg-gradient-to-br from-purple-400/20 to-blue-400/20 
-          border border-white/30 
-          shadow-lg shadow-purple-500/10
-          text-white
-        `
-      : effectiveTheme.message?.received || "bg-gray-200 text-gray-800"
-  } ${isPinned ? "ring-2 ring-yellow-400" : ""}`}
-  whileHover={{
-    boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
-    transition: { duration: 0.3 },
-  }}
+          className={`max-w-xs lg:max-w-md px-4 py-2 pb-7 rounded-lg relative ${
+            getMessageBubbleStyles()
+          } ${isPinned ? "ring-2 ring-yellow-400" : ""}`}
+          whileHover={{
+            boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
+            transition: { duration: 0.3 },
+          }}
           animate={
             isPinned
               ? {
@@ -258,7 +263,7 @@ const MessageBubble = React.memo(
             )}
           </AnimatePresence>
 
-          {/* Pin button - shows on hover */}
+          {/* Pin button */}
           <motion.button
             initial={{ opacity: 0, scale: 0.8 }}
             whileHover={{
@@ -279,7 +284,7 @@ const MessageBubble = React.memo(
             />
           </motion.button>
 
-          {/* Attachment-aware rendering: images, video, and other files */}
+          {/* Message content */}
           {message.attachments && message.attachments.length > 0 ? (
             <AttachmentRenderer
               message={message}
@@ -291,18 +296,20 @@ const MessageBubble = React.memo(
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.1 }}
+              className="text-white"
             >
               {message.content}
             </motion.p>
           )}
 
+          {/* ✅ FIX: Timestamp and read status - proper positioning */}
           <motion.div
-            className="flex items-center justify-end mt-1 space-x-1"
+            className="absolute bottom-2 right-3 flex items-center justify-end space-x-1"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
           >
-            <span className="text-xs opacity-75">
+            <span className="text-xs opacity-75 text-white">
               {formatMessageTime(message.timestamp)}
             </span>
             {isOwnMessage && (
@@ -321,7 +328,7 @@ const MessageBubble = React.memo(
                     <CheckCheck className="w-4 h-4 text-blue-400" />
                   </motion.div>
                 ) : (
-                  <Check className="w-4 h-4 opacity-75" />
+                  <Check className="w-4 h-4 opacity-75 text-white" />
                 )}
               </motion.div>
             )}
@@ -338,7 +345,9 @@ const MessageBubble = React.memo(
       JSON.stringify(prevProps.effectiveTheme) === JSON.stringify(nextProps.effectiveTheme)
     );
   }
-); // Messages Area Component
+);
+
+// Messages Area Component
 
 /* --------------------------------------------
    AttachmentRenderer Component
@@ -349,11 +358,9 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
   const [lightboxSrc, setLightboxSrc] = useState(null);
   const [zoomed, setZoomed] = useState(false);
 
-  // Download helper: fetch file as blob and trigger download with the provided filename.
   const handleDownload = async (e, url, filename) => {
     try {
       e && e.preventDefault();
-      // Try to fetch the resource as a blob to force filename on download
       const resp = await fetch(url, { mode: 'cors' });
       if (!resp.ok) throw new Error('Network response not ok');
       const blob = await resp.blob();
@@ -364,11 +371,9 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
       document.body.appendChild(a);
       a.click();
       a.remove();
-      // Revoke after a short delay to ensure download started
       setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
     } catch (err) {
       console.error('Download failed, falling back to direct open', err);
-      // Fallback: open in new tab (browser may handle download)
       window.open(url, '_blank');
     }
   };
@@ -400,7 +405,6 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
 
     if (!url) return null;
 
-    // image
     if (mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(url)) {
       return (
         <div key={idx} className="mb-2">
@@ -410,12 +414,10 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
             className="w-64 max-w-full rounded cursor-pointer object-cover"
             onClick={() => openLightbox(url)}
           />
-          {/* filenames hidden for images (preview only) */}
         </div>
       );
     }
 
-    // video
     if (mime.startsWith('video/') || /\.(mp4|webm|ogg)$/i.test(url)) {
       return (
         <div key={idx} className="mb-2">
@@ -423,38 +425,24 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
             <source src={url} />
             Your browser does not support the video tag.
           </video>
-          {/* <div className="flex items-center justify-end mt-1 text-xs text-gray-500">
-            <a
-              href={url}
-              onClick={(e) => handleDownload(e, url, name)}
-              title={`Download ${name}`}
-              aria-label={`Download ${name}`}
-              tabIndex={0}
-              className="text-blue-500"
-            >
-              Download
-            </a>
-          </div> */}
         </div>
       );
     }
 
-    // other files (pdf, docx, etc.)
+    // ✅ FIX: File attachment styling
     return (
-      <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded mb-2">
+      <div key={idx} className="flex items-center justify-between bg-white/10 backdrop-blur-sm p-2 rounded mb-2">
         <div className="flex items-center space-x-3 w-full">
-          <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center flex-shrink-0">
-            <FileText className="w-5 h-5 text-gray-600" />
+          <div className="w-10 h-10 bg-white/20 rounded flex items-center justify-center flex-shrink-0">
+            <FileText className="w-5 h-5 text-white" />
           </div>
 
           <div className="relative w-full">
-            <div className="text-sm font-medium truncate pr-16">{name}</div>
+            <div className="text-sm font-medium truncate pr-16 text-white">{name}</div>
             {att.fileSize && (
-              <div className="text-xs text-gray-500">{(att.fileSize / 1024).toFixed(1)} KB</div>
+              <div className="text-xs text-white/70">{(att.fileSize / 1024).toFixed(1)} KB</div>
             )}
 
-            {/* Icon overlay: hidden by default, appears when parent message bubble is hovered (uses parent's `group` class).
-                Each icon uses `peer` so its tooltip only shows when that icon is hovered. */}
             <div className="absolute right-0 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
               <div className="bg-white rounded-lg p-1 shadow-sm flex items-center space-x-1">
                 <a
@@ -491,17 +479,17 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
 
   return (
     <div>
-      {/* If there are attachments, render them first and show the message text below (WhatsApp-style).
-          Otherwise show the text above attachments as usual. */}
       <div className="flex flex-col">
         {(message.attachments || []).map((att, idx) => renderAttachment(att, idx))}
       </div>
+      
+      {/* ✅ FIX: Caption text color - always white */}
       {message.attachments && message.attachments.length > 0 ? (
         message.content ? (
-          <div className="mt-2 text-sm text-gray-800 bg-transparent">{message.content}</div>
+          <div className="mt-2 text-sm text-white">{message.content}</div>
         ) : null
       ) : (
-        message.content && <div className="mb-2">{message.content}</div>
+        message.content && <div className="mb-2 text-white">{message.content}</div>
       )}
 
       {lightboxOpen && createPortal(
@@ -2192,29 +2180,33 @@ const ChattingPage = ({ onLogout }) => {
           {showSidebar &&
             !(isMobileView && (showGroupCreation || showNewChat)) && (
               <motion.div
-                initial={{ x: isMobileView ? -300 : -100, opacity: 0 }}
-                animate={{
-                  x: 0,
-                  opacity: 1,
-                  transition: {
-                    type: "spring",
-                    stiffness: 300,
-                    damping: 30,
-                    opacity: { duration: 0.3 },
-                  },
-                }}
-                exit={{
-                  x: isMobileView ? -300 : -100,
-                  opacity: 0,
-                  transition: {
-                    duration: 0.3,
-                    ease: "easeInOut",
-                  },
-                }}
-                className={`${
+  initial={{ x: isMobileView ? -300 : -100, opacity: 0 }}
+  animate={{
+    x: 0,
+    opacity: 1,
+    transition: {
+      type: "spring",
+      stiffness: 300,
+      damping: 30,
+      opacity: { duration: 0.3 },
+    },
+  }}
+  exit={{
+    x: isMobileView ? -300 : -100,
+    opacity: 0,
+    transition: {
+      duration: 0.3,
+      ease: "easeInOut",
+    },
+  }}
+  className={`${
     isMobileView ? "absolute z-20 w-full" : "w-1/3 min-w-80"
-  } backdrop-blur-xl bg-gray-900/30 border-r border-white/10 flex flex-col`}
-              >
+  } ${
+    effectiveTheme.mode === 'dark'
+      ? 'backdrop-blur-xl bg-gray-900/30 border-r border-white/10'
+      : 'bg-white/95 backdrop-blur-xl border-r border-gray-200 shadow-lg'
+  } flex flex-col`}
+>
                 {/* Search Header */}
                 <div className="p-4">
                   <div className="flex items-center justify-between mb-4">
@@ -2282,80 +2274,85 @@ const ChattingPage = ({ onLogout }) => {
                   <div>
                     {/* 🔹 Chat Requests Dropdown */}
                     <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
-                      <button
-                        onClick={() =>
-                          setShowReceivedDropdown(!showReceivedDropdown)
-                        }
-                        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-                          effectiveTheme.hover
-                            ? effectiveTheme.hover
-                            : "hover:bg-blue-100 dark:hover:bg-blue-900"
-                        } transition-colors text-blue-800 dark:text-blue-200 font-medium`}
-                      >
-                        <span className="flex items-center gap-2 text-gray-200">
-                          <img
-                            src={chatReqIcon}
-                            alt="Chat Requests"
-                            className="w-4 h-4"
-                          />
-                          Chat Requests Received ({receivedChats.length})
-                        </span>
-                        {showReceivedDropdown ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </button>
+                     <button
+  onClick={() => setShowReceivedDropdown(!showReceivedDropdown)}
+  className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
+    effectiveTheme.mode === 'dark'
+      ? 'hover:bg-blue-900/30 text-blue-200'
+      : 'hover:bg-blue-50 text-blue-800'
+  } transition-colors font-medium`}
+>
+  <span className="flex items-center gap-2">
+    <img
+      src={chatReqIcon}
+      alt="Chat Requests"
+      className="w-4 h-4"
+    />
+    Chat Requests Received ({receivedChats.length})
+  </span>
+  {showReceivedDropdown ? (
+    <ChevronUp className="w-4 h-4" />
+  ) : (
+    <ChevronDown className="w-4 h-4" />
+  )}
+</button>
 
+<AnimatePresence>
                       {showReceivedDropdown && (
+                        <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={{ duration: 0.3, ease: "easeInOut" }}
+      className="overflow-hidden"
+    >
                         <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
                           {receivedChats.length > 0 ? (
                             receivedChats.map((req) => (
                               <div
-                                key={req._id || req.email}
-                                className={`flex justify-between items-center p-2 rounded-md ${
-                                  effectiveTheme.hover
-                                    ? effectiveTheme.hover
-                                    : "hover:bg-gray-100 dark:hover:bg-gray-700"
-                                } transition-colors`}
-                              >
-                                {/* Left side: profile + info */}
-                                <div className="flex items-center gap-3 flex-1">
-                                  <img
-                                    src={
-                                      req.avatar ||
-                                      "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-                                    }
-                                    alt={req.name || "User"}
-                                    className="w-10 h-10 rounded-full object-cover"
-                                  />
-                                  <div>
-                                    <p className="font-medium text-gray-100 truncate">
-                                      {req.name ||
-                                        req.email?.split("@")[0] ||
-                                        "Unknown User"}
-                                    </p>
-                                    {/*  Show initial invite message */}
-                                    {req.message ? (
-                                      <p className="text-sm text-gray-400 truncate">
-                                        “{req.message}”
-                                      </p>
-                                    ) : (
-                                      <p className="text-sm text-gray-500 truncate">
-                                        No message
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
+  key={req._id || req.email}
+  className={`flex justify-between items-center p-2 rounded-md ${
+    effectiveTheme.mode === 'dark'
+      ? 'hover:bg-gray-700/50'
+      : 'hover:bg-gray-100'
+  } transition-colors`}
+>
+  <div className="flex items-center gap-3 flex-1">
+    <img
+      src={
+        req.avatar ||
+        "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+      }
+      alt={req.name || "User"}
+      className="w-10 h-10 rounded-full object-cover"
+    />
+    <div>
+      <p className={`font-medium truncate ${
+        effectiveTheme.mode === 'dark' ? 'text-gray-100' : 'text-gray-900'
+      }`}>
+        {req.name || req.email?.split("@")[0] || "Unknown User"}
+      </p>
+      {req.message ? (
+        <p className={`text-sm truncate ${
+          effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-600'
+        }`}>
+          "{req.message}"
+        </p>
+      ) : (
+        <p className="text-sm text-gray-500 truncate">
+          No message
+        </p>
+      )}
+    </div>
+  </div>
+  <button
+    onClick={() => handleAcceptChat(req.email)}
+    className="px-3 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition"
+  >
+    Accept
+  </button>
+</div>
 
-                                {/* Right side: Accept button */}
-                                <button
-                                  onClick={() => handleAcceptChat(req.email)}
-                                  className="px-3 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition"
-                                >
-                                  Accept
-                                </button>
-                              </div>
                             ))
                           ) : (
                             <div
@@ -2369,97 +2366,102 @@ const ChattingPage = ({ onLogout }) => {
                             </div>
                           )}
                         </div>
+                        </motion.div>
                       )}
+</AnimatePresence>
                     </div>
 
                     {/* 🔹 Accepted Chats Dropdown */}
                     <div className="rounded-md justify-between items-center px-2 py-1">
                       <button
-                        onClick={() =>
-                          setShowAcceptedDropdown(!showAcceptedDropdown)
-                        }
-                        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-                          effectiveTheme.hover
-                            ? effectiveTheme.hover
-                            : "hover:bg-green-100 dark:hover:bg-green-900"
-                        } transition-colors text-green-800 dark:text-green-200 font-medium`}
-                      >
-                        <span className="flex items-center gap-2 text-gray-200">
-                          <img
-                            src={chatAcceptIcon}
-                            alt="Chats Accepted"
-                            className="w-4 h-4"
-                          />
-                          Chat Invites Accepted ({filteredAcceptedChats?.length || 0})
-                        </span>
-                        {showAcceptedDropdown ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </button>
+  onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
+  className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
+    effectiveTheme.mode === 'dark'
+      ? 'hover:bg-green-900/30 text-green-200'
+      : 'hover:bg-green-50 text-green-800'
+  } transition-colors font-medium`}
+>
+  <span className="flex items-center gap-2">
+    <img
+      src={chatAcceptIcon}
+      alt="Chats Accepted"
+      className="w-4 h-4"
+    />
+    Chat Invites Accepted ({filteredAcceptedChats?.length || 0})
+  </span>
+  {showAcceptedDropdown ? (
+    <ChevronUp className="w-4 h-4" />
+  ) : (
+    <ChevronDown className="w-4 h-4" />
+  )}
+</button>
 
+<AnimatePresence>
                       {showAcceptedDropdown && (
+                            <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={{ duration: 0.3, ease: "easeInOut" }}
+      className="overflow-hidden"
+    >
                         <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
                           {filteredAcceptedChats && filteredAcceptedChats.length > 0 ? (
                             filteredAcceptedChats.map((chat, index) => (
                               <motion.div
-                                key={
-                                  chat._id || chat.email || `accepted-${index}`
-                                } // ✅ ensures unique key
-                                whileHover={{ scale: 0.98 }}
-                                className={`flex justify-between items-center p-2 rounded-md ${
-                                  effectiveTheme.hover
-                                    ? effectiveTheme.hover
-                                    : "hover:bg-gray-100 dark:hover:bg-gray-700"
-                                } transition-colors`}
-                              >
-                                {/* Left side: profile + info */}
-                                <div className="flex items-center gap-3 flex-1 overflow-hidden">
-                                  <div className="relative flex-shrink-0">
-                                    <img
-                                      src={
-                                        chat.avatar ||
-                                        "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-                                      }
-                                      alt={chat.name || chat.email || "User"}
-                                      className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
-                                    />
-                                  </div>
+  key={chat._id || chat.email || `accepted-${index}`}
+  whileHover={{ scale: 0.98 }}
+  className={`flex justify-between items-center p-2 rounded-md ${
+    effectiveTheme.mode === 'dark'
+      ? 'hover:bg-gray-700/50'
+      : 'hover:bg-gray-100'
+  } transition-colors`}
+>
+  <div className="flex items-center gap-3 flex-1 overflow-hidden">
+    <div className="relative flex-shrink-0">
+      <img
+        src={
+          chat.avatar ||
+          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+        }
+        alt={chat.name || chat.email || "User"}
+        className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
+      />
+    </div>
 
-                                  <div className="overflow-hidden">
-                                    <p className="font-medium text-gray-100 truncate">
-                                      {/* ✅ Fixed name handling */}
-                                      {chat.name?.trim() &&
-                                      chat.name !== "Unknown User"
-                                        ? chat.name
-                                        : chat.email?.split("@")[0] ||
-                                          "Unknown User"}
-                                    </p>
+    <div className="overflow-hidden">
+      <p className={`font-medium truncate ${
+        effectiveTheme.mode === 'dark' ? 'text-gray-100' : 'text-gray-900'
+      }`}>
+        {chat.name?.trim() && chat.name !== "Unknown User"
+          ? chat.name
+          : chat.email?.split("@")[0] || "Unknown User"}
+      </p>
 
-                                    {/* ✅ WhatsApp-like normal message preview */}
-                                    {chat.message ? (
-                                      <p className="text-sm text-gray-300 truncate">
-                                        {chat.message}
-                                      </p>
-                                    ) : (
-                                      <p className="text-sm text-gray-500 truncate">
-                                        No message
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
+      {chat.message ? (
+        <p className={`text-sm truncate ${
+          effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-600'
+        }`}>
+          {chat.message}
+        </p>
+      ) : (
+        <p className="text-sm text-gray-500 truncate">
+          No message
+        </p>
+      )}
+    </div>
+  </div>
 
-                                {/* Right side: open chat button */}
-                                <motion.button
-                                  whileHover={{ scale: 0.95 }}
-                                  onClick={() => handleOpenChat(chat)}
-                                  className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
-                                  title="Open Chat"
-                                >
-                                  <MessageCircle className="w-5 h-5 text-white" />
-                                </motion.button>
-                              </motion.div>
+  <motion.button
+    whileHover={{ scale: 0.95 }}
+    onClick={() => handleOpenChat(chat)}
+    className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
+    title="Open Chat"
+  >
+    <MessageCircle className="w-5 h-5 text-white" />
+  </motion.button>
+</motion.div>
+
                             ))
                           ) : (
                             <div
@@ -2473,7 +2475,9 @@ const ChattingPage = ({ onLogout }) => {
                             </div>
                           )}
                         </div>
+                        </motion.div>
                       )}
+                      </AnimatePresence>
                     </div>
                   </div>
 
