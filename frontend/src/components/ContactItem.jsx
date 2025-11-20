@@ -1,5 +1,5 @@
 import React from "react";
-import { MessageCircle, Image, FileText, File, Video } from "lucide-react";
+import { Image, FileText, File, Video } from "lucide-react";
 
 // Utility to format timestamp nicely
 const formatTimestamp = (timestamp) => {
@@ -15,26 +15,16 @@ const formatTimestamp = (timestamp) => {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
-//recent-chats in main chat area
 const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
-  // Determine a consistent preview text for the contact list:
-  // Prefer explicit lastMessage, then any attachment filename, then typing/placeholder.
-  const previewText =
-    contact.lastMessage ||
-    contact.attachmentName ||
-    contact.attachmentFileName ||
-    contact.fileName ||
-    (contact.isTyping ? "Typing..." : "Attachment");
+  // ✅ Clean preview text - remove any emojis or extra symbols
+  const cleanText = (text) => {
+    if (!text || typeof text !== 'string') return '';
+    return text.replace(/📎/g, '').replace(/🔗/g, '').trim();
+  };
 
-  // Detect attachment presence when backend didn't set hasAttachment.
-  const looksLikeFilename = (s) => typeof s === 'string' && /\.[a-zA-Z0-9]{1,6}$/.test(s.trim());
-  const computedHasAttachment = !!(
-    contact.hasAttachment ||
-    contact.attachmentName ||
-    contact.attachmentFileName ||
-    contact.fileName ||
-    (typeof contact.lastMessage === 'string' && (contact.lastMessage.includes('📎') || looksLikeFilename(contact.lastMessage)))
-  );
+  const previewText = cleanText(contact.lastMessage || '');
+  const hasAttachment = contact.hasAttachment || false;
+  const attachmentMime = contact.attachmentMime || '';
 
   return (
     <div
@@ -42,8 +32,8 @@ const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
       onClick={() => onSelect(contact)}
     >
       {/* Left: Avatar and info */}
-      <div className="flex items-center space-x-3 min-w-0">
-        <div className="relative">
+      <div className="flex items-center space-x-3 flex-1 min-w-0">
+        <div className="relative flex-shrink-0">
           {contact.avatar ? (
             <img
               src={contact.avatar}
@@ -61,52 +51,52 @@ const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
         </div>
 
         <div className="flex-1 min-w-0">
-  <div className="flex items-center justify-between">
-    <h3
-      className={`font-semibold truncate ${effectiveTheme.text || "text-gray-900"}`}
-    >
-      {contact.name || contact.username}
-    </h3>
-    <span
-      className={`text-xs flex-shrink-0 ml-3 ${effectiveTheme.textSecondary || "text-gray-500"}`}
-    >
-      {formatTimestamp(contact.timestamp)}
-    </span>
-  </div>
-  <p className={`text-sm truncate ${effectiveTheme.textSecondary || "text-gray-500"}`}>
-    {computedHasAttachment ? (
-      <span className="inline-flex items-center gap-2">
-        {(() => {
-          const mime = contact.attachmentMime || "";
-          // if no mime available, try extension heuristic
-          if (mime.startsWith("image/") || (previewText && /\.(png|jpe?g|gif|webp|bmp)$/i.test(previewText))) return <Image className="w-4 h-4" />;
-          if (mime.startsWith("video/") || (previewText && /\.(mp4|webm|ogg)$/i.test(previewText))) return <Video className="w-4 h-4" />;
-          if (mime.includes("pdf") || (previewText && /\.pdf$/i.test(previewText))) return <FileText className="w-4 h-4" />;
-          return <File className="w-4 h-4" />;
-        })()}
-        <span className="truncate">{previewText}</span>
-      </span>
-    ) : (
-      contact.lastMessage || (contact.isTyping ? "Typing..." : "Say hi!")
-    )}
-  </p>
-</div>
-
-      </div>
-
-      {/* Right: Chat icon / unread badge */}
-      <div className="flex flex-col items-end ml-4 space-y-1">
-        {contact.unreadCount > 0 && (
-          <div className="w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
-            {contact.unreadCount}
+          <div className="flex items-center justify-between gap-2">
+            <h3
+              className={`font-semibold truncate ${effectiveTheme.text || "text-gray-900"}`}
+            >
+              {contact.name || contact.username}
+            </h3>
+            <span
+              className={`text-xs flex-shrink-0 ${effectiveTheme.textSecondary || "text-gray-500"}`}
+            >
+              {formatTimestamp(contact.timestamp)}
+            </span>
           </div>
-        )}
-        <div
-          className={`w-10 h-10 rounded-full ${effectiveTheme.accent || "bg-blue-500"} flex items-center justify-center`}
-        >
-          <MessageCircle className="w-5 h-5 text-white" />
+          
+          {/* ✅ Preview with icon only when attachment exists */}
+          <div className="flex items-center gap-2 min-w-0">
+            {hasAttachment && (
+              <div className="flex-shrink-0">
+                {(() => {
+                  if (attachmentMime.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp)$/i.test(previewText)) {
+                    return <Image className="w-4 h-4" />;
+                  }
+                  if (attachmentMime.startsWith("video/") || /\.(mp4|webm|ogg)$/i.test(previewText)) {
+                    return <Video className="w-4 h-4" />;
+                  }
+                  if (attachmentMime.includes("pdf") || /\.pdf$/i.test(previewText)) {
+                    return <FileText className="w-4 h-4" />;
+                  }
+                  return <File className="w-4 h-4" />;
+                })()}
+              </div>
+            )}
+            <p className={`text-sm truncate ${effectiveTheme.textSecondary || "text-gray-500"}`}>
+              {previewText || (contact.isTyping ? "Typing..." : "Say hi!")}
+            </p>
+          </div>
         </div>
       </div>
+
+      {/* ✅ Right: Only unread badge, NO chat icon */}
+      {contact.unreadCount > 0 && (
+        <div className="flex-shrink-0 ml-3">
+          <div className="w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center font-semibold">
+            {contact.unreadCount > 9 ? '9+' : contact.unreadCount}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
