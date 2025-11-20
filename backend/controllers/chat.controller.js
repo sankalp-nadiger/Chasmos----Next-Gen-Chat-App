@@ -242,27 +242,20 @@ export const getRecentChats = async (req, res) => {
         unread = chat.unreadCount[String(userId)] || chat.unreadCount[userId] || 0;
       }
 
-      // ✅ FIX: Determine last message preview WITHOUT paperclip emoji
+      // Determine last message preview
       let lastMessageText = "";
-      let hasAttachments = false;
-      let attachmentMime = null;
-      let attachmentName = null;
-
       if (chat.lastMessage) {
         const msg = chat.lastMessage;
         const text = (msg.content || msg.text || "").toString().trim();
 
-        hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+        const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
 
         if (text && text.length > 0) {
-          // ✅ If there's text, show only the text (no paperclip)
           const preview = text.split(/\s+/).slice(0, 8).join(" ");
-          lastMessageText = preview;
+          lastMessageText = hasAttachments ? `${preview} 📎` : preview;
         } else if (hasAttachments) {
-          // ✅ If only attachment (no caption), show filename
           const att = msg.attachments[0];
           let filename = att.fileName || att.file_name || att.filename || "";
-          
           if (!filename && att.fileUrl) {
             try {
               filename = path.basename(new URL(att.fileUrl).pathname);
@@ -271,13 +264,8 @@ export const getRecentChats = async (req, res) => {
             }
           }
 
-          // Remove timestamp prefix from filename
           filename = filename.replace(/^[\d\-:.]+_/, "");
           lastMessageText = filename || "Attachment";
-          
-          // Store attachment metadata for frontend icon rendering
-          attachmentName = filename;
-          attachmentMime = att.mimeType || att.fileType || null;
         }
       }
 
@@ -287,9 +275,6 @@ export const getRecentChats = async (req, res) => {
         lastMessage: lastMessageText || "Say hi!",
         timestamp: chat.updatedAt || chat.timestamp,
         unreadCount: unread,
-        hasAttachment: hasAttachments, // ✅ Add flag for frontend
-        attachmentMime: attachmentMime, // ✅ Add mime type for icon
-        attachmentName: attachmentName, // ✅ Add filename
         otherUser: {
           id: otherUser?._id ? String(otherUser._id) : null,
           username: otherUser?.name || otherUser?.email || null,
