@@ -347,28 +347,38 @@ export const acceptChatRequest = asyncHandler(async (req, res) => {
     throw new Error("Sender or receiver not found");
   }
 
-  // Remove sender from receiver’s received list
-  receiver.receivedChatRequests = receiver.receivedChatRequests.filter(
-    (r) => r.email.toLowerCase() !== senderEmail.toLowerCase()
-  );
+  // ------------ SAFELY FILTER RECEIVED CHAT REQUESTS ------------
+  receiver.receivedChatRequests = receiver.receivedChatRequests.filter((r) => {
+    if (!r || !r.email) return false; // remove invalid entries
+    return r.email.toLowerCase() !== senderEmail.toLowerCase();
+  });
   await receiver.save();
 
-  // Remove receiver from sender’s sent list
-  sender.sentChatRequests = sender.sentChatRequests.filter(
-    (r) => r.email.toLowerCase() !== receiver.email.toLowerCase()
-  );
+  // ------------ SAFELY FILTER SENT CHAT REQUESTS ------------
+  sender.sentChatRequests = sender.sentChatRequests.filter((r) => {
+    if (!r || !r.email) return false; // remove invalid entries
+    return r.email.toLowerCase() !== receiver.email.toLowerCase();
+  });
 
+  // ------------ ADD TO ACCEPTED LIST ------------
   if (!sender.acceptedChatRequests.includes(receiver.email)) {
     sender.acceptedChatRequests.push(receiver.email);
   }
 
   await sender.save();
 
+  // ------------ SEND ACCEPTED CHAT BACK TO FRONTEND ------------
   res.status(200).json({
     message: "Chat request accepted",
-    receivedChatRequests: receiver.receivedChatRequests,
+    acceptedChat: {
+      email: receiver.email,
+      name: receiver.name,
+      avatar: receiver.avatar,
+      message: "", // you can include any extra fields here
+    },
   });
 });
+
 
 // Fetch accepted chat requests that other users accepted which were sent by the current user
 export const getAcceptedChatRequestsSentByUser = asyncHandler(

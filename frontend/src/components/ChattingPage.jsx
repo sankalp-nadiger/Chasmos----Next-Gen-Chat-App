@@ -775,6 +775,7 @@ const ChattingPage = ({ onLogout }) => {
   const [showReceivedDropdown, setShowReceivedDropdown] = useState(false);
   const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
 
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -1082,91 +1083,110 @@ const ChattingPage = ({ onLogout }) => {
 
   //handle on clicking accept button
   // ✅ Accept Chat Request
-  const handleAcceptChat = async (senderEmail) => {
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) throw new Error("No token found.");
-
-      const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ senderEmail }),
-      });
-
-      const data = await res.json();
-      if (!res.ok)
-        throw new Error(data.message || "Failed to accept chat request");
-
-      // ✅ Remove the accepted chat from 'Received' section
-      setReceivedChats((prev) => prev.filter((r) => r.email !== senderEmail));
-
-      console.log("✅ Chat request accepted! Sender will see it.");
-
-      // ✅ Optionally refresh accepted chats after accepting
-      fetchAcceptedChats();
-    } catch (error) {
-      console.error("❌ Error accepting chat request:", error);
-    }
-  };
-
-  // Fetch accepted chats on component mount
-  // Fetch all accepted chats
-  useEffect(() => {
   const fetchAcceptedChats = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        console.error("No token found — user not logged in");
-        return;
-      }
-
-      // Fetch accepted chats (backend now returns full objects)
-      const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Failed to fetch accepted chats: ${errorText}`);
-      }
-
-      const acceptedData = await res.json();
-      console.log("✅ Accepted Chats (raw from backend):", acceptedData);
-
-      if (!Array.isArray(acceptedData)) {
-        console.warn("Accepted chats response is not an array, resetting to empty");
-        setAcceptedChats([]);
-        return;
-      }
-
-      // Normalize and filter entries
-      const normalizedChats = acceptedData
-        .filter(Boolean)
-        .map((chat) => ({
-          _id: chat._id || chat.email || Math.random().toString(36).substr(2, 9),
-          email: chat.email || "",
-          name: chat.name || chat.email?.split("@")[0] || "Unknown",
-          avatar:
-            chat.avatar ||
-            "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
-          message: chat.message || "",
-          date: chat.date ? new Date(chat.date) : new Date(),
-        }));
-
-      console.log("✅ Normalized Accepted Chats:", normalizedChats);
-
-      setAcceptedChats(normalizedChats);
-    } catch (err) {
-      console.error("Error fetching accepted chats:", err);
-      setAcceptedChats([]); // safe fallback
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      console.error("No token found");
+      return;
     }
-  };
 
+    const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`Failed to fetch accepted chats: ${errorText}`);
+    }
+
+    const acceptedData = await res.json();
+    console.log("✅ Accepted Chats (raw):", acceptedData);
+
+    if (!Array.isArray(acceptedData)) {
+      setAcceptedChats([]);
+      return;
+    }
+
+    // Normalize entire list
+    const normalizedChats = acceptedData
+      .filter(Boolean)
+      .map((chat) => ({
+        _id: chat._id || chat.email,
+        email: chat.email || "",
+        name: chat.name || chat.email?.split("@")[0] || "Unknown",
+        avatar:
+          chat.avatar ||
+          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+        message: chat.message || "",
+        date: chat.date ? new Date(chat.date) : new Date(),
+      }));
+
+    console.log("🔹 Normalized Accepted Chats:", normalizedChats);
+
+    setAcceptedChats(normalizedChats);
+    setFilteredAcceptedChats(normalizedChats); // important
+  } catch (err) {
+    console.error("Error fetching accepted chats:", err);
+    setAcceptedChats([]);
+  }
+};
+
+const handleAcceptChat = async (senderEmail) => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) throw new Error("No token found.");
+
+    const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ senderEmail }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message);
+
+    // Remove from received
+    setReceivedChats((prev) =>
+      prev.filter((c) => c.email !== senderEmail)
+    );
+
+    // Add to accepted instantly
+    if (data.acceptedChat) {
+      const normalized = {
+        _id: data.acceptedChat._id || data.acceptedChat.email,
+        email: data.acceptedChat.email,
+        name:
+          data.acceptedChat.name ||
+          data.acceptedChat.email?.split("@")[0] ||
+          "Unknown",
+        avatar:
+          data.acceptedChat.avatar ||
+          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+        message: data.acceptedChat.message || "",
+        date: new Date(),
+      };
+
+      setFilteredAcceptedChats((prev) => [...prev, normalized]);
+      setAcceptedChats((prev) => [...prev, normalized]);
+    }
+
+    console.log("✅ Chat accepted!");
+
+    // sync with backend
+    fetchAcceptedChats();
+  } catch (error) {
+    console.error("❌ Error accepting chat:", error);
+  }
+};
+
+useEffect(() => {
   fetchAcceptedChats();
 }, []);
+
 
 
   // ✅ Run once when the component mounts (and on mobile view change if needed)
@@ -2665,120 +2685,113 @@ useEffect(() => {
 
                     {/* 🔹 Accepted Chats Dropdown */}
                     <div className="rounded-md justify-between items-center px-2 py-1">
-                      <button
-  onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
-  className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-    effectiveTheme.mode === 'dark'
-      ? 'hover:bg-green-900/30 text-green-200'
-      : 'hover:bg-green-50 text-green-800'
-  } transition-colors font-medium`}
->
-  <span className="flex items-center gap-2">
-    <img
-      src={chatAcceptIcon}
-      alt="Chats Accepted"
-      className="w-4 h-4"
-    />
-    Chat Invites Accepted ({filteredAcceptedChats?.length || 0})
-  </span>
-  {showAcceptedDropdown ? (
-    <ChevronUp className="w-4 h-4" />
-  ) : (
-    <ChevronDown className="w-4 h-4" />
-  )}
-</button>
-
-<AnimatePresence>
-                      {showAcceptedDropdown && (
-                            <motion.div
-  initial={{ height: 0, opacity: 0 }}
-  animate={{ height: "auto", opacity: 1 }}
-  exit={{ height: 0, opacity: 0 }}
-  transition={{ duration: 0.3, ease: "easeInOut" }}
-  className="overflow-hidden"
->
-  <div 
-    className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto"
-    style={{
-      scrollbarWidth: 'thin',
-      scrollbarColor: effectiveTheme.mode === 'dark' 
-        ? '#667eea transparent'
-        : '#8b5cf6 transparent'
-    }}
+  <button
+    onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
+    className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
+      effectiveTheme.mode === "dark"
+        ? "hover:bg-green-900/30 text-green-200"
+        : "hover:bg-green-50 text-green-800"
+    } transition-colors font-medium`}
   >
-                          {filteredAcceptedChats && filteredAcceptedChats.length > 0 ? (
-                            filteredAcceptedChats.map((chat, index) => (
-                              <motion.div
-  key={chat._id || chat.email || `accepted-${index}`}
-  whileHover={{ scale: 0.98 }}
-  className={`flex justify-between items-center p-2 rounded-md ${
-    effectiveTheme.mode === 'dark'
-      ? 'hover:bg-gray-700/50'
-      : 'hover:bg-gray-100'
-  } transition-colors`}
->
-  <div className="flex items-center gap-3 flex-1 overflow-hidden">
-    <div className="relative flex-shrink-0">
+    <span className="flex items-center gap-2">
       <img
-        src={
-          chat.avatar ||
-          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-        }
-        alt={chat.name || chat.email || "User"}
-        className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
+        src={chatAcceptIcon}
+        alt="Chats Accepted"
+        className="w-4 h-4"
       />
-    </div>
+      Chat Invites Accepted ({filteredAcceptedChats?.length || 0})
+    </span>
+    {showAcceptedDropdown ? (
+      <ChevronUp className="w-4 h-4" />
+    ) : (
+      <ChevronDown className="w-4 h-4" />
+    )}
+  </button>
 
-    <div className="overflow-hidden">
-      <p className={`font-medium truncate ${
-        effectiveTheme.mode === 'dark' ? 'text-gray-100' : 'text-gray-900'
-      }`}>
-        {chat.name?.trim() && chat.name !== "Unknown User"
-          ? chat.name
-          : chat.email?.split("@")[0] || "Unknown User"}
-      </p>
+  <AnimatePresence>
+    {showAcceptedDropdown && (
+      <motion.div
+        initial={{ height: 0, opacity: 0 }}
+        animate={{ height: "auto", opacity: 1 }}
+        exit={{ height: 0, opacity: 0 }}
+        transition={{ duration: 0.3, ease: "easeInOut" }}
+        className="overflow-hidden"
+      >
+        <div
+          className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto"
+          style={{
+            scrollbarWidth: "thin",
+            scrollbarColor:
+              effectiveTheme.mode === "dark"
+                ? "#667eea transparent"
+                : "#8b5cf6 transparent",
+          }}
+        >
+          {filteredAcceptedChats && filteredAcceptedChats.length > 0 ? (
+            filteredAcceptedChats.map((chat, index) => (
+              <motion.div
+                key={chat._id || chat.email || `accepted-${index}`}
+                whileHover={{ scale: 0.98 }}
+                className={`flex justify-between items-center p-2 rounded-md ${
+                  effectiveTheme.mode === "dark"
+                    ? "hover:bg-gray-700/50"
+                    : "hover:bg-gray-100"
+                } transition-colors`}
+              >
+                <div className="flex items-center gap-3 flex-1 overflow-hidden">
+                  <div className="relative flex-shrink-0">
+                    <img
+                      src={
+                        chat.avatar ||
+                        "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+                      }
+                      alt={chat.name || chat.email || "User"}
+                      className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
+                    />
+                  </div>
 
-      {chat.message ? (
-        <p className={`text-sm truncate ${
-          effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-600'
-        }`}>
-          {chat.message}
-        </p>
-      ) : (
-        <p className="text-sm text-gray-500 truncate">
-          No message
-        </p>
-      )}
-    </div>
-  </div>
+                  <div className="overflow-hidden">
+                    <p
+                      className={`font-medium truncate ${
+                        effectiveTheme.mode === "dark"
+                          ? "text-gray-100"
+                          : "text-gray-900"
+                      }`}
+                    >
+                      {chat.name?.trim() && chat.name !== "Unknown User"
+                        ? chat.name
+                        : chat.email?.split("@")[0] || "Unknown User"}
+                    </p>
+                  </div>
+                </div>
 
-  <motion.button
-    whileHover={{ scale: 0.95 }}
-    onClick={() => handleOpenChat(chat)}
-    className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
-    title="Open Chat"
-  >
-    <MessageCircle className="w-5 h-5 text-white" />
-  </motion.button>
-</motion.div>
+                <motion.button
+                  whileHover={{ scale: 0.95 }}
+                  onClick={() => handleOpenChat(chat)}
+                  className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
+                  title="Open Chat"
+                >
+                  <MessageCircle className="w-5 h-5 text-white" />
+                </motion.button>
+              </motion.div>
+            ))
+          ) : (
+            <div
+              className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
+                effectiveTheme.searchBg
+                  ? effectiveTheme.searchBg
+                  : "bg-gray-100 dark:bg-gray-800"
+              } text-gray-400`}
+            >
+              No new accepted invites yet
+            </div>
+          )}
+        </div>
+      </motion.div>
+    )}
+  </AnimatePresence>
+</div>
 
-                            ))
-                          ) : (
-                            <div
-                              className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
-                                effectiveTheme.searchBg
-                                  ? effectiveTheme.searchBg
-                                  : "bg-gray-100 dark:bg-gray-800"
-                              } text-gray-400`}
-                            >
-                              No new accepted invites yet
-                            </div>
-                          )}
-                        </div>
-                        </motion.div>
-                      )}
-                      </AnimatePresence>
-                    </div>
                   </div>
 
                   {/* 🧭 Contacts List */}
