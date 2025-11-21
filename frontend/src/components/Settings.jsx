@@ -17,6 +17,7 @@ import {
   Trash2,
   Info,
 } from "lucide-react";
+import Logo from "./Logo";
 
 const Settings = ({ onClose, effectiveTheme }) => {
   const [notifications, setNotifications] = useState(true);
@@ -111,6 +112,14 @@ const Settings = ({ onClose, effectiveTheme }) => {
             >
               <X className={`w-5 h-5 ${effectiveTheme.text}`} />
             </button>
+            
+            {/* Chasmos Logo and Name */}
+            <div className="flex items-center space-x-2">
+              <Logo size="md" showText={true} textClassName={effectiveTheme.text} />
+            </div>
+            
+            <div className={`hidden sm:block border-l ${effectiveTheme.border} h-8 mx-2`}></div>
+            
             <div>
               <h2 className={`text-lg font-semibold ${effectiveTheme.text}`}>
                 Settings
