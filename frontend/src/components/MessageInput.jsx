@@ -173,76 +173,75 @@ const MessageInput = React.memo(({
                 className={`absolute -top-20 left-0 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50`}
               >
                 <div className="flex items-center space-x-4">
-                  {/* Document Upload */}
-                  <motion.div
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-blue-50 transition-colors"
-                    onClick={() => handleFileUpload('document')}
-                  >
-                    <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-white" />
-                    </div>
-                    <p className={`${effectiveTheme.text} text-xs font-medium`}>Document</p>
-                  </motion.div>
+                 {/* Document Upload */}
+<motion.div
+  whileHover={{ scale: 1.1 }}
+  whileTap={{ scale: 0.95 }}
+  className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-blue-500 hover:bg-opacity-10 transition-colors"
+  onClick={() => handleFileUpload('document')}
+>
+  <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
+    <FileText className="w-5 h-5 text-white" />
+  </div>
+  <p className={`${effectiveTheme.text} text-xs font-medium`}>Document</p>
+</motion.div>
 
-                  {/* Image Upload */}
-                  <motion.div
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-green-50 transition-colors"
-                    onClick={() => handleFileUpload('image')}
-                  >
-                    <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
-                      <Image className="w-5 h-5 text-white" />
-                    </div>
-                    <p className={`${effectiveTheme.text} text-xs font-medium`}>Photo</p>
-                  </motion.div>
+{/* Image Upload */}
+<motion.div
+  whileHover={{ scale: 1.1 }}
+  whileTap={{ scale: 0.95 }}
+  className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-green-500 hover:bg-opacity-10 transition-colors"
+  onClick={() => handleFileUpload('image')}
+>
+  <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+    <Image className="w-5 h-5 text-white" />
+  </div>
+  <p className={`${effectiveTheme.text} text-xs font-medium`}>Photo</p>
+</motion.div>
 
-                  {/* Video Upload */}
-                  <motion.div
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-yellow-50 transition-colors"
-                    onClick={() => handleFileUpload('video')}
-                  >
-                    <div className="w-10 h-10 bg-yellow-500 rounded-full flex items-center justify-center">
-                      <Camera className="w-5 h-5 text-white" />
-                    </div>
-                    <p className={`${effectiveTheme.text} text-xs font-medium`}>Video</p>
-                  </motion.div>
+{/* Video Upload */}
+<motion.div
+  whileHover={{ scale: 1.1 }}
+  whileTap={{ scale: 0.95 }}
+  className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-yellow-500 hover:bg-opacity-10 transition-colors"
+  onClick={() => handleFileUpload('video')}
+>
+  <div className="w-10 h-10 bg-yellow-500 rounded-full flex items-center justify-center">
+    <Camera className="w-5 h-5 text-white" />
+  </div>
+  <p className={`${effectiveTheme.text} text-xs font-medium`}>Video</p>
+</motion.div>
 
-                  {/* Camera */}
-                  <motion.div
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-purple-50 transition-colors"
-                    onClick={() => {
-                      // Offer camera capture for photo by triggering the image input
-                      imageInputRef.current?.click();
-                      setShowAttachmentMenu(false);
-                    }}
-                  >
-                    <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
-                      <Camera className="w-5 h-5 text-white" />
-                    </div>
-                    <p className={`${effectiveTheme.text} text-xs font-medium`}>Camera</p>
-                  </motion.div>
+{/* Camera */}
+<motion.div
+  whileHover={{ scale: 1.1 }}
+  whileTap={{ scale: 0.95 }}
+  className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-purple-500 hover:bg-opacity-10 transition-colors"
+  onClick={() => {
+    imageInputRef.current?.click();
+    setShowAttachmentMenu(false);
+  }}
+>
+  <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
+    <Camera className="w-5 h-5 text-white" />
+  </div>
+  <p className={`${effectiveTheme.text} text-xs font-medium`}>Camera</p>
+</motion.div>
 
-                  {/* Location */}
-                  <motion.div
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-red-50 transition-colors"
-                    onClick={() => {
-                      setShowAttachmentMenu(false);
-                    }}
-                  >
-                    <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center">
-                      <MapPin className="w-5 h-5 text-white" />
-                    </div>
-                    <p className={`${effectiveTheme.text} text-xs font-medium`}>Location</p>
-                  </motion.div>
+{/* Location */}
+<motion.div
+  whileHover={{ scale: 1.1 }}
+  whileTap={{ scale: 0.95 }}
+  className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-red-500 hover:bg-opacity-10 transition-colors"
+  onClick={() => {
+    setShowAttachmentMenu(false);
+  }}
+>
+  <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center">
+    <MapPin className="w-5 h-5 text-white" />
+  </div>
+  <p className={`${effectiveTheme.text} text-xs font-medium`}>Location</p>
+</motion.div>
                 </div>
               </motion.div>
             )}

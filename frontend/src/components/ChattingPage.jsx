@@ -185,14 +185,25 @@ const ChatHeader = React.memo(
   }
 );
 
-// MessageBubble component definition (moved before MessagesArea)
+// MessageBubble component definition
 const MessageBubble = React.memo(
-  ({ message, isPinned, onPinToggle, effectiveTheme }) => {
-    const isOwnMessage = message.sender === "me";
+  ({ message, isPinned, onPinToggle, effectiveTheme, currentUserId }) => {
+    const sender = message.sender;
+    const isOwnMessage = (() => {
+      if (!sender) return false;
+      if (sender === "me") return true;
+      if (typeof sender === "string") return String(sender) === String(currentUserId);
+      if (typeof sender === "object") return String(sender._id || sender.id) === String(currentUserId);
+      return false;
+    })();
 
     const handlePinClick = useCallback(() => {
       onPinToggle(message.id);
     }, [message.id, onPinToggle]);
+
+    const messageText = message.content || '';
+    const hasAttachments = message.attachments && message.attachments.length > 0;
+    const isShortMessage = messageText.length < 30 && !hasAttachments;
 
     return (
       <motion.div
@@ -213,10 +224,21 @@ const MessageBubble = React.memo(
         } group relative`}
       >
         <motion.div
-          className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg relative ${
+          className={`${
+            isShortMessage ? 'inline-flex flex-col' : 'max-w-xs lg:max-w-md'
+          } px-4 ${
+            // ✅ FIX: More padding for ticks - different for short/long messages
+            isShortMessage 
+              ? 'py-2' 
+              : isOwnMessage 
+                ? 'pt-2 pb-8 pr-4' 
+                : 'py-2'
+          } rounded-lg relative ${
             isOwnMessage
-              ? effectiveTheme.message?.sent || "bg-blue-500 text-white"
-              : effectiveTheme.message?.received || "bg-gray-200 text-gray-800"
+              ? `backdrop-blur-md bg-gradient-to-br from-purple-400/20 to-blue-400/20 border border-white/30 shadow-lg shadow-purple-500/10 text-white`
+              : effectiveTheme.mode === 'dark'
+                ? 'bg-blue-500/80 backdrop-blur-md text-white'
+                : 'bg-white/90 backdrop-blur-md text-gray-800 border border-gray-200'
           } ${isPinned ? "ring-2 ring-yellow-400" : ""}`}
           whileHover={{
             boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
@@ -247,7 +269,6 @@ const MessageBubble = React.memo(
             )}
           </AnimatePresence>
 
-          {/* Pin button - shows on hover */}
           <motion.button
             initial={{ opacity: 0, scale: 0.8 }}
             whileHover={{
@@ -268,65 +289,76 @@ const MessageBubble = React.memo(
             />
           </motion.button>
 
-          {/* Attachment-aware rendering: images, video, and other files */}
-          {message.attachments && message.attachments.length > 0 ? (
+          {hasAttachments ? (
             <AttachmentRenderer
               message={message}
               isOwnMessage={isOwnMessage}
               effectiveTheme={effectiveTheme}
             />
           ) : (
-            <motion.p
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.1 }}
+              className={isShortMessage ? 'flex items-end gap-2' : ''}
             >
-              {message.content}
-            </motion.p>
+              <span>{message.content}</span>
+              
+              {/* For short messages, show timestamp inline */}
+              {isShortMessage && isOwnMessage && (
+                <span className="text-xs opacity-75 text-white whitespace-nowrap flex items-center gap-1 ml-2 flex-shrink-0">
+                  {formatMessageTime(message.timestamp)}
+                  {message.isRead ? (
+                    <CheckCheck className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                  ) : (
+                    <Check className="w-4 h-4 opacity-75 flex-shrink-0" />
+                  )}
+                </span>
+              )}
+              {isShortMessage && !isOwnMessage && (
+                <span className={`text-xs opacity-75 whitespace-nowrap ml-2 flex-shrink-0 ${
+                  effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-600'
+                }`}>
+                  {formatMessageTime(message.timestamp)}
+                </span>
+              )}
+            </motion.div>
           )}
 
-          <motion.div
-            className="flex items-center justify-end mt-1 space-x-1"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-          >
-            <span className="text-xs opacity-75">
-              {formatMessageTime(message.timestamp)}
-            </span>
-            {isOwnMessage && (
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.4, type: "spring", stiffness: 400 }}
-              >
-                {message.isRead ? (
-                  <motion.div
-                    animate={{
-                      color: ["#60A5FA", "#3B82F6", "#60A5FA"],
-                      transition: { duration: 2, repeat: Infinity },
-                    }}
-                  >
+          {/* ✅ FIX: Timestamp at bottom with MORE space */}
+          {!isShortMessage && (
+            <motion.div
+              className={`flex items-center justify-end space-x-1 mt-1 ${
+                isOwnMessage ? 'absolute bottom-2 right-3' : 'mt-2'
+              }`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+            >
+              <span className={`text-xs opacity-75 ${isOwnMessage ? 'text-white' : effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-600'}`}>
+                {formatMessageTime(message.timestamp)}
+              </span>
+              {isOwnMessage && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: 0.4, type: "spring", stiffness: 400 }}
+                  className="flex-shrink-0"
+                >
+                  {message.isRead ? (
                     <CheckCheck className="w-4 h-4 text-blue-400" />
-                  </motion.div>
-                ) : (
-                  <Check className="w-4 h-4 opacity-75" />
-                )}
-              </motion.div>
-            )}
-          </motion.div>
+                  ) : (
+                    <Check className="w-4 h-4 opacity-75 text-white" />
+                  )}
+                </motion.div>
+              )}
+            </motion.div>
+          )}
         </motion.div>
       </motion.div>
     );
-  },
-  (prevProps, nextProps) => {
-    return (
-      prevProps.message.id === nextProps.message.id &&
-      prevProps.isPinned === nextProps.isPinned &&
-      prevProps.currentTheme === nextProps.currentTheme
-    );
   }
-); // Messages Area Component
+);
 
 /* --------------------------------------------
    AttachmentRenderer Component
@@ -337,11 +369,9 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
   const [lightboxSrc, setLightboxSrc] = useState(null);
   const [zoomed, setZoomed] = useState(false);
 
-  // Download helper: fetch file as blob and trigger download with the provided filename.
   const handleDownload = async (e, url, filename) => {
     try {
       e && e.preventDefault();
-      // Try to fetch the resource as a blob to force filename on download
       const resp = await fetch(url, { mode: 'cors' });
       if (!resp.ok) throw new Error('Network response not ok');
       const blob = await resp.blob();
@@ -352,11 +382,9 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
       document.body.appendChild(a);
       a.click();
       a.remove();
-      // Revoke after a short delay to ensure download started
       setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
     } catch (err) {
       console.error('Download failed, falling back to direct open', err);
-      // Fallback: open in new tab (browser may handle download)
       window.open(url, '_blank');
     }
   };
@@ -380,7 +408,7 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
     return base;
   };
 
-  const renderAttachment = (att, idx) => {
+ const renderAttachment = (att, idx) => {
     const url = att.fileUrl || att.url || att.publicUrl;
     const mime = att.mimeType || att.fileType || '';
     const rawName = att.fileName || (url ? url.split('/').pop() : `file-${idx}`);
@@ -388,7 +416,6 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
 
     if (!url) return null;
 
-    // image
     if (mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(url)) {
       return (
         <div key={idx} className="mb-2">
@@ -398,12 +425,10 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
             className="w-64 max-w-full rounded cursor-pointer object-cover"
             onClick={() => openLightbox(url)}
           />
-          {/* filenames hidden for images (preview only) */}
         </div>
       );
     }
 
-    // video
     if (mime.startsWith('video/') || /\.(mp4|webm|ogg)$/i.test(url)) {
       return (
         <div key={idx} className="mb-2">
@@ -411,38 +436,29 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
             <source src={url} />
             Your browser does not support the video tag.
           </video>
-          {/* <div className="flex items-center justify-end mt-1 text-xs text-gray-500">
-            <a
-              href={url}
-              onClick={(e) => handleDownload(e, url, name)}
-              title={`Download ${name}`}
-              aria-label={`Download ${name}`}
-              tabIndex={0}
-              className="text-blue-500"
-            >
-              Download
-            </a>
-          </div> */}
         </div>
       );
     }
 
-    // other files (pdf, docx, etc.)
+    const textColor = isOwnMessage 
+      ? 'text-white' 
+      : effectiveTheme.mode === 'dark' 
+        ? 'text-white' 
+        : 'text-gray-800';
+
     return (
-      <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded mb-2">
+      <div key={idx} className={`flex items-center justify-between ${isOwnMessage ? 'bg-white/10' : effectiveTheme.mode === 'dark' ? 'bg-black/20' : 'bg-gray-100/50'} backdrop-blur-sm p-2 rounded mb-2`}>
         <div className="flex items-center space-x-3 w-full">
-          <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center flex-shrink-0">
-            <FileText className="w-5 h-5 text-gray-600" />
+          <div className={`w-10 h-10 ${isOwnMessage ? 'bg-white/20' : effectiveTheme.mode === 'dark' ? 'bg-white/10' : 'bg-gray-200'} rounded flex items-center justify-center flex-shrink-0`}>
+            <FileText className={`w-5 h-5 ${textColor}`} />
           </div>
 
           <div className="relative w-full">
-            <div className="text-sm font-medium truncate pr-16">{name}</div>
+            <div className={`text-sm font-medium truncate pr-16 ${textColor}`}>{name}</div>
             {att.fileSize && (
-              <div className="text-xs text-gray-500">{(att.fileSize / 1024).toFixed(1)} KB</div>
+              <div className={`text-xs ${textColor} opacity-70`}>{(att.fileSize / 1024).toFixed(1)} KB</div>
             )}
 
-            {/* Icon overlay: hidden by default, appears when parent message bubble is hovered (uses parent's `group` class).
-                Each icon uses `peer` so its tooltip only shows when that icon is hovered. */}
             <div className="absolute right-0 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
               <div className="bg-white rounded-lg p-1 shadow-sm flex items-center space-x-1">
                 <a
@@ -477,19 +493,24 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
     );
   };
 
+  const textColor = isOwnMessage 
+    ? 'text-white' 
+    : effectiveTheme.mode === 'dark' 
+      ? 'text-white' 
+      : 'text-gray-800';
+
   return (
     <div>
-      {/* If there are attachments, render them first and show the message text below (WhatsApp-style).
-          Otherwise show the text above attachments as usual. */}
       <div className="flex flex-col">
         {(message.attachments || []).map((att, idx) => renderAttachment(att, idx))}
       </div>
+      
       {message.attachments && message.attachments.length > 0 ? (
         message.content ? (
-          <div className="mt-2 text-sm text-gray-800 bg-transparent">{message.content}</div>
+          <div className={`mt-2 text-sm ${textColor}`}>{message.content}</div>
         ) : null
       ) : (
-        message.content && <div className="mb-2">{message.content}</div>
+        message.content && <div className={`mb-2 ${textColor}`}>{message.content}</div>
       )}
 
       {lightboxOpen && createPortal(
@@ -517,6 +538,7 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
   );
 });
 
+// Messages Area Component
 const MessagesArea = ({
   filteredMessages,
   pinnedMessages,
@@ -524,78 +546,201 @@ const MessagesArea = ({
   effectiveTheme,
   isTyping,
   selectedContactId,
+  currentUserId,
 }) => {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const shouldAutoScrollRef = useRef(true); // ✅ Track if we should auto-scroll
 
-  // Auto-scroll to bottom when messages change
-  useEffect(() => {
-    try {
-      console.debug("MessagesArea: filteredMessages updated", {
-        length: filteredMessages?.length || 0,
-        selectedContactId,
-      });
-    } catch (e) {}
-
+  const scrollToBottom = (e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  const handleScroll = (e) => {
+    const element = e.target;
+    const isNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 200;
+    setShowScrollButton(!isNearBottom);
+    
+    // ✅ Only auto-scroll if user is near bottom
+    shouldAutoScrollRef.current = isNearBottom;
+  };
+
+  // ✅ FIX: Only auto-scroll when NEW messages arrive AND user is at bottom
+  useEffect(() => {
+    if (shouldAutoScrollRef.current && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [filteredMessages, isTyping]);
 
-  // Auto-scroll to bottom when component mounts or contact changes
+  // ✅ Always scroll on contact change
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "auto" });
+      shouldAutoScrollRef.current = true;
     }
   }, [selectedContactId]);
 
   return (
-    <div
-      ref={messagesContainerRef}
-      className="h-full overflow-y-auto p-4 space-y-4 scrollbar-hide relative"
-    >
-      {/* Messages Content */}
-      <div className="relative z-10">
-        <AnimatePresence mode="popLayout">
-          {filteredMessages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              isPinned={pinnedMessages[message.id] || false}
-              onPinToggle={onPinMessage}
-              effectiveTheme={effectiveTheme}
+    <div className="relative h-full overflow-hidden">
+      {/* Day mode diagonal comets */}
+      {effectiveTheme.mode !== 'dark' && (
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {[...Array(5)].map((_, i) => (
+            <motion.div
+              key={`day-comet-${i}`}
+              className="absolute w-1 h-16 bg-gradient-to-b from-blue-300 via-purple-300 to-transparent rounded-full"
+              style={{
+                left: `${Math.random() * 100}%`,
+                top: `-10%`,
+                transform: `rotate(45deg)`,
+              }}
+              animate={{
+                x: [0, 400],
+                y: [0, 400],
+                opacity: [0, 1, 0],
+              }}
+              transition={{
+                duration: 3 + Math.random() * 2,
+                repeat: Infinity,
+                delay: i * 1.5,
+                ease: "linear",
+              }}
             />
           ))}
-        </AnimatePresence>
+        </div>
+      )}
 
-        {isTyping[selectedContactId] && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="flex justify-start"
-          >
-            <div
-              className={`max-w-xs px-4 py-2 rounded-lg ${effectiveTheme.message?.received || "bg-gray-200 text-gray-800"}`}
+      <div
+        ref={messagesContainerRef}
+        onScroll={handleScroll}
+        className="h-full overflow-y-auto p-4 space-y-4 relative"
+        style={{
+          scrollbarWidth: 'thin',
+          scrollbarColor: effectiveTheme.mode === 'dark' 
+            ? '#667eea transparent' // Blue-purple for dark mode
+            : '#8b5cf6 transparent' // Purple for light mode
+        }}
+      >
+        <div className="relative z-10">
+          <AnimatePresence mode="popLayout">
+            {filteredMessages.map((message) => (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                isPinned={pinnedMessages[message.id] || false}
+                onPinToggle={onPinMessage}
+                effectiveTheme={effectiveTheme}
+                currentUserId={currentUserId}
+              />
+            ))}
+          </AnimatePresence>
+
+          {isTyping[selectedContactId] && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="flex justify-start"
             >
-              <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-current rounded-full animate-bounce" />
-                <div
-                  className="w-2 h-2 bg-current rounded-full animate-bounce"
-                  style={{ animationDelay: "0.2s" }}
-                />
-                <div
-                  className="w-2 h-2 bg-current rounded-full animate-bounce"
-                  style={{ animationDelay: "0.4s" }}
-                />
+              <div
+                className={`max-w-xs px-4 py-2 rounded-lg ${
+                  effectiveTheme.mode === 'dark'
+                    ? 'bg-blue-500/80 backdrop-blur-md text-white'
+                    : 'bg-white/90 backdrop-blur-md text-gray-800 border border-gray-200'
+                }`}
+              >
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-current rounded-full animate-bounce" />
+                  <div
+                    className="w-2 h-2 bg-current rounded-full animate-bounce"
+                    style={{ animationDelay: "0.2s" }}
+                  />
+                  <div
+                    className="w-2 h-2 bg-current rounded-full animate-bounce"
+                    style={{ animationDelay: "0.4s" }}
+                  />
+                </div>
               </div>
-            </div>
-          </motion.div>
-        )}
+            </motion.div>
+          )}
 
-        {/* Scroll target - always scroll to this element */}
-        <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} />
+        </div>
       </div>
+
+      {/* Cosmic Scroll Button */}
+      <AnimatePresence>
+        {showScrollButton && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0, y: 20 }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={scrollToBottom}
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-50 w-12 h-12 rounded-full flex items-center justify-center shadow-2xl cursor-pointer"
+            style={{
+              background: effectiveTheme.mode === 'dark'
+                ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                : 'linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%)',
+              pointerEvents: 'auto',
+            }}
+          >
+            <motion.div
+              className="absolute inset-0 rounded-full"
+              animate={{
+                boxShadow: [
+                  '0 0 20px rgba(139, 92, 246, 0.5)',
+                  '0 0 40px rgba(139, 92, 246, 0.8)',
+                  '0 0 20px rgba(139, 92, 246, 0.5)',
+                ],
+              }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: "easeInOut",
+              }}
+            />
+            
+            <motion.div
+              animate={{
+                rotate: [0, 360],
+              }}
+              transition={{
+                duration: 20,
+                repeat: Infinity,
+                ease: "linear",
+              }}
+            >
+              <svg
+                width="28"
+                height="28"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"
+                  fill="white"
+                />
+                <path
+                  d="M12 6L13 10L17 11L13 12L12 16L11 12L7 11L11 10L12 6Z"
+                  fill={effectiveTheme.mode === 'dark' ? '#fbbf24' : '#f59e0b'}
+                />
+              </svg>
+            </motion.div>
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -648,6 +793,9 @@ const ChattingPage = ({ onLogout }) => {
   // Socket reference
   const socketRef = useRef(null);
   const [socketConnected, setSocketConnected] = useState(false);
+  // Current user id (used for message alignment)
+  const _localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+  const currentUserId = _localUser._id || _localUser.id || null;
 
   // Fetch both received and accepted requests
   useEffect(() => {
@@ -989,6 +1137,7 @@ const ChattingPage = ({ onLogout }) => {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, [selectedContact]);
+  
   // Close chat search bar and three dots menu when switching chats
   useEffect(() => {
     setShowChatSearch(false);
@@ -1911,6 +2060,24 @@ const ChattingPage = ({ onLogout }) => {
     return () => clearInterval(interval);
   }, [getTimeBasedCosmicTheme, lastUpdateTime, cosmicTheme.period]);
 
+  // Add this useEffect near the top of ChattingPage component
+useEffect(() => {
+  const root = document.documentElement;
+  
+  if (effectiveTheme.mode === 'dark' || cosmicTheme.isNightMode) {
+    root.classList.add('dark');
+    root.setAttribute('data-theme', 'dark');
+  } else {
+    root.classList.remove('dark');
+    root.setAttribute('data-theme', 'light');
+  }
+  
+  return () => {
+    root.classList.remove('dark');
+    root.removeAttribute('data-theme');
+  };
+}, [effectiveTheme.mode, cosmicTheme.isNightMode]);
+
   return (
     <>
       <style>
@@ -2181,29 +2348,33 @@ const ChattingPage = ({ onLogout }) => {
           {showSidebar &&
             !(isMobileView && (showGroupCreation || showNewChat)) && (
               <motion.div
-                initial={{ x: isMobileView ? -300 : -100, opacity: 0 }}
-                animate={{
-                  x: 0,
-                  opacity: 1,
-                  transition: {
-                    type: "spring",
-                    stiffness: 300,
-                    damping: 30,
-                    opacity: { duration: 0.3 },
-                  },
-                }}
-                exit={{
-                  x: isMobileView ? -300 : -100,
-                  opacity: 0,
-                  transition: {
-                    duration: 0.3,
-                    ease: "easeInOut",
-                  },
-                }}
-                className={`${
-                  isMobileView ? "absolute z-20 w-full" : "w-1/3 min-w-80"
-                } ${effectiveTheme.sidebar} flex flex-col backdrop-blur-sm`}
-              >
+  initial={{ x: isMobileView ? -300 : -100, opacity: 0 }}
+  animate={{
+    x: 0,
+    opacity: 1,
+    transition: {
+      type: "spring",
+      stiffness: 300,
+      damping: 30,
+      opacity: { duration: 0.3 },
+    },
+  }}
+  exit={{
+    x: isMobileView ? -300 : -100,
+    opacity: 0,
+    transition: {
+      duration: 0.3,
+      ease: "easeInOut",
+    },
+  }}
+  className={`${
+    isMobileView ? "absolute z-20 w-full h-full" : "w-1/3 min-w-80 h-full"
+  } ${
+    effectiveTheme.mode === 'dark'
+      ? 'backdrop-blur-xl bg-gray-900/30 border-r border-white/10'
+      : 'bg-white/95 backdrop-blur-xl border-r border-gray-200 shadow-lg'
+  } flex flex-col overflow-hidden`}
+>
                 {/* Search Header */}
                 <div className="p-4">
                   <div className="flex items-center justify-between mb-4">
@@ -2235,85 +2406,90 @@ const ChattingPage = ({ onLogout }) => {
                 </div>
 
                 {/* Chat Sidebar Area */}
-                <div className="flex-1 flex flex-col">
-                  {/*  Alerts Section: Chat Requests & Accepted */}
-                  <div>
-                    {/* 🔹 Chat Requests Dropdown */}
-                    <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
-                      <button
-                        onClick={() =>
-                          setShowReceivedDropdown(!showReceivedDropdown)
-                        }
-                        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-                          effectiveTheme.hover
-                            ? effectiveTheme.hover
-                            : "hover:bg-blue-100 dark:hover:bg-blue-900"
-                        } transition-colors text-blue-800 dark:text-blue-200 font-medium`}
-                      >
-                        <span className={`flex items-center gap-2 ${effectiveTheme.text}`}>
-                          <img
-                            src={chatReqIcon}
-                            alt="Chat Requests"
-                            className="w-4 h-4"
-                          />
-                          Chat Requests Received ({receivedChats.length})
-                        </span>
-                        {showReceivedDropdown ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </button>
+                <div className="flex-1 flex flex-col overflow-hidden">
+  {/* Alerts Section: Chat Requests & Accepted */}
+  <div className="flex-shrink-0">
+    {/* Chat Requests Dropdown */}
+    <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
+      <button
+        onClick={() => setShowReceivedDropdown(!showReceivedDropdown)}
+        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
+          effectiveTheme.mode === 'dark'
+            ? 'hover:bg-blue-900/30 text-blue-200'
+            : 'hover:bg-blue-50 text-blue-800'
+        } transition-colors font-medium`}
+      >
+        <span className="flex items-center gap-2">
+          <img src={chatReqIcon} alt="Chat Requests" className="w-4 h-4" />
+          Chat Requests Received ({receivedChats.length})
+        </span>
+        {showReceivedDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+      </button>
 
+<AnimatePresence>
                       {showReceivedDropdown && (
-                        <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
+                        <motion.div
+  initial={{ height: 0, opacity: 0 }}
+  animate={{ height: "auto", opacity: 1 }}
+  exit={{ height: 0, opacity: 0 }}
+  transition={{ duration: 0.3, ease: "easeInOut" }}
+  className="overflow-hidden"
+>
+  <div 
+    className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto"
+    style={{
+      scrollbarWidth: 'thin',
+      scrollbarColor: effectiveTheme.mode === 'dark' 
+        ? '#667eea transparent'
+        : '#8b5cf6 transparent'
+    }}
+  >
                           {receivedChats.length > 0 ? (
                             receivedChats.map((req) => (
                               <div
-                                key={req._id || req.email}
-                                className={`flex justify-between items-center p-2 rounded-md ${
-                                  effectiveTheme.hover
-                                    ? effectiveTheme.hover
-                                    : "hover:bg-gray-100 dark:hover:bg-gray-700"
-                                } transition-colors`}
-                              >
-                                {/* Left side: profile + info */}
-                                <div className="flex items-center gap-3 flex-1">
-                                  <img
-                                    src={
-                                      req.avatar ||
-                                      "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-                                    }
-                                    alt={req.name || "User"}
-                                    className="w-10 h-10 rounded-full object-cover"
-                                  />
-                                  <div>
-                                    <p className={`font-medium ${effectiveTheme.text} truncate`}>
-                                      {req.name ||
-                                        req.email?.split("@")[0] ||
-                                        "Unknown User"}
-                                    </p>
-                                    {/*  Show initial invite message */}
-                                    {req.message ? (
-                                      <p className="text-sm text-gray-400 truncate">
-                                        “{req.message}”
-                                      </p>
-                                    ) : (
-                                      <p className="text-sm text-gray-500 truncate">
-                                        No message
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
+  key={req._id || req.email}
+  className={`flex justify-between items-center p-2 rounded-md ${
+    effectiveTheme.mode === 'dark'
+      ? 'hover:bg-gray-700/50'
+      : 'hover:bg-gray-100'
+  } transition-colors`}
+>
+  <div className="flex items-center gap-3 flex-1">
+    <img
+      src={
+        req.avatar ||
+        "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+      }
+      alt={req.name || "User"}
+      className="w-10 h-10 rounded-full object-cover"
+    />
+    <div>
+      <p className={`font-medium truncate ${
+        effectiveTheme.mode === 'dark' ? 'text-gray-100' : 'text-gray-900'
+      }`}>
+        {req.name || req.email?.split("@")[0] || "Unknown User"}
+      </p>
+      {req.message ? (
+        <p className={`text-sm truncate ${
+          effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-600'
+        }`}>
+          "{req.message}"
+        </p>
+      ) : (
+        <p className="text-sm text-gray-500 truncate">
+          No message
+        </p>
+      )}
+    </div>
+  </div>
+  <button
+    onClick={() => handleAcceptChat(req.email)}
+    className="px-3 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition"
+  >
+    Accept
+  </button>
+</div>
 
-                                {/* Right side: Accept button */}
-                                <button
-                                  onClick={() => handleAcceptChat(req.email)}
-                                  className="px-3 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition"
-                                >
-                                  Accept
-                                </button>
-                              </div>
                             ))
                           ) : (
                             <div
@@ -2327,97 +2503,110 @@ const ChattingPage = ({ onLogout }) => {
                             </div>
                           )}
                         </div>
+                        </motion.div>
                       )}
+</AnimatePresence>
                     </div>
 
                     {/* 🔹 Accepted Chats Dropdown */}
                     <div className="rounded-md justify-between items-center px-2 py-1">
                       <button
-                        onClick={() =>
-                          setShowAcceptedDropdown(!showAcceptedDropdown)
-                        }
-                        className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-                          effectiveTheme.hover
-                            ? effectiveTheme.hover
-                            : "hover:bg-green-100 dark:hover:bg-green-900"
-                        } transition-colors text-green-800 dark:text-green-200 font-medium`}
-                      >
-                        <span className={`flex items-center gap-2 ${effectiveTheme.text}`}>
-                          <img
-                            src={chatAcceptIcon}
-                            alt="Chats Accepted"
-                            className="w-4 h-4"
-                          />
-                          Chat Invites Accepted ({filteredAcceptedChats?.length || 0})
-                        </span>
-                        {showAcceptedDropdown ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </button>
+  onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
+  className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
+    effectiveTheme.mode === 'dark'
+      ? 'hover:bg-green-900/30 text-green-200'
+      : 'hover:bg-green-50 text-green-800'
+  } transition-colors font-medium`}
+>
+  <span className="flex items-center gap-2">
+    <img
+      src={chatAcceptIcon}
+      alt="Chats Accepted"
+      className="w-4 h-4"
+    />
+    Chat Invites Accepted ({filteredAcceptedChats?.length || 0})
+  </span>
+  {showAcceptedDropdown ? (
+    <ChevronUp className="w-4 h-4" />
+  ) : (
+    <ChevronDown className="w-4 h-4" />
+  )}
+</button>
 
+<AnimatePresence>
                       {showAcceptedDropdown && (
-                        <div className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto">
+                            <motion.div
+  initial={{ height: 0, opacity: 0 }}
+  animate={{ height: "auto", opacity: 1 }}
+  exit={{ height: 0, opacity: 0 }}
+  transition={{ duration: 0.3, ease: "easeInOut" }}
+  className="overflow-hidden"
+>
+  <div 
+    className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto"
+    style={{
+      scrollbarWidth: 'thin',
+      scrollbarColor: effectiveTheme.mode === 'dark' 
+        ? '#667eea transparent'
+        : '#8b5cf6 transparent'
+    }}
+  >
                           {filteredAcceptedChats && filteredAcceptedChats.length > 0 ? (
                             filteredAcceptedChats.map((chat, index) => (
                               <motion.div
-                                key={
-                                  chat._id || chat.email || `accepted-${index}`
-                                } // ✅ ensures unique key
-                                whileHover={{ scale: 0.98 }}
-                                className={`flex justify-between items-center p-2 rounded-md ${
-                                  effectiveTheme.hover
-                                    ? effectiveTheme.hover
-                                    : "hover:bg-gray-100 dark:hover:bg-gray-700"
-                                } transition-colors`}
-                              >
-                                {/* Left side: profile + info */}
-                                <div className="flex items-center gap-3 flex-1 overflow-hidden">
-                                  <div className="relative flex-shrink-0">
-                                    <img
-                                      src={
-                                        chat.avatar ||
-                                        "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-                                      }
-                                      alt={chat.name || chat.email || "User"}
-                                      className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
-                                    />
-                                  </div>
+  key={chat._id || chat.email || `accepted-${index}`}
+  whileHover={{ scale: 0.98 }}
+  className={`flex justify-between items-center p-2 rounded-md ${
+    effectiveTheme.mode === 'dark'
+      ? 'hover:bg-gray-700/50'
+      : 'hover:bg-gray-100'
+  } transition-colors`}
+>
+  <div className="flex items-center gap-3 flex-1 overflow-hidden">
+    <div className="relative flex-shrink-0">
+      <img
+        src={
+          chat.avatar ||
+          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+        }
+        alt={chat.name || chat.email || "User"}
+        className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
+      />
+    </div>
 
-                                  <div className="overflow-hidden">
-                                    <p className={`font-medium ${effectiveTheme.text} truncate`}>
-                                      {/* ✅ Fixed name handling */}
-                                      {chat.name?.trim() &&
-                                      chat.name !== "Unknown User"
-                                        ? chat.name
-                                        : chat.email?.split("@")[0] ||
-                                          "Unknown User"}
-                                    </p>
+    <div className="overflow-hidden">
+      <p className={`font-medium truncate ${
+        effectiveTheme.mode === 'dark' ? 'text-gray-100' : 'text-gray-900'
+      }`}>
+        {chat.name?.trim() && chat.name !== "Unknown User"
+          ? chat.name
+          : chat.email?.split("@")[0] || "Unknown User"}
+      </p>
 
-                                    {/* ✅ WhatsApp-like normal message preview */}
-                                    {chat.message ? (
-                                      <p className="text-sm text-gray-300 truncate">
-                                        {chat.message}
-                                      </p>
-                                    ) : (
-                                      <p className="text-sm text-gray-500 truncate">
-                                        No message
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
+      {chat.message ? (
+        <p className={`text-sm truncate ${
+          effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-600'
+        }`}>
+          {chat.message}
+        </p>
+      ) : (
+        <p className="text-sm text-gray-500 truncate">
+          No message
+        </p>
+      )}
+    </div>
+  </div>
 
-                                {/* Right side: open chat button */}
-                                <motion.button
-                                  whileHover={{ scale: 0.95 }}
-                                  onClick={() => handleOpenChat(chat)}
-                                  className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
-                                  title="Open Chat"
-                                >
-                                  <MessageCircle className="w-5 h-5 text-white" />
-                                </motion.button>
-                              </motion.div>
+  <motion.button
+    whileHover={{ scale: 0.95 }}
+    onClick={() => handleOpenChat(chat)}
+    className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
+    title="Open Chat"
+  >
+    <MessageCircle className="w-5 h-5 text-white" />
+  </motion.button>
+</motion.div>
+
                             ))
                           ) : (
                             <div
@@ -2431,119 +2620,71 @@ const ChattingPage = ({ onLogout }) => {
                             </div>
                           )}
                         </div>
+                        </motion.div>
                       )}
+                      </AnimatePresence>
                     </div>
                   </div>
 
                   {/* 🧭 Contacts List */}
-                  <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col p-4 space-y-4">
-                    {/* Document Chats */}
-                    {activeNavItem === "documents" && documentChats.length > 0 && (
-                      <div className="flex flex-col gap-2">
-                        <div className="flex items-center justify-between">
-                          <h4 className={`${effectiveTheme.text} font-semibold`}>
-                            Documents
-                          </h4>
-                          <button
-                            onClick={() => setIsNewDocumentChat(true)}
-                            className="p-1 rounded-full bg-blue-500 hover:bg-blue-600 transition-colors"
-                          >
-                            <Plus className="w-4 h-4 text-white" />
-                          </button>
-                        </div>
-                        {documentChats.map((doc) => (
-                          <motion.div
-                            key={doc._id}
-                            whileHover={{ scale: 0.98 }}
-                            onClick={() => {
-                              setSelectedDocument(doc);
-                              setActiveNavItem("documents");
-                            }}
-                            className={`flex items-center p-3 rounded-lg cursor-pointer ${
-                              effectiveTheme.hover
-                            } transition-colors`}
-                          >
-                            <div className="w-12 h-12 mr-3 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
-                              <FileText className="w-6 h-6 text-white" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h4 className={`font-medium ${effectiveTheme.text} truncate`}>
-                                {doc.fileName || "Untitled Document"}
-                              </h4>
-                              <p className={`text-sm ${effectiveTheme.textSecondary} truncate`}>
-                                {new Date(doc.createdAt).toLocaleDateString()}
-                              </p>
-                            </div>
-                          </motion.div>
-                        ))}
-                      </div>
-                    )}
-                    
-                    {/* Recent Chats */}
-                    {activeNavItem !== "documents" && recentChats.length > 0 && (
-                      <div className="flex flex-col gap-2">
-                        <h4 className={`${effectiveTheme.text} font-semibold`}>
-                          Recent Chats
-                        </h4>
-                        {recentChats.map((chat) => (
-                          <ContactItem
-                            key={chat.id}
-                            contact={chat}
-                            effectiveTheme={effectiveTheme}
-                            onSelect={(c) => handleOpenChat(c)}
-                          />
-                        ))}
-                      </div>
-                    )}
+               <div 
+  className="flex-1 overflow-y-auto p-4 space-y-4 sidebar-scroll"
+  style={{
+    scrollbarWidth: 'thin',
+    scrollbarColor: effectiveTheme.mode === 'dark' 
+      ? '#667eea transparent' // Blue-purple for dark mode
+      : '#8b5cf6 transparent' // Purple for light mode
+  }}
+>
+  {/* Recent Chats */}
+  {recentChats.length > 0 && (
+    <div className="flex flex-col gap-2">
+      <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+        Recent Chats
+      </h4>
+      {recentChats.map((chat) => (
+        <ContactItem
+          key={chat.id}
+          contact={chat}
+          effectiveTheme={effectiveTheme}
+          onSelect={(c) => handleOpenChat(c)}
+        />
+      ))}
+    </div>
+  )}
 
-                    {/* All Contacts */}
-                    {activeNavItem !== "documents" && contacts.length > 0 && (
-                      <div className="flex flex-col gap-2 mt-4">
-                        <h4 className={`${effectiveTheme.text} font-semibold`}>
-                          Contacts
-                        </h4>
-                        {contacts.map((contact) => (
-                          <ContactItem
-                            key={contact.id}
-                            contact={contact}
-                            effectiveTheme={effectiveTheme}
-                            onSelect={(c) => handleOpenChat(c)}
-                          />
-                        ))}
-                      </div>
-                    )}
+  {/* All Contacts */}
+  {contacts.length > 0 && (
+    <div className="flex flex-col gap-2 mt-4">
+      <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+        Contacts
+      </h4>
+      {contacts.map((contact) => (
+        <ContactItem
+          key={contact.id}
+          contact={contact}
+          effectiveTheme={effectiveTheme}
+          onSelect={(c) => handleOpenChat(c)}
+        />
+      ))}
+    </div>
+  )}
 
-                    {/* Empty State for Documents */}
-                    {activeNavItem === "documents" && documentChats.length === 0 && (
-                      <div className="text-center space-y-4 mt-10">
-                        <FileText className="w-16 h-16 mx-auto text-gray-400" />
-                        <p className="text-gray-500 dark:text-gray-400">
-                          No documents yet
-                        </p>
-                        <button
-                          onClick={() => setIsNewDocumentChat(true)}
-                          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
-                        >
-                          Upload Document
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Empty State for Chats */}
-                    {activeNavItem !== "documents" && recentChats.length === 0 && contacts.length === 0 && (
-                      <div className="text-center space-y-4 mt-10">
-                        <p className="text-gray-500 dark:text-gray-400">
-                          Start chatting with Chasmos!
-                        </p>
-                        <button
-                          onClick={() => setShowNewChat(true)}
-                          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
-                        >
-                          New Chat
-                        </button>
-                      </div>
-                    )}
-                  </div>
+  {/* Empty State */}
+  {recentChats.length === 0 && contacts.length === 0 && (
+    <div className="text-center space-y-4 mt-10">
+      <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+        Start chatting with Chasmos!
+      </p>
+      <button
+        onClick={() => setShowNewChat(true)}
+        className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+      >
+        New Chat
+      </button>
+    </div>
+  )}
+</div>
                 </div>
 
                 {/* Floating Add Button with Menu */}
@@ -2766,6 +2907,7 @@ const ChattingPage = ({ onLogout }) => {
                   effectiveTheme={effectiveTheme}
                   isTyping={isTyping}
                   selectedContactId={selectedContact.id}
+                  currentUserId={currentUserId}
                 />
               </div>
               <MessageInput

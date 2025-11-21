@@ -59,35 +59,40 @@ export const completeGoogleSignup = asyncHandler(async (req, res) => {
     enableGoogleContacts 
   } = req.body;
 
-  // Validate required fields
-  if (!email || !name || !phoneNumber) {
+  // Validate required fields (phone number is optional)
+  if (!email || !name) {
     res.status(400);
-    throw new Error("Please fill all required fields");
+    throw new Error("Please provide at least name and email");
   }
 
-  // Check if user exists
-  const userExists = await User.findOne({
-    $or: [
-      { email: email.toLowerCase() },
-      { phoneNumber }
-    ]
-  });
-
-  if (userExists) {
+  // Check if user exists by email
+  const existingByEmail = await User.findOne({ email: email.toLowerCase() });
+  if (existingByEmail) {
     res.status(400);
-    throw new Error("User already exists with this email or phone number");
+    throw new Error("User already exists with this email");
   }
 
-  // Create user
-  const user = await User.create({
+  // If phoneNumber was provided, ensure it's unique
+  if (phoneNumber) {
+    const existingByPhone = await User.findOne({ phoneNumber });
+    if (existingByPhone) {
+      res.status(400);
+      throw new Error("User already exists with this phone number");
+    }
+  }
+
+  // Create user (include phoneNumber only if provided)
+  const userPayload = {
     name: name.trim(),
     email: email.toLowerCase().trim(),
-    phoneNumber,
     password: password || Math.random().toString(36).slice(-8), // Generate random password if not provided
     avatar,
     googleId: email, // Using email as googleId for now
     googleContactsSyncEnabled: enableGoogleContacts
-  });
+  };
+  if (phoneNumber) userPayload.phoneNumber = phoneNumber;
+
+  const user = await User.create(userPayload);
 
   if (user) {
     res.status(201).json({
