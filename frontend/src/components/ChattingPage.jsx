@@ -795,67 +795,189 @@ const ChattingPage = ({ onLogout }) => {
   const currentUserId = _localUser._id || _localUser.id || null;
 
   // Fetch both received and accepted requests
+  // useEffect(() => {
+  //   const fetchRequests = async () => {
+  //     try {
+  //       const token = localStorage.getItem("token");
+  //       if (!token) {
+  //         console.error("No token found — user might not be logged in.");
+  //         return;
+  //       }
+
+  //       // 1️⃣ Fetch received chat requests
+  //       const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
+  //         headers: { Authorization: `Bearer ${token}` },
+  //       });
+  //       const receivedData = await resReceived.json();
+  //       console.log("Received Emails:", receivedData);
+  //       const receivedEmails = Array.isArray(receivedData) ? receivedData : [];
+
+  //       // 2️⃣ Fetch accepted chat requests
+  //       const resAccepted = await fetch(
+  //         `${API_BASE_URL}/api/user/requests/accepted`,
+  //         {
+  //           headers: { Authorization: `Bearer ${token}` },
+  //         }
+  //       );
+  //       const acceptedData = await resAccepted.json();
+  //       const acceptedEmails = Array.isArray(acceptedData) ? acceptedData : [];
+
+  //       // 3️⃣ Helper: fetch user profiles by email
+  //       const fetchUsersByEmails = async (emails) => {
+  //         if (!Array.isArray(emails) || emails.length === 0) return [];
+  //         const results = await Promise.all(
+  //           emails.map(async (email) => {
+  //             const res = await fetch(
+  //               `${API_BASE_URL}/api/user?search=${email}`,
+  //               {
+  //                 headers: { Authorization: `Bearer ${token}` },
+  //               }
+  //             );
+  //             const data = await res.json();
+  //             return Array.isArray(data) ? data[0] : data; // handle array response
+  //           })
+  //         );
+  //         return results.filter(Boolean);
+  //       };
+
+  //       // 4️⃣ Fetch both user lists
+  //       const [receivedUsers, acceptedUsers] = await Promise.all([
+  //         fetchUsersByEmails(receivedEmails),
+  //         fetchUsersByEmails(acceptedEmails),
+  //       ]);
+
+  //       // 5️⃣ Update states
+  //       setReceivedChats(receivedUsers);
+  //       setAcceptedChats(acceptedUsers);
+  //     } catch (err) {
+  //       console.error("Error fetching chat requests:", err);
+  //     }
+  //   };
+
+  //   fetchRequests();
+  // }, []);
   useEffect(() => {
-    const fetchRequests = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        if (!token) {
-          console.error("No token found — user might not be logged in.");
-          return;
-        }
+  let mounted = true;
 
-        // 1️⃣ Fetch received chat requests
-        const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const receivedData = await resReceived.json();
-        console.log("Received Emails:", receivedData);
-        const receivedEmails = Array.isArray(receivedData) ? receivedData : [];
-
-        // 2️⃣ Fetch accepted chat requests
-        const resAccepted = await fetch(
-          `${API_BASE_URL}/api/user/requests/accepted`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-        const acceptedData = await resAccepted.json();
-        const acceptedEmails = Array.isArray(acceptedData) ? acceptedData : [];
-
-        // 3️⃣ Helper: fetch user profiles by email
-        const fetchUsersByEmails = async (emails) => {
-          if (!Array.isArray(emails) || emails.length === 0) return [];
-          const results = await Promise.all(
-            emails.map(async (email) => {
-              const res = await fetch(
-                `${API_BASE_URL}/api/user?search=${email}`,
-                {
-                  headers: { Authorization: `Bearer ${token}` },
-                }
-              );
-              const data = await res.json();
-              return Array.isArray(data) ? data[0] : data; // handle array response
-            })
-          );
-          return results.filter(Boolean);
-        };
-
-        // 4️⃣ Fetch both user lists
-        const [receivedUsers, acceptedUsers] = await Promise.all([
-          fetchUsersByEmails(receivedEmails),
-          fetchUsersByEmails(acceptedEmails),
-        ]);
-
-        // 5️⃣ Update states
-        setReceivedChats(receivedUsers);
-        setAcceptedChats(acceptedUsers);
-      } catch (err) {
-        console.error("Error fetching chat requests:", err);
+  const fetchRequests = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        console.error("No token found — user might not be logged in.");
+        return;
       }
-    };
 
-    fetchRequests();
-  }, []);
+      // 1️⃣ Fetch received + accepted requests
+      const [resReceived, resAccepted] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/user/requests`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+
+      const receivedData = (await resReceived.json()) || [];
+      const acceptedData = (await resAccepted.json()) || [];
+
+      console.log("✅ Received Chats:", receivedData);
+      console.log("✅ Accepted Chats:", acceptedData);
+
+      // 2️⃣ Normalize (in case backend returned strings)
+      const normalizedReceived = receivedData.map((r) =>
+        typeof r === "string" ? { email: r, message: "", date: null } : r
+      );
+
+      const normalizedAccepted = acceptedData.map((r) =>
+        typeof r === "string" ? { email: r, message: "", date: null } : r
+      );
+
+      // Helper: fetch user profile
+      const fetchProfile = async (email) => {
+        try {
+          const r = await fetch(
+            `${API_BASE_URL}/api/user?search=${encodeURIComponent(email)}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          if (!r.ok) return null;
+          const data = await r.json();
+          return Array.isArray(data) && data.length > 0 ? data[0] : null;
+        } catch (err) {
+          console.error("Error fetching profile for", email, err);
+          return null;
+        }
+      };
+
+      // 3️⃣ Fetch profiles in parallel
+      const receivedProfiles = await Promise.all(
+        normalizedReceived.map((r) => fetchProfile(r.email))
+      );
+      const acceptedProfiles = await Promise.all(
+        normalizedAccepted.map((r) => fetchProfile(r.email))
+      );
+
+      // 4️⃣ Merge profile + message
+      const mergeRequests = (requests, profiles) =>
+        requests
+          .map((req, i) => {
+            const profile = profiles[i] || {};
+            return {
+              _id: profile._id || `${req.email}-req`,
+              name: profile.name || req.email.split("@")[0],
+              email: req.email,
+              avatar:
+                profile.avatar ||
+                "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+              message: req.message || "",
+              date: req.date,
+            };
+          })
+          .filter(
+            (v, i, arr) =>
+              arr.findIndex(
+                (x) => x.email.toLowerCase() === v.email.toLowerCase()
+              ) === i
+          );
+
+      const finalReceived = mergeRequests(normalizedReceived, receivedProfiles);
+      const finalAccepted = mergeRequests(normalizedAccepted, acceptedProfiles);
+
+      console.log("Merged received chats:", finalReceived);
+      console.log("Merged accepted chats:", finalAccepted);
+
+      // ⭐ 5️⃣ FINAL MERGE FOR UI — this fixes your problem ⭐
+      const finalMerged = [
+        ...finalAccepted,
+        ...finalReceived.filter(
+          (r) => !finalAccepted.some((a) => a.email === r.email)
+        ),
+      ];
+
+      console.log("🔥 FINAL MERGED FOR UI:", finalMerged);
+
+      if (!mounted) return;
+
+      // ⬇️ set ONLY ONE STATE (UI expects one list)
+      setAcceptedChats(finalMerged);
+
+      // (Optional) keep separate list too
+      setReceivedChats(finalReceived);
+
+    } catch (err) {
+      console.error("Error fetching chat requests:", err);
+    }
+  };
+
+  fetchRequests();
+
+  return () => {
+    mounted = false;
+  };
+}, []);
+
+
 
   //After chatting with accepted chats
   const handleOpenChat = (chat) => {
@@ -993,47 +1115,59 @@ const ChattingPage = ({ onLogout }) => {
   // Fetch accepted chats on component mount
   // Fetch all accepted chats
   useEffect(() => {
-    const fetchAcceptedChats = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        if (!token) return console.error("No token found — user not logged in");
-
-        // Step 1️⃣ — Get list of accepted emails
-        const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const acceptedEmails = await res.json();
-        console.log("✅ Accepted Chats:", acceptedEmails);
-
-        if (!Array.isArray(acceptedEmails) || acceptedEmails.length === 0) {
-          setAcceptedChats([]);
-          return;
-        }
-
-        // Step 2️⃣ — Fetch full user profiles for each accepted email
-        const users = await Promise.all(
-          acceptedEmails.map(async (email) => {
-            const resUser = await fetch(
-              `${API_BASE_URL}/api/user?search=${email}`,
-              {
-                headers: { Authorization: `Bearer ${token}` },
-              }
-            );
-            const data = await resUser.json();
-            return Array.isArray(data) ? data[0] : data; // sometimes backend sends array
-          })
-        );
-
-        // Step 3️⃣ — Filter out invalid responses
-        const validUsers = users.filter(Boolean);
-        setAcceptedChats(validUsers);
-      } catch (err) {
-        console.error("Error fetching accepted chats:", err);
+  const fetchAcceptedChats = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        console.error("No token found — user not logged in");
+        return;
       }
-    };
 
-    fetchAcceptedChats();
-  }, []);
+      // Fetch accepted chats (backend now returns full objects)
+      const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to fetch accepted chats: ${errorText}`);
+      }
+
+      const acceptedData = await res.json();
+      console.log("✅ Accepted Chats (raw from backend):", acceptedData);
+
+      if (!Array.isArray(acceptedData)) {
+        console.warn("Accepted chats response is not an array, resetting to empty");
+        setAcceptedChats([]);
+        return;
+      }
+
+      // Normalize and filter entries
+      const normalizedChats = acceptedData
+        .filter(Boolean)
+        .map((chat) => ({
+          _id: chat._id || chat.email || Math.random().toString(36).substr(2, 9),
+          email: chat.email || "",
+          name: chat.name || chat.email?.split("@")[0] || "Unknown",
+          avatar:
+            chat.avatar ||
+            "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+          message: chat.message || "",
+          date: chat.date ? new Date(chat.date) : new Date(),
+        }));
+
+      console.log("✅ Normalized Accepted Chats:", normalizedChats);
+
+      setAcceptedChats(normalizedChats);
+    } catch (err) {
+      console.error("Error fetching accepted chats:", err);
+      setAcceptedChats([]); // safe fallback
+    }
+  };
+
+  fetchAcceptedChats();
+}, []);
+
 
   // ✅ Run once when the component mounts (and on mobile view change if needed)
   // useEffect(() => {
@@ -1784,24 +1918,23 @@ const ChattingPage = ({ onLogout }) => {
   const [documentChats, setDocumentChats] = useState([]);
   // Filter accepted chats to exclude users already present in recentChats
   const filteredAcceptedChats = React.useMemo(() => {
-    if (!Array.isArray(acceptedChats) || acceptedChats.length === 0) return [];
-    if (!Array.isArray(recentChats) || recentChats.length === 0) return acceptedChats;
+  if (!Array.isArray(acceptedChats) || acceptedChats.length === 0) return [];
+  if (!Array.isArray(recentChats) || recentChats.length === 0) return acceptedChats;
 
-    const recentIds = new Set(
-      recentChats
-        .map((r) => r.id || (r.otherUser && r.otherUser.id) || r.chatId || r.email)
-        .filter(Boolean)
-        .map((v) => String(v))
-    );
+  const recentEmails = new Set(
+    recentChats
+      .map((r) => r.email || r.otherUser?.email)
+      .filter(Boolean)
+      .map((email) => email.toLowerCase())
+  );
 
-    return acceptedChats.filter((a) => {
-      const aid = String(a._id || a.id || a.email || a.userId || a.emailAddress || '')
-        .trim();
-      // if any recent id matches accepted user's id/email, exclude
-      if (!aid) return true; // keep if we can't determine id
-      return !recentIds.has(aid);
-    });
-  }, [acceptedChats, recentChats]);
+  return acceptedChats.filter((a) => {
+    const email = (a.email || "").toLowerCase();
+    return !recentEmails.has(email);
+  });
+}, [acceptedChats, recentChats]);
+
+
   const [isExpanded, setIsExpanded] = useState(true);
 
   // ✅ Create a new chat/document

@@ -30,6 +30,7 @@ router.post("/request/send", protect, checkBlockStatus, sendChatRequest);
 router.put("/request/accept", protect, acceptChatRequest);
 router.get("/requests", protect, getReceivedChatRequests);
 router.get("/requests/accepted", protect, getAcceptedChatRequestsSentByUser);
+router.get("/requests/received", protect, getReceivedChatRequests);
 router.post("/request/withdraw", protect, withdrawChatRequest);
 
 export default router;
