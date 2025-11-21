@@ -1,17 +1,18 @@
 /* eslint-disable no-unused-vars */
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
-import { Phone, Lock, Image, Users, Eye, EyeOff, Mail, User, Check, ArrowLeft } from "lucide-react";
+import { Phone, Lock, Image, Users, Eye, EyeOff, Mail, User, Check, ArrowLeft, X, Camera } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
 const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
 const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) => {
+  // Auto-populate avatar from Google data (checks .avatar or .picture)
   const [formData, setFormData] = useState({
-    email: googleData.email || "",
-    name: googleData.name || "",
-    avatar: googleData.avatar || "",
+    email: googleData?.email || "",
+    name: googleData?.name || "",
+    avatar: googleData?.avatar || googleData?.picture || "", 
     phoneNumber: "",
     password: "", 
     confirmPassword: "", 
@@ -23,6 +24,7 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [newAvatar, setNewAvatar] = useState(null);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -51,6 +53,7 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
     try {
       let finalAvatarUrl = formData.avatar;
       
+      // If user selected a new file, upload it to Cloudinary
       if (newAvatar) {
         const uploadData = new FormData();
         uploadData.append('file', newAvatar);
@@ -105,6 +108,7 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
     const file = e.target.files[0];
     if (file) {
       setNewAvatar(file);
+      // Create a local preview URL immediately
       const reader = new FileReader();
       reader.onloadend = () => {
         setFormData(prev => ({ ...prev, avatar: reader.result }));
@@ -135,7 +139,7 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
         </span>
       </div>
 
-      {/* Page Header - Centered Middle Top */}
+      {/* Page Header */}
       <div className="mt-8 mb-12 text-center max-w-7xl mx-auto w-full">
         <h2 className={`text-3xl font-bold ${currentTheme.text} mb-2`}>Complete Your Profile</h2>
         <p className={currentTheme.textSecondary}>Please review your details and set up your preferences.</p>
@@ -207,56 +211,66 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
             </button>
         </div>
 
-        {/* 2. Middle Part: Profile Pic & Sync (Wider & Stretches) */}
+        {/* 2. Middle Part: Profile Pic & Sync (Bigger Circle, Header Aligned) */}
         <div className="flex flex-col w-full lg:w-2/5 gap-6">
             <motion.div 
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: 0.2 }}
-                className={`w-full ${currentTheme.secondary} p-6 rounded-2xl shadow-sm border ${currentTheme.border} flex-1 flex flex-col items-center justify-center text-center`}
+                className={`w-full ${currentTheme.secondary} p-6 rounded-2xl shadow-sm border ${currentTheme.border} flex-1 flex flex-col items-center text-center`}
             >
                 <h3 className={`text-lg font-semibold ${currentTheme.text} mb-8 w-full text-left border-b ${currentTheme.border} pb-3`}>
                     Profile & Sync
                 </h3>
 
-                <div className="relative mb-8 group">
-                    <div className={`w-32 h-32 rounded-full p-1 border-2 border-dashed ${currentTheme.border} group-hover:border-blue-500 transition-colors`}>
-                        <img
-                            src={formData.avatar || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"}
-                            alt="Profile"
-                            className="w-full h-full rounded-full object-cover"
-                        />
-                    </div>
-                    <label className="absolute bottom-1 right-1 p-2 bg-blue-600 rounded-full cursor-pointer hover:bg-blue-700 transition-colors shadow-lg text-white">
-                        <Image className="w-4 h-4" />
-                        <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleAvatarChange}
-                            className="hidden"
-                        />
-                    </label>
-                    <p className={`mt-3 text-sm ${currentTheme.textSecondary}`}>Upload Profile Picture (Optional)</p>
-                </div>
-
-                <div className={`w-full p-4 rounded-xl border ${formData.enableGoogleContacts ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : currentTheme.border} transition-all cursor-pointer`}
-                    onClick={() => setFormData(prev => ({ ...prev, enableGoogleContacts: !prev.enableGoogleContacts }))}
-                >
-                    <div className="flex items-center space-x-3">
-                        <div className={`flex-shrink-0 w-6 h-6 rounded border flex items-center justify-center transition-colors ${formData.enableGoogleContacts ? 'bg-blue-500 border-blue-500' : 'border-gray-400 bg-transparent'}`}>
-                            {formData.enableGoogleContacts && <Check className="w-4 h-4 text-white" />}
+                <div className="flex-1 w-full flex flex-col items-center justify-center">
+                    <div className="relative mb-8 group">
+                        <div 
+                            className={`w-56 h-56 lg:w-45 lg:h-45 rounded-full p-1 border-2 border-dashed ${currentTheme.border} group-hover:border-blue-500 transition-colors overflow-hidden relative ${!newAvatar ? "cursor-zoom-in" : ""}`}
+                            onClick={() => !newAvatar && setIsExpanded(true)}
+                        >
+                            <img
+                                src={formData.avatar || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"}
+                                alt="Profile"
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full rounded-full object-cover"
+                            />
                         </div>
-                        <div className="flex-1 text-left">
-                            <p className={`font-medium ${currentTheme.text} flex items-center gap-2`}>
-                            <Users className="w-4 h-4 text-blue-500" /> Sync Google Contacts
-                            </p>
-                            <p className={`text-xs ${currentTheme.textSecondary}`}>Find friends from your contacts automatically</p>
+                        <label className="absolute bottom-6 right-5 p-2 bg-blue-600 rounded-full cursor-pointer hover:bg-blue-700 transition-colors shadow-lg text-white z-10" title="Upload new picture">
+                            <Camera className="w-4 h-4" />
+                            <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleAvatarChange}
+                                className="hidden"
+                            />
+                        </label>
+                        <p className={`mt-3 text-sm ${currentTheme.textSecondary}`}>
+                            {formData.avatar && formData.avatar.includes('googleusercontent') && !newAvatar 
+                                ? "" 
+                                : "Upload Profile Picture"}
+                        </p>
+                    </div>
+
+                    <div className={`w-full p-4 rounded-xl border ${formData.enableGoogleContacts ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : currentTheme.border} transition-all cursor-pointer`}
+                        onClick={() => setFormData(prev => ({ ...prev, enableGoogleContacts: !prev.enableGoogleContacts }))}
+                    >
+                        <div className="flex items-center space-x-3">
+                            <div className={`flex-shrink-0 w-6 h-6 rounded border flex items-center justify-center transition-colors ${formData.enableGoogleContacts ? 'bg-blue-500 border-blue-500' : 'border-gray-400 bg-transparent'}`}>
+                                {formData.enableGoogleContacts && <Check className="w-4 h-4 text-white" />}
+                            </div>
+                            <div className="flex-1 text-left">
+                                <p className={`font-medium ${currentTheme.text} flex items-center gap-2`}>
+                                <Users className="w-4 h-4 text-blue-500" /> Sync Google Contacts
+                                </p>
+                                <p className={`text-xs ${currentTheme.textSecondary}`}>Find friends from your contacts automatically</p>
+                            </div>
                         </div>
                     </div>
                 </div>
             </motion.div>
 
-            {/* Hidden Placeholder Button to align card bottom with siblings */}
+            {/* Hidden Placeholder Button */}
             <div className={`${buttonClasses} opacity-0 pointer-events-none`} aria-hidden="true">
                 Placeholder
             </div>
@@ -358,6 +372,55 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
         </div>
 
       </form>
+
+      {/* Profile Image Lightbox with Adaptive Glassy Background */}
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsExpanded(false)}
+            className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden"
+          >
+             {/* 1. Blurred Adaptive Background Layer - Increased intensity */}
+            <div className="absolute inset-0 z-0">
+                <img 
+                    src={formData.avatar} 
+                    alt="" 
+                    className="w-full h-full object-cover blur-3xl scale-125 opacity-80" 
+                    referrerPolicy="no-referrer"
+                />
+                {/* 2. Glassy Overlay - Darker and blurrier */}
+                <div className="absolute inset-0 backdrop-blur-3xl bg-black/50"></div> 
+            </div>
+
+             {/* 3. Content Layer */}
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.8, opacity: 0, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="relative z-10 p-2 rounded-full shadow-2xl ring-4 ring-white/20"
+              onClick={(e) => e.stopPropagation()} 
+            >
+              <img 
+                 src={formData.avatar} 
+                 alt="Profile" 
+                 className="w-72 h-72 md:w-96 md:h-96 rounded-full object-cover shadow-lg"
+                 referrerPolicy="no-referrer"
+              />
+              <button 
+                onClick={() => setIsExpanded(false)}
+                className="absolute top-0 right-0 m-4 bg-black/50 text-white p-2 rounded-full hover:bg-black/70 transition-colors backdrop-blur-sm border border-white/20"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </motion.div>
   );
 };
