@@ -1,19 +1,54 @@
 import asyncHandler from "express-async-handler";
 import User from "../models/user.model.js";
 import generateToken from "../config/generatetoken.js";
-export const allUsers = asyncHandler(async (req, res) => {
-  const keyword = req.query.search
-    ? {
-        $or: [
-          { name: { $regex: req.query.search, $options: "i" } },
-          { email: { $regex: req.query.search, $options: "i" } },
-        ],
-      }
-    : {};
+// export const allUsers = asyncHandler(async (req, res) => {
+//   const keyword = req.query.search
+//     ? {
+//         $or: [
+//           { name: { $regex: req.query.search, $options: "i" } },
+//           { email: { $regex: req.query.search, $options: "i" } },
+//         ],
+//       }
+//     : {};
 
-  const users = await User.find(keyword)
-    .find({ _id: { $ne: req.user._id } })
-    .select("-password"); // Don't send password field
+//   const users = await User.find(keyword)
+//     .find({ _id: { $ne: req.user._id } })
+//     .select("-password"); // Don't send password field
+
+//   res.status(200).json(users);
+// });
+export const allUsers = asyncHandler(async (req, res) => {
+  const search = req.query.search?.trim();
+
+  let users = [];
+
+  if (!search) {
+    // No search → return all except current user
+    users = await User.find({ _id: { $ne: req.user._id } }).select(
+      "-password -__v"
+    );
+    return res.status(200).json(users);
+  }
+
+  // If search is an email → exact match
+  if (search.includes("@")) {
+    const user = await User.findOne({ email: search.toLowerCase() }).select(
+      "-password -__v"
+    );
+    if (user && user._id.toString() !== req.user._id.toString()) {
+      return res.status(200).json([user]); // return array for compatibility
+    }
+    // fallback to fuzzy search if exact not found
+  }
+
+  // Fuzzy search on name or email
+  users = await User.find({
+    $or: [
+      { name: { $regex: search, $options: "i" } },
+      { email: { $regex: search, $options: "i" } },
+    ],
+    _id: { $ne: req.user._id },
+  }).select("-password -__v");
 
   res.status(200).json(users);
 });
@@ -312,28 +347,38 @@ export const acceptChatRequest = asyncHandler(async (req, res) => {
     throw new Error("Sender or receiver not found");
   }
 
-  // Remove sender from receiver’s received list
-  receiver.receivedChatRequests = receiver.receivedChatRequests.filter(
-    (r) => r.email.toLowerCase() !== senderEmail.toLowerCase()
-  );
+  // ------------ SAFELY FILTER RECEIVED CHAT REQUESTS ------------
+  receiver.receivedChatRequests = receiver.receivedChatRequests.filter((r) => {
+    if (!r || !r.email) return false; // remove invalid entries
+    return r.email.toLowerCase() !== senderEmail.toLowerCase();
+  });
   await receiver.save();
 
-  // Remove receiver from sender’s sent list
-  sender.sentChatRequests = sender.sentChatRequests.filter(
-    (r) => r.email.toLowerCase() !== receiver.email.toLowerCase()
-  );
+  // ------------ SAFELY FILTER SENT CHAT REQUESTS ------------
+  sender.sentChatRequests = sender.sentChatRequests.filter((r) => {
+    if (!r || !r.email) return false; // remove invalid entries
+    return r.email.toLowerCase() !== receiver.email.toLowerCase();
+  });
 
+  // ------------ ADD TO ACCEPTED LIST ------------
   if (!sender.acceptedChatRequests.includes(receiver.email)) {
     sender.acceptedChatRequests.push(receiver.email);
   }
 
   await sender.save();
 
+  // ------------ SEND ACCEPTED CHAT BACK TO FRONTEND ------------
   res.status(200).json({
     message: "Chat request accepted",
-    receivedChatRequests: receiver.receivedChatRequests,
+    acceptedChat: {
+      email: receiver.email,
+      name: receiver.name,
+      avatar: receiver.avatar,
+      message: "", // you can include any extra fields here
+    },
   });
 });
+
 
 // Fetch accepted chat requests that other users accepted which were sent by the current user
 export const getAcceptedChatRequestsSentByUser = asyncHandler(
@@ -367,9 +412,12 @@ export const getReceivedChatRequests = asyncHandler(async (req, res) => {
     throw new Error("User not found");
   }
 
-  // Populate each sender's profile info
+  const normalizedRequests = (user.receivedChatRequests || []).map((r) =>
+    typeof r === "string" ? { email: r, message: "", date: null } : r
+  );
+
   const detailedRequests = await Promise.all(
-    user.receivedChatRequests.map(async (reqItem) => {
+    normalizedRequests.map(async (reqItem) => {
       const sender = await User.findOne({ email: reqItem.email }).select("name email avatar");
       return {
         email: reqItem.email,
@@ -385,6 +433,7 @@ export const getReceivedChatRequests = asyncHandler(async (req, res) => {
 
   res.status(200).json(detailedRequests);
 });
+
 
 //Withdraw invite request
 // export const withdrawChatRequest = asyncHandler(async (req, res) => {
