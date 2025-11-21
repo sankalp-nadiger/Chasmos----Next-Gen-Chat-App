@@ -1401,295 +1401,204 @@ useEffect(() => {
   }, []);
 
   // Handle sending message from the MessageInput component-Updated
-  const handleSendMessageFromInput = useCallback(
-    (payload) => {
-      // payload can be a string (text) or an object (server message or attachment payload)
-      if (!payload || !selectedContact) return;
+  // Updated handleSendMessageFromInput function
+const handleSendMessageFromInput = useCallback(
+  (payload) => {
+    if (!payload || !selectedContact) return;
 
-      // If payload is a server-created message object (has _id), append directly
-      if (typeof payload === 'object' && (payload._id || payload.id || payload.createdAt)) {
-        try {
-          const chatId = payload.chat?._id || payload.chat || selectedContact.chatId || selectedContact.id || selectedContact._id;
-          const formatted = {
-            id: payload._id || payload.id || Date.now(),
-            type: payload.type || 'file',
-            content: payload.content || payload.text || '',
-            sender: payload.sender?._id || payload.sender || 'me',
-            timestamp: new Date(payload.createdAt || payload.createdAt || Date.now()).getTime(),
-            isRead: true,
-            attachments: payload.attachments || payload.files || [],
-          };
+    const getChatId = (payload) => {
+      return (
+        payload?.chat?._id ||
+        payload?.chat ||
+        selectedContact.chatId ||
+        selectedContact.id ||
+        selectedContact._id
+      );
+    };
 
-          setMessages((prevMessages) => ({
-            ...prevMessages,
-            [chatId]: [...(prevMessages[chatId] || []), formatted],
-          }));
+    const appendMessage = (chatId, message) => {
+      setMessages((prev) => ({
+        ...prev,
+        [chatId]: [...(prev[chatId] || []), message],
+      }));
+    };
 
-          // emit socket event if available
-          if (socketRef.current && socketRef.current.emit) {
-            socketRef.current.emit('new message', payload);
-          }
-
-          // update recentChats
-          setRecentChats((prevChats) => {
-            const exists = prevChats.find((c) => c.id === chatId || c.chatId === chatId);
-            if (exists) {
-              return prevChats.map((c) => (c.id === chatId || c.chatId === chatId ? { ...c, lastMessage: payload.content || payload.text || '', timestamp: Date.now() } : c));
-            } else {
-              return [
-                {
-                  id: chatId,
-                  chatId,
-                  name: selectedContact.name,
-                  avatar: selectedContact.avatar || '/default-avatar.png',
-                  lastMessage: payload.content || payload.text || '',
-                  timestamp: Date.now(),
-                  unreadCount: 0,
-                },
-                ...prevChats,
-              ];
-            }
-          });
-
-          return;
-        } catch (err) {
-          console.error('Error appending server message payload', err);
-          return;
+    const updateRecentChat = (chatId, preview) => {
+      setRecentChats((prev) => {
+        const exists = prev.find((c) => c.id === chatId || c.chatId === chatId);
+        if (exists) {
+          return prev.map((c) =>
+            c.id === chatId || c.chatId === chatId
+              ? { ...c, lastMessage: preview, timestamp: Date.now() }
+              : c
+          );
         }
-      }
+        return [
+          {
+            id: chatId,
+            chatId,
+            name: selectedContact.name,
+            avatar: selectedContact.avatar || '/default-avatar.png',
+            lastMessage: preview,
+            timestamp: Date.now(),
+            unreadCount: 0,
+          },
+          ...prev,
+        ];
+      });
+    };
 
-      // If payload is an object with attachments but not a server message, send via API
-      if (typeof payload === 'object' && payload.attachments) {
-        (async () => {
-          const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-          const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
-          if (!chatId || !token) {
-            // local fallback
-            const chatKey = chatId || selectedContact.email || selectedContact.id;
-            const newMessage = {
-              id: Date.now(),
-              type: payload.type || 'file',
-              content: payload.text || '',
-              sender: 'me',
-              timestamp: Date.now(),
-              attachments: payload.attachments,
-            };
+    // Case 1: Server message object
+    if (typeof payload === 'object' && (payload._id || payload.id || payload.createdAt)) {
+      try {
+        const chatId = getChatId(payload);
+        const formatted = {
+          id: payload._id || payload.id || Date.now(),
+          type: payload.type || 'file',
+          content: payload.content || payload.text || '',
+          sender: payload.sender?._id || payload.sender || 'me',
+          timestamp: new Date(payload.createdAt || Date.now()).getTime(),
+          isRead: true,
+          attachments: payload.attachments || payload.files || [],
+        };
 
-            setMessages((prevMessages) => ({
-              ...prevMessages,
-              [chatKey]: [...(prevMessages[chatKey] || []), newMessage],
-            }));
-            // Update recentChats preview for local fallback: prefer text, else attachment filename
-            setRecentChats((prevChats) => {
-              const previewFromAttachments = (atts) => {
-                if (!Array.isArray(atts) || atts.length === 0) return '';
-                const a = atts[0];
-                const possibleName = a.fileName || a.file_name || a.filename || a.name || a.url || a.fileUrl || '';
-                if (typeof possibleName === 'string' && possibleName.length > 0) {
-                  return possibleName.replace(/^[\d\-:.]+_/, '');
-                }
-                return 'Attachment';
-              };
+        appendMessage(chatId, formatted);
 
-              return prevChats.map((c) => {
-                if (c.id === chatKey || c.chatId === chatKey) {
-                  const newLast = newMessage.content && newMessage.content.trim() ? newMessage.content : previewFromAttachments(newMessage.attachments);
-                  return {
-                    ...c,
-                    lastMessage: newLast || 'Attachment',
-                    timestamp: Date.now(),
-                    hasAttachment: Array.isArray(newMessage.attachments) && newMessage.attachments.length > 0,
-                    attachmentName: Array.isArray(newMessage.attachments) && newMessage.attachments[0]?.fileName ? newMessage.attachments[0].fileName.replace(/^[\d\-:.]+_/, '') : undefined,
-                    attachmentMime: Array.isArray(newMessage.attachments) && (newMessage.attachments[0]?.mimeType || newMessage.attachments[0]?.fileType) ? (newMessage.attachments[0].mimeType || newMessage.attachments[0].fileType) : undefined,
-                  };
-                }
-                return c;
-              });
-            });
-            return;
-          }
+        if (socketRef.current?.emit) {
+          socketRef.current.emit('new message', payload);
+        }
 
-          try {
-            const res = await fetch(`${API_BASE_URL}/api/message`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ content: payload.text || '', chatId, attachments: payload.attachments, type: payload.type }),
-            });
-
-            if (!res.ok) throw new Error('Failed to send message with attachments');
-
-            const sent = await res.json();
-            const formatted = {
-              id: sent._id || sent.id || Date.now(),
-              type: sent.type || payload.type || 'file',
-              content: sent.content || sent.text || payload.text || '',
-              sender: sent.sender?._id || sent.sender || 'me',
-              timestamp: new Date(sent.createdAt || Date.now()).getTime(),
-              isRead: true,
-              attachments: sent.attachments || payload.attachments,
-            };
-
-            setMessages((prevMessages) => ({
-              ...prevMessages,
-              [chatId]: [...(prevMessages[chatId] || []), formatted],
-            }));
-
-            if (socketRef.current && socketRef.current.emit) {
-              socketRef.current.emit('new message', sent);
-            }
-
-            // Compute preview: prefer text, else first attachment filename (stripped)
-            const computePreview = (fmt) => {
-              const text = (fmt.content || fmt.text || '').toString().trim();
-              const atts = fmt.attachments || [];
-              if (text.length > 0) {
-                return atts.length > 0 ? `${text} 📎` : text;
-              }
-              if (atts.length > 0) {
-                const a = atts[0];
-                const name = a.fileName || a.file_name || a.filename || a.name || (a.fileUrl ? a.fileUrl.split('/').pop() : '') || '';
-                const stripped = (name || '').replace(/^[\d\-:.]+_/, '');
-                return stripped || 'Attachment';
-              }
-              return '';
-            };
-
-            const previewText = computePreview(formatted);
-
-            setRecentChats((prevChats) => {
-              const exists = prevChats.find((c) => c.id === chatId || c.chatId === chatId);
-              if (exists) {
-                return prevChats.map((c) =>
-                  c.id === chatId || c.chatId === chatId
-                    ? {
-                        ...c,
-                        lastMessage: previewText,
-                        timestamp: Date.now(),
-                        hasAttachment: Array.isArray(formatted.attachments) && formatted.attachments.length > 0,
-                        attachmentName: Array.isArray(formatted.attachments) && formatted.attachments[0]?.fileName ? formatted.attachments[0].fileName.replace(/^[\d\-:.]+_/, '') : undefined,
-                        attachmentMime: Array.isArray(formatted.attachments) && (formatted.attachments[0]?.mimeType || formatted.attachments[0]?.fileType) ? (formatted.attachments[0].mimeType || formatted.attachments[0].fileType) : undefined,
-                      }
-                    : c
-                );
-              } else {
-                return [
-                  {
-                    id: chatId,
-                    chatId,
-                    name: selectedContact.name,
-                    avatar: selectedContact.avatar || '/default-avatar.png',
-                    lastMessage: previewText,
-                    timestamp: Date.now(),
-                    unreadCount: 0,
-                    hasAttachment: Array.isArray(formatted.attachments) && formatted.attachments.length > 0,
-                    attachmentName: Array.isArray(formatted.attachments) && formatted.attachments[0]?.fileName ? formatted.attachments[0].fileName.replace(/^[\d\-:.]+_/, '') : undefined,
-                    attachmentMime: Array.isArray(formatted.attachments) && (formatted.attachments[0]?.mimeType || formatted.attachments[0]?.fileType) ? (formatted.attachments[0].mimeType || formatted.attachments[0].fileType) : undefined,
-                  },
-                  ...prevChats,
-                ];
-              }
-            });
-          } catch (err) {
-            console.error('Error sending attachment message:', err);
-          }
-        })();
-
+        updateRecentChat(chatId, formatted.content || 'Attachment');
+        return;
+      } catch (err) {
+        console.error('Error appending server message payload', err);
         return;
       }
+    }
 
-      // Otherwise treat payload as text message string
-      if (typeof payload === 'string') {
-        const messageText = payload;
-        if (!messageText.trim()) return;
+    // Case 2: Attachments message
+    if (typeof payload === 'object' && payload.attachments) {
+      (async () => {
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        const chatId = getChatId(payload);
 
-        (async () => {
-          const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-          const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
+        const localMessage = {
+          id: Date.now(),
+          type: payload.type || 'file',
+          content: payload.text || '',
+          sender: 'me',
+          timestamp: Date.now(),
+          attachments: payload.attachments,
+        };
 
-          // If we don't have a chatId or token, fall back to local append
-          if (!chatId || !token) {
-            const chatKey = chatId || selectedContact.email || selectedContact.id;
-            const newMessage = {
-              id: Date.now(),
-              type: 'text',
-              content: messageText,
-              sender: 'me',
-              timestamp: Date.now(),
-              isRead: true,
-            };
+        // Local fallback
+        if (!chatId || !token) {
+          appendMessage(chatId, localMessage);
+          updateRecentChat(chatId, localMessage.content || 'Attachment');
+          return;
+        }
 
-            setMessages((prevMessages) => ({
-              ...prevMessages,
-              [chatKey]: [...(prevMessages[chatKey] || []), newMessage],
-            }));
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/message`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              content: payload.text || '',
+              chatId,
+              attachments: payload.attachments,
+              type: payload.type,
+            }),
+          });
 
-            return;
-          }
+          if (!res.ok) throw new Error('Failed to send message with attachments');
 
-          try {
-            const res = await fetch(`${API_BASE_URL}/api/message`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ content: messageText, chatId }),
-            });
+          const sent = await res.json();
 
-            if (!res.ok) throw new Error('Failed to send message');
+          const formatted = {
+            id: sent._id || sent.id || Date.now(),
+            type: sent.type || payload.type || 'file',
+            content: sent.content || sent.text || payload.text || '',
+            sender: sent.sender?._id || sent.sender || 'me',
+            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            isRead: true,
+            attachments: sent.attachments || payload.attachments,
+          };
 
-            const sent = await res.json();
+          appendMessage(chatId, formatted);
 
-            const formatted = {
-              id: sent._id || sent.id || Date.now(),
-              type: 'text',
-              content: sent.content || sent.text || messageText,
-              sender: sent.sender?._id || sent.sender || 'me',
-              timestamp: new Date(sent.createdAt || Date.now()).getTime(),
-              isRead: true,
-            };
+          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
 
-            setMessages((prevMessages) => ({
-              ...prevMessages,
-              [chatId]: [...(prevMessages[chatId] || []), formatted],
-            }));
+          const preview = formatted.content || (formatted.attachments[0]?.fileName || 'Attachment');
+          updateRecentChat(chatId, preview);
+        } catch (err) {
+          console.error('Error sending attachment message:', err);
+        }
+      })();
 
-            // Emit socket event for realtime delivery
-            if (socketRef.current && socketRef.current.emit) {
-              socketRef.current.emit('new message', sent);
-            }
+      return;
+    }
 
-            // Update recentChats
-            setRecentChats((prevChats) => {
-              const exists = prevChats.find((c) => c.id === chatId || c.chatId === chatId);
-              if (exists) {
-                return prevChats.map((c) => (c.id === chatId || c.chatId === chatId ? { ...c, lastMessage: messageText, timestamp: Date.now() } : c));
-              } else {
-                return [
-                  {
-                    id: chatId,
-                    chatId,
-                    name: selectedContact.name,
-                    avatar: selectedContact.avatar || '/default-avatar.png',
-                    lastMessage: messageText,
-                    timestamp: Date.now(),
-                    unreadCount: 0,
-                  },
-                  ...prevChats,
-                ];
-              }
-            });
-          } catch (err) {
-            console.error('Error sending message:', err);
-          }
-        })();
-      }
-    },
-    [selectedContact]
-  );
+    // Case 3: Text message
+    if (typeof payload === 'string') {
+      const messageText = payload.trim();
+      if (!messageText) return;
+
+      (async () => {
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        const chatId = getChatId(payload);
+
+        const localMessage = {
+          id: Date.now(),
+          type: 'text',
+          content: messageText,
+          sender: 'me',
+          timestamp: Date.now(),
+          isRead: true,
+        };
+
+        if (!chatId || !token) {
+          appendMessage(chatId, localMessage);
+          return;
+        }
+
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/message`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ content: messageText, chatId }),
+          });
+
+          if (!res.ok) throw new Error('Failed to send message');
+
+          const sent = await res.json();
+
+          const formatted = {
+            id: sent._id || sent.id || Date.now(),
+            type: 'text',
+            content: sent.content || sent.text || messageText,
+            sender: sent.sender?._id || sent.sender || 'me',
+            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            isRead: true,
+          };
+
+          appendMessage(chatId, formatted);
+          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
+
+          updateRecentChat(chatId, messageText);
+        } catch (err) {
+          console.error('Error sending message:', err);
+        }
+      })();
+    }
+  },
+  [selectedContact]
+);
 
   // Initialize socket connection once
   useEffect(() => {
@@ -2049,7 +1958,11 @@ useEffect(() => {
 
           const otherId = otherUser?._id || otherUser?.id || null;
           const displayName =
-            otherUser?.email || otherUser?.username || otherUser?.name || "Unknown";
+  otherUser?.name ||
+  otherUser?.username ||
+  (otherUser?.email ? otherUser.email.split("@")[0] : null) ||
+  "Unknown";
+
 
           // Determine if lastMessage indicates attachments and extract preview text
           let preview = "";
