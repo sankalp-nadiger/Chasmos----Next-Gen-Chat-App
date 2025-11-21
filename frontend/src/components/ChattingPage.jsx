@@ -232,11 +232,11 @@ const MessageBubble = React.memo(
                 ? 'pt-2 pb-8 pr-4' 
                 : 'py-2'
           } rounded-lg relative ${
-            isOwnMessage
-              ? `backdrop-blur-md bg-gradient-to-br from-purple-400/20 to-blue-400/20 border border-white/30 shadow-lg shadow-purple-500/10 text-white`
-              : effectiveTheme.mode === 'dark'
-                ? 'bg-blue-500/80 backdrop-blur-md text-white'
-                : 'bg-white/90 backdrop-blur-md text-gray-800 border border-gray-200'
+          isOwnMessage
+  ? `backdrop-blur-md bg-gradient-to-br from-purple-400/20 to-blue-400/20 border border-white/30 shadow-lg shadow-purple-500/10 text-white`
+  : effectiveTheme.mode === 'dark'
+    ? 'backdrop-blur-xl bg-gradient-to-br from-blue-400/30 to-blue-600/25 border border-blue-300/30 shadow-lg shadow-blue-500/10 text-white'
+    : 'bg-gradient-to-br from-blue-50 to-purple-50 backdrop-blur-md text-gray-800 border border-blue-200 shadow-sm'
           } ${isPinned ? "ring-2 ring-yellow-400" : ""}`}
           whileHover={{
             boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
@@ -294,17 +294,21 @@ const MessageBubble = React.memo(
               effectiveTheme={effectiveTheme}
             />
           ) : (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.1 }}
-              className={isShortMessage ? 'flex items-end gap-2' : ''}
-            >
-              <span>{message.content}</span>
+           <motion.div
+  initial={{ opacity: 0 }}
+  animate={{ opacity: 1 }}
+  transition={{ delay: 0.1 }}
+  className={isShortMessage ? 'flex items-end gap-2' : ''}
+>
+  <span className={effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900'}>
+    {message.content}
+  </span>
               
               {/* For short messages, show timestamp inline */}
               {isShortMessage && isOwnMessage && (
-                <span className="text-xs opacity-75 text-white whitespace-nowrap flex items-center gap-1 ml-2 flex-shrink-0">
+                <span className={`text-xs opacity-75 whitespace-nowrap flex items-center gap-1 ml-2 flex-shrink-0 ${
+    effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900'
+  }`}>
                   {formatMessageTime(message.timestamp)}
                   {message.isRead ? (
                     <CheckCheck className="w-4 h-4 text-blue-400 flex-shrink-0" />
@@ -314,12 +318,12 @@ const MessageBubble = React.memo(
                 </span>
               )}
               {isShortMessage && !isOwnMessage && (
-                <span className={`text-xs opacity-75 whitespace-nowrap ml-2 flex-shrink-0 ${
-                  effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-600'
-                }`}>
-                  {formatMessageTime(message.timestamp)}
-                </span>
-              )}
+  <span className={`text-xs opacity-75 whitespace-nowrap ml-2 flex-shrink-0 ${
+    effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900'
+  }`}>
+    {formatMessageTime(message.timestamp)}
+  </span>
+)}
             </motion.div>
           )}
 
@@ -333,9 +337,13 @@ const MessageBubble = React.memo(
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3 }}
             >
-              <span className={`text-xs opacity-75 ${isOwnMessage ? 'text-white' : effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-600'}`}>
-                {formatMessageTime(message.timestamp)}
-              </span>
+              <span className={`text-xs opacity-75 ${
+  isOwnMessage 
+    ? (effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900')
+    : (effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900')
+}`}>
+  {formatMessageTime(message.timestamp)}
+</span>
               {isOwnMessage && (
                 <motion.div
                   initial={{ scale: 0 }}
@@ -442,20 +450,37 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
       ? 'text-white' 
       : effectiveTheme.mode === 'dark' 
         ? 'text-white' 
-        : 'text-gray-800';
+        : 'text-gray-700';
 
-    return (
-      <div key={idx} className={`flex items-center justify-between ${isOwnMessage ? 'bg-white/10' : effectiveTheme.mode === 'dark' ? 'bg-black/20' : 'bg-gray-100/50'} backdrop-blur-sm p-2 rounded mb-2`}>
-        <div className="flex items-center space-x-3 w-full">
-          <div className={`w-10 h-10 ${isOwnMessage ? 'bg-white/20' : effectiveTheme.mode === 'dark' ? 'bg-white/10' : 'bg-gray-200'} rounded flex items-center justify-center flex-shrink-0`}>
-            <FileText className={`w-5 h-5 ${textColor}`} />
-          </div>
+       // Update the textColor logic for better contrast
+const fileNameColor = isOwnMessage 
+  ? effectiveTheme.mode === 'dark' 
+    ? 'text-white' 
+    : 'text-gray-600' // Dark text for own messages in light mode
+  : effectiveTheme.mode === 'dark' 
+    ? 'text-white' 
+    : 'text-gray-600'; // Dark text for received messages in light mode
 
-          <div className="relative w-full">
-            <div className={`text-sm font-medium truncate pr-16 ${textColor}`}>{name}</div>
-            {att.fileSize && (
-              <div className={`text-xs ${textColor} opacity-70`}>{(att.fileSize / 1024).toFixed(1)} KB</div>
-            )}
+const iconColor = isOwnMessage 
+  ? effectiveTheme.mode === 'dark' 
+    ? 'text-white' 
+    : 'text-gray-700'
+  : effectiveTheme.mode === 'dark' 
+    ? 'text-white' 
+    : 'text-gray-700';
+
+return (
+  <div key={idx} className={`flex items-center justify-between ${isOwnMessage ? 'bg-white/10' : effectiveTheme.mode === 'dark' ? 'bg-black/20' : 'bg-gray-100/50'} backdrop-blur-sm p-2 rounded mb-2`}>
+    <div className="flex items-center space-x-3 w-full">
+      <div className={`w-10 h-10 ${isOwnMessage ? 'bg-white/20' : effectiveTheme.mode === 'dark' ? 'bg-white/10' : 'bg-gray-200'} rounded flex items-center justify-center flex-shrink-0`}>
+        <FileText className={`w-5 h-5 ${iconColor}`} />
+      </div>
+
+      <div className="relative w-full">
+        <div className={`text-sm font-medium truncate pr-16 ${fileNameColor}`}>{name}</div>
+        {att.fileSize && (
+          <div className={`text-xs ${fileNameColor} opacity-70`}>{(att.fileSize / 1024).toFixed(1)} KB</div>
+        )}
 
             <div className="absolute right-0 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
               <div className="bg-white rounded-lg p-1 shadow-sm flex items-center space-x-1">
@@ -503,13 +528,23 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
         {(message.attachments || []).map((att, idx) => renderAttachment(att, idx))}
       </div>
       
-      {message.attachments && message.attachments.length > 0 ? (
-        message.content ? (
-          <div className={`mt-2 text-sm ${textColor}`}>{message.content}</div>
-        ) : null
-      ) : (
-        message.content && <div className={`mb-2 ${textColor}`}>{message.content}</div>
-      )}
+{message.attachments && message.attachments.length > 0 ? (
+  message.content ? (
+    <div className={`mt-2 text-sm ${
+      effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900'
+    }`}>
+      {message.content}
+    </div>
+  ) : null
+) : (
+  message.content && (
+    <div className={`mb-2 ${
+      effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900'
+    }`}>
+      {message.content}
+    </div>
+  )
+)}
 
       {lightboxOpen && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-95" onClick={closeLightbox}>
@@ -587,33 +622,46 @@ const MessagesArea = ({
 
   return (
     <div className="relative h-full overflow-hidden">
-      {/* Day mode diagonal comets */}
-      {effectiveTheme.mode !== 'dark' && (
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          {[...Array(5)].map((_, i) => (
-            <motion.div
-              key={`day-comet-${i}`}
-              className="absolute w-1 h-16 bg-gradient-to-b from-blue-300 via-purple-300 to-transparent rounded-full"
-              style={{
-                left: `${Math.random() * 100}%`,
-                top: `-10%`,
-                transform: `rotate(45deg)`,
-              }}
-              animate={{
-                x: [0, 400],
-                y: [0, 400],
-                opacity: [0, 1, 0],
-              }}
-              transition={{
-                duration: 3 + Math.random() * 2,
-                repeat: Infinity,
-                delay: i * 1.5,
-                ease: "linear",
-              }}
-            />
-          ))}
-        </div>
-      )}
+   {/* Day time diagonal comets - Tail at top, Head at bottom (vertical) */}
+{effectiveTheme.mode !== 'dark' && (
+  <div className="absolute inset-0 overflow-hidden pointer-events-none">
+    {[...Array(3)].map((_, i) => (
+      <motion.div
+        key={`day-comet-${i}`}
+        className="absolute w-0.5 h-20 rounded-full"
+        style={{
+          left: `${10 + Math.random() * 80}%`,
+          top: `-10%`,
+
+          // ⭐ Gradient: transparent at top (tail) → solid at bottom (head)
+          background: `
+            linear-gradient(
+              to bottom,
+              transparent 0%,
+              rgba(196,181,253,0.25) 30%,
+              rgba(147,197,253,0.5) 70%,
+              rgba(96,165,250,0.7) 100%
+            )
+          `,
+
+          // ⭐ No rotation - moves straight down
+          transform: 'rotate(0deg)',
+          filter: 'blur(0.5px)', // Reduced blur
+        }}
+        animate={{
+          y: [-100, window.innerHeight + 100],
+          opacity: [0, 0.6, 0],
+        }}
+        transition={{
+          duration: 6 + Math.random() * 3, // Slower: 6-9 seconds
+          repeat: Infinity,
+          delay: i * 2.5,
+          ease: "linear",
+        }}
+      />
+    ))}
+  </div>
+)}
 
       <div
         ref={messagesContainerRef}
