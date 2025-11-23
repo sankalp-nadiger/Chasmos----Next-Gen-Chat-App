@@ -8,6 +8,7 @@ import React, {
   useRef,
 } from "react";
 import { createPortal } from 'react-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from "socket.io-client";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -59,6 +60,7 @@ import {
 import DocumentChat from "./DocumentChat";
 import NewDocumentUploader from "./NewDocumentUploader";
 import DocumentChatWrapper from "./DocumentChat";
+import Community from "./Community";
 
 // Memoized Chat Header Component
 const ChatHeader = React.memo(
@@ -791,8 +793,10 @@ const MessagesArea = ({
   );
 };
 
-const ChattingPage = ({ onLogout }) => {
+const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const { currentTheme, setTheme, theme } = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const [selectedContact, setSelectedContact] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -816,7 +820,16 @@ const ChattingPage = ({ onLogout }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [activeNavItem, setActiveNavItem] = useState("chats"); // 'chats', 'groups', 'documents', 'community'
+  const [activeNavItem, setActiveNavItem] = useState(activeSection); // 'chats', 'groups', 'documents', 'community', 'profile', 'settings'
+
+  // Sync activeNavItem with activeSection prop (from URL)
+  useEffect(() => {
+    setActiveNavItem(activeSection);
+    // Show sidebar for sections that need it (chats, groups, documents)
+    if (['chats', 'groups', 'documents'].includes(activeSection)) {
+      setShowSidebar(true);
+    }
+  }, [activeSection]);
   const [recentChats, setRecentChats] = useState([]);
   const [receivedChats, setReceivedChats] = React.useState([]); // incoming chat requests
   const [acceptedChats, setAcceptedChats] = React.useState([]); // chats you accepted
@@ -2288,7 +2301,7 @@ useEffect(() => {
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveNavItem("chats")}
+              onClick={() => navigate('/chats')}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
                 activeNavItem === "chats"
                   ? `${effectiveTheme.accent} text-white shadow-lg`
@@ -2303,7 +2316,7 @@ useEffect(() => {
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveNavItem("groups")}
+              onClick={() => navigate('/groups')}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
                 activeNavItem === "groups"
                   ? `${effectiveTheme.accent} text-white shadow-lg`
@@ -2318,7 +2331,7 @@ useEffect(() => {
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveNavItem("documents")}
+              onClick={() => navigate('/documents')}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
                 activeNavItem === "documents"
                   ? `${effectiveTheme.accent} text-white shadow-lg`
@@ -2333,7 +2346,7 @@ useEffect(() => {
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveNavItem("community")}
+              onClick={() => navigate('/community')}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
                 activeNavItem === "community"
                   ? `${effectiveTheme.accent} text-white shadow-lg`
@@ -2351,8 +2364,12 @@ useEffect(() => {
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setShowProfile(true)}
-              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`}
+              onClick={() => navigate('/profile')}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                activeNavItem === "profile"
+                  ? `${effectiveTheme.accent} text-white shadow-lg`
+                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+              }`}
               title="Profile"
             >
               <User className="w-5 h-5" />
@@ -2362,8 +2379,12 @@ useEffect(() => {
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setShowSettings(true)}
-              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`}
+              onClick={() => navigate('/settings')}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                activeNavItem === "settings"
+                  ? `${effectiveTheme.accent} text-white shadow-lg`
+                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+              }`}
               title="Settings"
             >
               <Settings className="w-5 h-5" />
@@ -2385,7 +2406,8 @@ useEffect(() => {
         {/* Sidebar */}
         <AnimatePresence mode="wait">
           {showSidebar &&
-            !(isMobileView && (showGroupCreation || showNewChat)) && (
+            !(isMobileView && (showGroupCreation || showNewChat)) &&
+            !['community', 'profile', 'settings'].includes(activeSection) && (
               <motion.div
   initial={{ x: isMobileView ? -300 : -100, opacity: 0 }}
   animate={{
@@ -2477,7 +2499,8 @@ useEffect(() => {
 
                 {/* Chat Sidebar Area */}
                 <div className="flex-1 flex flex-col overflow-hidden">
-  {/* Alerts Section: Chat Requests & Accepted */}
+  {/* Alerts Section: Chat Requests & Accepted - Hide for documents section */}
+  {activeSection !== 'documents' && (
   <div className="flex-shrink-0">
     {/* Chat Requests Dropdown */}
     <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
@@ -2695,8 +2718,9 @@ useEffect(() => {
                       </AnimatePresence>
                     </div>
                   </div>
+  )}
 
-                  {/* 🧭 Contacts List */}
+                  {/* 🧭 Contacts/Documents List */}
                <div 
   className="flex-1 overflow-y-auto p-4 space-y-4 sidebar-scroll"
   style={{
@@ -2706,53 +2730,83 @@ useEffect(() => {
       : '#8b5cf6 transparent' // Purple for light mode
   }}
 >
-  {/* Recent Chats */}
-  {recentChats.length > 0 && (
-    <div className="flex flex-col gap-2">
-      <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-        Recent Chats
-      </h4>
-      {recentChats.map((chat) => (
-        <ContactItem
-          key={chat.id}
-          contact={chat}
-          effectiveTheme={effectiveTheme}
-          onSelect={(c) => handleOpenChat(c)}
-        />
-      ))}
-    </div>
-  )}
+  {activeSection === 'documents' ? (
+    /* Documents List */
+    <>
+      <div className="flex flex-col gap-2">
+        <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+          My Documents
+        </h4>
+        {contacts.length > 0 ? (
+          contacts.map((contact) => (
+            <ContactItem
+              key={contact.id}
+              contact={contact}
+              effectiveTheme={effectiveTheme}
+              onSelect={(c) => handleOpenChat(c)}
+            />
+          ))
+        ) : (
+          <div className="text-center space-y-4 mt-10">
+            <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+              No documents uploaded yet
+            </p>
+          </div>
+        )}
+      </div>
+    </>
+  ) : (
+    /* Regular Chats and Contacts */
+    <>
+      {/* Recent Chats */}
+      {recentChats.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+            Recent Chats
+          </h4>
+          {recentChats.map((chat) => (
+            <ContactItem
+              key={chat.id}
+              contact={chat}
+              effectiveTheme={effectiveTheme}
+              onSelect={(c) => handleOpenChat(c)}
+            />
+          ))}
+        </div>
+      )}
 
-  {/* All Contacts */}
-  {contacts.length > 0 && (
-    <div className="flex flex-col gap-2 mt-4">
-      <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-        Contacts
-      </h4>
-      {contacts.map((contact) => (
-        <ContactItem
-          key={contact.id}
-          contact={contact}
-          effectiveTheme={effectiveTheme}
-          onSelect={(c) => handleOpenChat(c)}
-        />
-      ))}
-    </div>
-  )}
+      {/* All Contacts */}
+      {contacts.length > 0 && (
+        <div className="flex flex-col gap-2 mt-4">
+          <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+            Contacts
+          </h4>
+          {contacts.map((contact) => (
+            <ContactItem
+              key={contact.id}
+              contact={contact}
+              effectiveTheme={effectiveTheme}
+              onSelect={(c) => handleOpenChat(c)}
+            />
+          ))}
+        </div>
+      )}
 
-  {/* Empty State */}
-  {recentChats.length === 0 && contacts.length === 0 && (
-    <div className="text-center space-y-4 mt-10">
-      <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
-        Start chatting with Chasmos!
-      </p>
-      <button
-        onClick={() => setShowNewChat(true)}
-        className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
-      >
-        New Chat
-      </button>
-    </div>
+      {/* Empty State */}
+      {recentChats.length === 0 && contacts.length === 0 && (
+        <div className="text-center space-y-4 mt-10">
+          <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+            Start chatting with Chasmos!
+          </p>
+          <button
+            onClick={() => setShowNewChat(true)}
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+          >
+            New Chat
+          </button>
+        </div>
+      )}
+    </>
   )}
 </div>
                 </div>
@@ -2900,7 +2954,120 @@ useEffect(() => {
           key={selectedContact?.id || selectedDocument?._id || "no-contact"}
           className="flex-1 flex flex-col relative h-full overflow-hidden"
         >
-          {showGroupCreation ? (
+          {activeSection === "community" ? (
+            <Community 
+              effectiveTheme={effectiveTheme}
+              onClose={() => navigate('/chats')}
+            />
+          ) : activeSection === "profile" ? (
+            <Profile
+              effectiveTheme={effectiveTheme}
+              onClose={() => navigate('/chats')}
+            />
+          ) : activeSection === "settings" ? (
+            <SettingsPage
+              effectiveTheme={effectiveTheme}
+              onClose={() => navigate('/chats')}
+            />
+          ) : activeSection === "documents" && !selectedDocument && !isNewDocumentChat ? (
+            // Documents section welcome screen
+            <div className="flex-1 flex items-center justify-center p-4">
+              <div className="text-center max-w-md w-full">
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.5 }}
+                  className={`w-24 h-24 rounded-full ${effectiveTheme.accent} mx-auto mb-6 flex items-center justify-center`}
+                >
+                  <FileText className="w-12 h-12 text-white" />
+                </motion.div>
+                <motion.h2
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.2, duration: 0.5 }}
+                  className={`text-2xl font-bold mb-3 ${effectiveTheme.text}`}
+                >
+                  Document Chat
+                </motion.h2>
+                <motion.p
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.3, duration: 0.5 }}
+                  className={`text-base ${effectiveTheme.textSecondary} mb-6`}
+                >
+                  Upload a document to start chatting with AI about its contents
+                </motion.p>
+                <motion.button
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.4, duration: 0.5 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setIsNewDocumentChat(true)}
+                  className={`px-6 py-3 ${effectiveTheme.accent} text-white rounded-lg font-medium transition-all flex items-center gap-2 mx-auto`}
+                  style={{
+                    background: effectiveTheme.mode === 'dark' ? '#667eea' : '#8b5cf6'
+                  }}
+                >
+                  <Plus className="w-5 h-5" />
+                  Upload Document
+                </motion.button>
+              </div>
+            </div>
+          ) : activeSection === "groups" && !selectedContact ? (
+            // Groups section welcome screen
+            <div className="flex-1 flex items-center justify-center p-4">
+              <div className="text-center max-w-md w-full">
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.5 }}
+                  className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full ${effectiveTheme.accent} mx-auto mb-4 sm:mb-6 flex items-center justify-center`}
+                >
+                  <svg
+                    width="48"
+                    height="48"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-12 h-12 sm:w-14 sm:h-14"
+                  >
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      fill="currentColor"
+                      className="text-blue-500"
+                    />
+                    <path
+                      d="M17.5 15.5C17.25 15.25 16.8125 15.0625 16.375 14.875C15.9375 14.6875 15.5625 14.5 15.0625 14.1875C14.5625 13.875 14.1875 13.625 13.8125 13.3125C13.4375 13 13.0625 12.5625 12.75 12.0625C12.5 11.5625 12.25 11.0625 12 10.5625C11.75 10.0625 11.5 9.5625 11.25 9.0625C11 8.5625 10.75 8.125 10.5 7.625C10.25 7.125 10 6.625 9.75 6.125C9.5 5.625 9.25 5.1875 9 4.6875C8.75 4.1875 8.5 3.75 8.25 3.25C8 2.75 7.75 2.25 7.5 1.75C7.25 1.25 7 0.75 6.75 0.25C6.5 0.25 6.25 0.5 6 0.75C5.75 1 5.5 1.25 5.25 1.5C5 1.75 4.75 2 4.5 2.25C4.25 2.5 4 2.75 3.75 3C3.5 3.25 3.25 3.5 3 3.75C2.75 4 2.5 4.25 2.25 4.5C2 4.75 1.75 5 1.5 5.25C1.25 5.5 1 5.75 0.75 6C0.5 6.25 0.25 6.5 0.25 6.75L0.25 6.75Z"
+                      fill="white"
+                    />
+                  </svg>
+                </motion.div>
+                <motion.h2
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.2, duration: 0.5 }}
+                  className={`text-xl sm:text-2xl font-bold mb-2 ${effectiveTheme.text}`}
+                  style={{
+                    fontFamily: "'Orbitron', sans-serif",
+                    letterSpacing: "2px",
+                  }}
+                >
+                  Welcome to Chasmos
+                </motion.h2>
+                <motion.p
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.4, duration: 0.5 }}
+                  className={`text-sm sm:text-base ${effectiveTheme.textSecondary}`}
+                >
+                  Select a group conversation to start messaging
+                </motion.p>
+              </div>
+            </div>
+          ) : showGroupCreation ? (
             <GroupCreation
               contacts={contacts}
               effectiveTheme={effectiveTheme}
@@ -2913,16 +3080,6 @@ useEffect(() => {
               effectiveTheme={effectiveTheme}
               onClose={handleCloseNewChat}
               onStartChat={handleStartNewChat}
-            />
-          ) : showProfile ? (
-            <Profile
-              effectiveTheme={effectiveTheme}
-              onClose={() => setShowProfile(false)}
-            />
-          ) : showSettings ? (
-            <SettingsPage
-              effectiveTheme={effectiveTheme}
-              onClose={() => setShowSettings(false)}
             />
           ) : isNewDocumentChat ? (
             <NewDocumentUploader
