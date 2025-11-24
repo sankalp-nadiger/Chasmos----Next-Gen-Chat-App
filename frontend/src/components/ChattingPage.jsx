@@ -41,7 +41,13 @@ import {
   ChevronUp,
   Globe,
   Folder,
+  UserMinus,
+  Copy,
 } from "lucide-react";
+import blockService from "../utils/blockService";
+import archiveService from "../utils/archiveService";
+import BlockedUsers from "./BlockedUsers";
+import ArchiveManager from "./ArchiveManager";
 import { useTheme } from "../context/ThemeContext";
 import MessageInput from "./MessageInput";
 import ContactItem from "./ContactItem";
@@ -77,7 +83,26 @@ const ChatHeader = React.memo(
     onCloseChatSearch,
     pinnedMessages,
     onShowPinnedMessages,
+    onBlockUser,
+    onUnblockUser,
+    onArchiveChat,
+    onUnarchiveChat,
+    isBlocked,
+    isArchived,
   }) => {
+    const [menuOpen, setMenuOpen] = React.useState(false);
+    const menuRef = React.useRef(null);
+
+    React.useEffect(() => {
+      const handler = (e) => {
+        if (!menuRef.current) return;
+        if (menuOpen && !menuRef.current.contains(e.target)) {
+          setMenuOpen(false);
+        }
+      };
+      document.addEventListener('mousedown', handler);
+      return () => document.removeEventListener('mousedown', handler);
+    }, [menuOpen]);
     const pinnedCount = Object.values(pinnedMessages || {}).filter(
       Boolean
     ).length;
@@ -168,6 +193,49 @@ const ChatHeader = React.memo(
               </div>
             )}
           </div>
+          <div className="relative ml-2" ref={menuRef}>
+            <button aria-label="Open chat menu" className={`p-2 rounded ${effectiveTheme.hover} ${effectiveTheme.text}`} onClick={(e)=>{e.stopPropagation(); setMenuOpen(s=>!s)}}>
+              <MoreVertical className={`w-5 h-5 ${effectiveTheme.text}`} />
+            </button>
+            {menuOpen && (
+              <div className={`absolute right-0 top-10 w-56 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded shadow-lg z-50`}>
+                <ul className="divide-y">
+                  <li>
+                    {!isBlocked ? (
+                      <button className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onBlockUser && onBlockUser(selectedContact); setMenuOpen(false); }}>
+                        <UserMinus className="w-4 h-4 opacity-80" />
+                        <span>Block User</span>
+                      </button>
+                    ) : (
+                      <button className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onUnblockUser && onUnblockUser(selectedContact); setMenuOpen(false); }}>
+                        <UserPlus className="w-4 h-4 opacity-80" />
+                        <span>Unblock User</span>
+                      </button>
+                    )}
+                  </li>
+                  <li>
+                    {!isArchived ? (
+                      <button className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onArchiveChat && onArchiveChat(selectedContact); setMenuOpen(false); }}>
+                        <Archive className="w-4 h-4 opacity-80" />
+                        <span>Archive Chat</span>
+                      </button>
+                    ) : (
+                      <button className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onUnarchiveChat && onUnarchiveChat(selectedContact); setMenuOpen(false); }}>
+                        <Archive className="w-4 h-4 opacity-80" />
+                        <span>Unarchive Chat</span>
+                      </button>
+                    )}
+                  </li>
+                  <li>
+                    <button className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ navigator.clipboard?.writeText(selectedContact?.id || ''); setMenuOpen(false); }}>
+                      <Copy className="w-4 h-4 opacity-80" />
+                      <span>Copy Chat ID</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -180,7 +248,9 @@ const ChatHeader = React.memo(
       prevProps.showChatSearch === nextProps.showChatSearch &&
       prevProps.chatSearchTerm === nextProps.chatSearchTerm &&
       JSON.stringify(prevProps.pinnedMessages) ===
-        JSON.stringify(nextProps.pinnedMessages)
+        JSON.stringify(nextProps.pinnedMessages) &&
+      prevProps.isBlocked === nextProps.isBlocked &&
+      prevProps.isArchived === nextProps.isArchived
     );
   }
 );
@@ -822,6 +892,29 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [activeNavItem, setActiveNavItem] = useState(activeSection); // 'chats', 'groups', 'documents', 'community', 'profile', 'settings'
 
+  // Block / Archive UI state
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [isBlockedState, setIsBlockedState] = useState(false);
+  const [isArchivedState, setIsArchivedState] = useState(false);
+  const [archivedChatIds, setArchivedChatIds] = useState(new Set());
+
+  // Keep archivedChatIds in sync (reload when archive modal toggles)
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const data = await archiveService.getArchivedChats();
+        if (!mounted) return;
+        setArchivedChatIds(new Set((data || []).map(c => String(c._id || c.id || (c.chat && c.chat._id) || ''))));
+      } catch (e) {
+        // ignore
+      }
+    };
+    load();
+    return () => { mounted = false; };
+  }, [showArchiveModal]);
+
   // Sync activeNavItem with activeSection prop (from URL)
   useEffect(() => {
     setActiveNavItem(activeSection);
@@ -855,6 +948,177 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   // Current user id (used for message alignment)
   const _localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
   const currentUserId = _localUser._id || _localUser.id || null;
+
+  // When selected contact changes, refresh block/archive status for that chat/user
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setIsBlockedState(false);
+        setIsArchivedState(false);
+
+        if (!selectedContact) return;
+
+        // determine user id and chat id
+        const userId = selectedContact.userId || selectedContact._id || selectedContact.id || selectedContact.participantId;
+        const chatId = selectedContact.id || selectedContact._id;
+
+        if (userId) {
+          try {
+            const status = await blockService.checkBlockStatus(userId);
+            if (!mounted) return;
+            // status may contain isBlocked/hasBlockedYou
+            setIsBlockedState(Boolean(status?.isBlocked || status?.hasBlockedYou));
+          } catch (e) {
+            // ignore errors
+          }
+        }
+
+        if (chatId) {
+          try {
+            const astatus = await archiveService.checkChatArchiveStatus(chatId);
+            if (!mounted) return;
+            setIsArchivedState(Boolean(astatus?.isArchived));
+          } catch (e) {
+            // ignore errors
+          }
+        }
+      } catch (err) {
+        // ignore
+      }
+    })();
+
+    return () => { mounted = false; };
+  }, [selectedContact]);
+
+  // Handlers for block / archive actions
+  const handleBlockUser = async (contact) => {
+    const userId = contact?.userId || contact?._id || contact?.id;
+    if (!userId) return;
+    try {
+      await blockService.blockUser(userId);
+      if (socketRef.current?.emit) socketRef.current.emit('block user', { userId });
+      setIsBlockedState(true);
+      setShowBlockedModal(true);
+    } catch (err) {
+      console.error('Block failed', err);
+      setIsBlockedState(false);
+    }
+  };
+
+  const handleUnblockUser = async (contact) => {
+    const userId = contact?.userId || contact?._id || contact?.id;
+    if (!userId) return;
+    try {
+      await blockService.unblockUser(userId);
+      if (socketRef.current?.emit) socketRef.current.emit('unblock user', { userId });
+      setIsBlockedState(false);
+    } catch (err) {
+      console.error('Unblock failed', err);
+    }
+  };
+
+  const handleArchiveChat = async (contact) => {
+    const chatId = contact?.id || contact?._id;
+    if (!chatId) return;
+    try {
+      await archiveService.archiveChat(chatId);
+      if (socketRef.current?.emit) socketRef.current.emit('archive chat', { chatId });
+      setIsArchivedState(true);
+      setArchivedChatIds((prev) => {
+        const s = new Set(prev || []);
+        s.add(String(chatId));
+        return s;
+      });
+      setShowArchiveModal(true);
+    } catch (err) {
+      console.error('Archive failed', err);
+    }
+  };
+
+  const handleUnarchiveChat = async (contact) => {
+    const chatId = contact?.id || contact?._id;
+    if (!chatId) return;
+    try {
+      await archiveService.unarchiveChat(chatId);
+      if (socketRef.current?.emit) socketRef.current.emit('unarchive chat', { chatId });
+      setIsArchivedState(false);
+      setArchivedChatIds((prev) => {
+        const s = new Set(prev || []);
+        s.delete(String(chatId));
+        return s;
+      });
+    } catch (err) {
+      console.error('Unarchive failed', err);
+    }
+  };
+
+  const handleOpenChatFromArchive = (chat) => {
+    // When opening an archived chat, load messages for that chat id and select it.
+    (async () => {
+      try {
+        const normalizedChatId = String(chat._id || chat.id);
+
+        // mark this chat as archived locally immediately so the header menu shows the correct action
+        setIsArchivedState(true);
+        setArchivedChatIds((prev) => {
+          const s = new Set(prev || []);
+          s.add(String(normalizedChatId));
+          return s;
+        });
+
+        // Build a UI contact object from the archived chat
+        const localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+        const otherUser = (chat.users || chat.participants || []).find(
+          (u) => String(u._id || u.id) !== String(localUser._id)
+        );
+
+        const contactForUI = {
+          id: normalizedChatId,
+          chatId: normalizedChatId,
+          name: chat.name || otherUser?.name || 'Chat',
+          avatar: otherUser?.avatar || otherUser?.pic || null,
+          participants: chat.users || chat.participants || [],
+          isGroup: chat.isGroupChat || false,
+        };
+
+        setSelectedContact(contactForUI);
+
+        // Join socket room for real-time updates
+        if (socketRef.current && socketRef.current.emit) {
+          socketRef.current.emit('join chat', normalizedChatId);
+        }
+
+        // Fetch messages for this chat
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        if (token) {
+          const msgsUrl = `${API_BASE_URL}/api/message/${normalizedChatId}`;
+          const msgsRes = await fetch(msgsUrl, { headers: { Authorization: `Bearer ${token}` } });
+          if (msgsRes.ok) {
+            const msgs = await msgsRes.json();
+            const formatted = msgs.map((m) => ({
+              id: m._id,
+              type: m.type || 'text',
+              content: m.content || m.text || '',
+              sender: m.sender?._id || m.sender,
+              timestamp: new Date(m.createdAt || m.timestamp || Date.now()).getTime(),
+              isRead: true,
+              attachments: Array.isArray(m.attachments) ? m.attachments : [],
+            }));
+
+            setMessages((prev) => ({ ...prev, [normalizedChatId]: formatted }));
+          }
+        }
+
+        setShowArchiveModal(false);
+      } catch (err) {
+        console.error('Failed to open archived chat', err);
+        // fallback: just close modal and set selected contact minimally
+        setSelectedContact({ id: chat._id || chat.id, name: chat.name || 'Chat' });
+        setShowArchiveModal(false);
+      }
+    })();
+  };
 
   // Fetch both received and accepted requests
   // useEffect(() => {
@@ -1281,6 +1545,15 @@ useEffect(() => {
         const token = localStorage.getItem("token");
         if (!token) throw new Error("No token found.");
 
+        // Fetch archived chats to exclude them from the recent list
+              let archived = [];
+              try {
+                archived = await archiveService.getArchivedChats();
+                setArchivedChatIds(new Set((archived || []).map(c => String(c._id || c.id || (c.chat && c.chat._id) || ''))));
+              } catch (e) {
+                archived = [];
+              }
+
         const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -1323,7 +1596,10 @@ useEffect(() => {
           };
         });
 
-        setRecentChats(formatted);
+        // Filter out archived chats
+        const archivedSet = new Set((archived || []).map(c => String(c._id || c.id || (c.chat && c.chat._id) || '')));
+        const filtered = formatted.filter(c => !archivedSet.has(String(c.chatId || c.id || '')));
+        setRecentChats(filtered);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -1486,6 +1762,11 @@ const handleSendMessageFromInput = useCallback(
 
     const updateRecentChat = (chatId, preview) => {
       setRecentChats((prev) => {
+        // don't add/archive update if this chat is archived
+        if (archivedChatIds && archivedChatIds.has(String(chatId))) {
+          return prev;
+        }
+
         const exists = prev.find((c) => c.id === chatId || c.chatId === chatId);
         if (exists) {
           return prev.map((c) =>
@@ -2069,7 +2350,13 @@ const handleSendMessageFromInput = useCallback(
           };
         });
 
-        setRecentChats(formatted);
+        // Filter using archivedChatIds state in case it's already loaded
+        if (archivedChatIds && archivedChatIds.size > 0) {
+          const filtered = formatted.filter(c => !archivedChatIds.has(String(c.chatId || c.id || '')));
+          setRecentChats(filtered);
+        } else {
+          setRecentChats(formatted);
+        }
       } catch (err) {
         setError(err.message);
       } finally {
@@ -2254,6 +2541,23 @@ useEffect(() => {
           }
         `}
       </style>
+
+      {/* Blocked users modal */}
+      {showBlockedModal && (
+        <BlockedUsers
+          onClose={() => setShowBlockedModal(false)}
+          effectiveTheme={effectiveTheme}
+        />
+      )}
+
+      {/* Archive manager modal */}
+      {showArchiveModal && (
+        <ArchiveManager
+          onClose={() => setShowArchiveModal(false)}
+          effectiveTheme={effectiveTheme}
+          onOpenChat={handleOpenChatFromArchive}
+        />
+      )}
 
       <div
         className={`fixed inset-0 w-full h-full flex overflow-hidden transition-all duration-1000 ${
@@ -2536,7 +2840,16 @@ useEffect(() => {
                           letterSpacing: "2px",
                         }}
                       >
-                        Chasmos
+                        <div className="flex items-center gap-3">
+                          <span>Chasmos</span>
+                          <button
+                            title="Open archived chats"
+                            onClick={() => setShowArchiveModal(true)}
+                            className={`p-1 rounded hover:${effectiveTheme.hover} ${effectiveTheme.text} ml-1`}
+                          >
+                            <Archive className="w-4 h-4" />
+                          </button>
+                        </div>
                       </h1>
                     </div>
                   </div>
@@ -3171,6 +3484,12 @@ useEffect(() => {
                 chatSearchRef={chatSearchRef}
                 onCloseChatSearch={closeChatSearch}
                 pinnedMessages={pinnedMessages}
+                onBlockUser={handleBlockUser}
+                onUnblockUser={handleUnblockUser}
+                onArchiveChat={handleArchiveChat}
+                onUnarchiveChat={handleUnarchiveChat}
+                isBlocked={isBlockedState}
+                isArchived={isArchivedState}
               />
               <div className="flex-1 overflow-hidden relative">
                 <MessagesArea
