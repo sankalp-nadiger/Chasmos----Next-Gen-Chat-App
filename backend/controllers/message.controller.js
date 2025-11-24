@@ -11,7 +11,6 @@ export const allMessages = asyncHandler(async (req, res) => {
       .populate({ path: 'attachments' })
       .populate("chat");
     
-    // Ensure chat participants are populated so frontend can identify users
     await User.populate(messages, {
       path: 'chat.participants',
       select: 'name avatar email',
@@ -33,7 +32,6 @@ export const sendMessage = asyncHandler(async (req, res) => {
     return res.sendStatus(400);
   }
 
-  // NEW: Check if chat exists and user is participant
   const chat = await Chat.findById(chatId)
     .populate("users", "blockedUsers")
     .populate("participants", "blockedUsers");
@@ -43,7 +41,6 @@ export const sendMessage = asyncHandler(async (req, res) => {
     throw new Error("Chat not found");
   }
 
-  // NEW: Check block status for one-on-one chats
   if (!chat.isGroupChat) {
     const otherUser = chat.users.find(user => 
       user._id.toString() !== req.user._id.toString()
@@ -61,7 +58,6 @@ export const sendMessage = asyncHandler(async (req, res) => {
     chat: chatId,
   };
 
-  // If attachments passed as array of ids include them
   if (req.body.attachments && Array.isArray(req.body.attachments)) {
     newMessage.attachments = req.body.attachments;
   }
@@ -72,15 +68,12 @@ export const sendMessage = asyncHandler(async (req, res) => {
 
     message = await message.populate("sender", "name avatar email");
     message = await message.populate("chat");
-    // populate attachments so clients receive URLs immediately
     message = await message.populate({ path: 'attachments' });
-    // Ensure chat participants are populated. Some codebases use `users` instead of `participants`.
     message = await User.populate(message, {
       path: "chat.participants",
       select: "name avatar email",
     });
 
-    // If participants were empty (older chats might use `users` field), try populating `chat.users`
     if (!message.chat.participants || message.chat.participants.length === 0) {
       try {
         const chatWithUsers = await Chat.findById(message.chat._id).populate(
@@ -88,19 +81,15 @@ export const sendMessage = asyncHandler(async (req, res) => {
           "name avatar email"
         );
         if (chatWithUsers && chatWithUsers.users && chatWithUsers.users.length > 0) {
-          // Attach users as participants for downstream consumers
           message.chat.participants = chatWithUsers.users;
         }
       } catch (e) {
-        // ignore populate fallback errors
       }
     }
 
-    // update chat lastMessage reference
     try {
       await Chat.findByIdAndUpdate(req.body.chatId, { lastMessage: message._id });
     } catch (e) {
-      // ignore
     }
 
     res.json(message);
@@ -108,4 +97,64 @@ export const sendMessage = asyncHandler(async (req, res) => {
     res.status(400);
     throw new Error(error.message);
   }
+});
+
+export const deleteMessage = asyncHandler(async (req, res) => {
+  const { messageId } = req.params;
+  const userId = req.user._id;
+
+  const message = await Message.findById(messageId);
+  
+  if (!message) {
+    res.status(404);
+    throw new Error("Message not found");
+  }
+
+  const chat = await Chat.findById(message.chat);
+  if (!chat) {
+    res.status(404);
+    throw new Error("Chat not found");
+  }
+
+  const isSender = message.sender.toString() === userId.toString();
+  const isGroupAdmin = chat.isGroupChat && chat.admins.includes(userId);
+  const isChatAdmin = chat.admins.includes(userId);
+
+  if (!isSender && !isGroupAdmin && !isChatAdmin) {
+    res.status(403);
+    throw new Error("Not authorized to delete this message");
+  }
+
+  await Message.findByIdAndDelete(messageId);
+
+  res.status(200).json({
+    message: "Message deleted successfully",
+    messageId: messageId
+  });
+});
+
+export const deleteMessagesForMe = asyncHandler(async (req, res) => {
+  const { messageId } = req.params;
+  const userId = req.user._id;
+
+  const message = await Message.findById(messageId);
+  
+  if (!message) {
+    res.status(404);
+    throw new Error("Message not found");
+  }
+
+  if (!message.deletedFor) {
+    message.deletedFor = [];
+  }
+
+  if (!message.deletedFor.includes(userId)) {
+    message.deletedFor.push(userId);
+    await message.save();
+  }
+
+  res.status(200).json({
+    message: "Message deleted for you",
+    messageId: messageId
+  });
 });
