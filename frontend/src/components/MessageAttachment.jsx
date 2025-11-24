@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import React, { useState } from 'react';
 import { Download, FileText, File, Video, Music, Archive, Eye, X, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
