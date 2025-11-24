@@ -836,6 +836,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [showReceivedDropdown, setShowReceivedDropdown] = useState(false);
   const [showAcceptedDropdown, setShowAcceptedDropdown] = useState(false);
 
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -856,67 +857,189 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const currentUserId = _localUser._id || _localUser.id || null;
 
   // Fetch both received and accepted requests
+  // useEffect(() => {
+  //   const fetchRequests = async () => {
+  //     try {
+  //       const token = localStorage.getItem("token");
+  //       if (!token) {
+  //         console.error("No token found — user might not be logged in.");
+  //         return;
+  //       }
+
+  //       // 1️⃣ Fetch received chat requests
+  //       const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
+  //         headers: { Authorization: `Bearer ${token}` },
+  //       });
+  //       const receivedData = await resReceived.json();
+  //       console.log("Received Emails:", receivedData);
+  //       const receivedEmails = Array.isArray(receivedData) ? receivedData : [];
+
+  //       // 2️⃣ Fetch accepted chat requests
+  //       const resAccepted = await fetch(
+  //         `${API_BASE_URL}/api/user/requests/accepted`,
+  //         {
+  //           headers: { Authorization: `Bearer ${token}` },
+  //         }
+  //       );
+  //       const acceptedData = await resAccepted.json();
+  //       const acceptedEmails = Array.isArray(acceptedData) ? acceptedData : [];
+
+  //       // 3️⃣ Helper: fetch user profiles by email
+  //       const fetchUsersByEmails = async (emails) => {
+  //         if (!Array.isArray(emails) || emails.length === 0) return [];
+  //         const results = await Promise.all(
+  //           emails.map(async (email) => {
+  //             const res = await fetch(
+  //               `${API_BASE_URL}/api/user?search=${email}`,
+  //               {
+  //                 headers: { Authorization: `Bearer ${token}` },
+  //               }
+  //             );
+  //             const data = await res.json();
+  //             return Array.isArray(data) ? data[0] : data; // handle array response
+  //           })
+  //         );
+  //         return results.filter(Boolean);
+  //       };
+
+  //       // 4️⃣ Fetch both user lists
+  //       const [receivedUsers, acceptedUsers] = await Promise.all([
+  //         fetchUsersByEmails(receivedEmails),
+  //         fetchUsersByEmails(acceptedEmails),
+  //       ]);
+
+  //       // 5️⃣ Update states
+  //       setReceivedChats(receivedUsers);
+  //       setAcceptedChats(acceptedUsers);
+  //     } catch (err) {
+  //       console.error("Error fetching chat requests:", err);
+  //     }
+  //   };
+
+  //   fetchRequests();
+  // }, []);
   useEffect(() => {
-    const fetchRequests = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        if (!token) {
-          console.error("No token found — user might not be logged in.");
-          return;
-        }
+  let mounted = true;
 
-        // 1️⃣ Fetch received chat requests
-        const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const receivedData = await resReceived.json();
-        console.log("Received Emails:", receivedData);
-        const receivedEmails = Array.isArray(receivedData) ? receivedData : [];
-
-        // 2️⃣ Fetch accepted chat requests
-        const resAccepted = await fetch(
-          `${API_BASE_URL}/api/user/requests/accepted`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-        const acceptedData = await resAccepted.json();
-        const acceptedEmails = Array.isArray(acceptedData) ? acceptedData : [];
-
-        // 3️⃣ Helper: fetch user profiles by email
-        const fetchUsersByEmails = async (emails) => {
-          if (!Array.isArray(emails) || emails.length === 0) return [];
-          const results = await Promise.all(
-            emails.map(async (email) => {
-              const res = await fetch(
-                `${API_BASE_URL}/api/user?search=${email}`,
-                {
-                  headers: { Authorization: `Bearer ${token}` },
-                }
-              );
-              const data = await res.json();
-              return Array.isArray(data) ? data[0] : data; // handle array response
-            })
-          );
-          return results.filter(Boolean);
-        };
-
-        // 4️⃣ Fetch both user lists
-        const [receivedUsers, acceptedUsers] = await Promise.all([
-          fetchUsersByEmails(receivedEmails),
-          fetchUsersByEmails(acceptedEmails),
-        ]);
-
-        // 5️⃣ Update states
-        setReceivedChats(receivedUsers);
-        setAcceptedChats(acceptedUsers);
-      } catch (err) {
-        console.error("Error fetching chat requests:", err);
+  const fetchRequests = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        console.error("No token found — user might not be logged in.");
+        return;
       }
-    };
 
-    fetchRequests();
-  }, []);
+      // 1️⃣ Fetch received + accepted requests
+      const [resReceived, resAccepted] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/user/requests`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+
+      const receivedData = (await resReceived.json()) || [];
+      const acceptedData = (await resAccepted.json()) || [];
+
+      console.log("✅ Received Chats:", receivedData);
+      console.log("✅ Accepted Chats:", acceptedData);
+
+      // 2️⃣ Normalize (in case backend returned strings)
+      const normalizedReceived = receivedData.map((r) =>
+        typeof r === "string" ? { email: r, message: "", date: null } : r
+      );
+
+      const normalizedAccepted = acceptedData.map((r) =>
+        typeof r === "string" ? { email: r, message: "", date: null } : r
+      );
+
+      // Helper: fetch user profile
+      const fetchProfile = async (email) => {
+        try {
+          const r = await fetch(
+            `${API_BASE_URL}/api/user?search=${encodeURIComponent(email)}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          if (!r.ok) return null;
+          const data = await r.json();
+          return Array.isArray(data) && data.length > 0 ? data[0] : null;
+        } catch (err) {
+          console.error("Error fetching profile for", email, err);
+          return null;
+        }
+      };
+
+      // 3️⃣ Fetch profiles in parallel
+      const receivedProfiles = await Promise.all(
+        normalizedReceived.map((r) => fetchProfile(r.email))
+      );
+      const acceptedProfiles = await Promise.all(
+        normalizedAccepted.map((r) => fetchProfile(r.email))
+      );
+
+      // 4️⃣ Merge profile + message
+      const mergeRequests = (requests, profiles) =>
+        requests
+          .map((req, i) => {
+            const profile = profiles[i] || {};
+            return {
+              _id: profile._id || `${req.email}-req`,
+              name: profile.name || req.email.split("@")[0],
+              email: req.email,
+              avatar:
+                profile.avatar ||
+                "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+              message: req.message || "",
+              date: req.date,
+            };
+          })
+          .filter(
+            (v, i, arr) =>
+              arr.findIndex(
+                (x) => x.email.toLowerCase() === v.email.toLowerCase()
+              ) === i
+          );
+
+      const finalReceived = mergeRequests(normalizedReceived, receivedProfiles);
+      const finalAccepted = mergeRequests(normalizedAccepted, acceptedProfiles);
+
+      console.log("Merged received chats:", finalReceived);
+      console.log("Merged accepted chats:", finalAccepted);
+
+      // ⭐ 5️⃣ FINAL MERGE FOR UI — this fixes your problem ⭐
+      const finalMerged = [
+        ...finalAccepted,
+        ...finalReceived.filter(
+          (r) => !finalAccepted.some((a) => a.email === r.email)
+        ),
+      ];
+
+      console.log("🔥 FINAL MERGED FOR UI:", finalMerged);
+
+      if (!mounted) return;
+
+      // ⬇️ set ONLY ONE STATE (UI expects one list)
+      setAcceptedChats(finalMerged);
+
+      // (Optional) keep separate list too
+      setReceivedChats(finalReceived);
+
+    } catch (err) {
+      console.error("Error fetching chat requests:", err);
+    }
+  };
+
+  fetchRequests();
+
+  return () => {
+    mounted = false;
+  };
+}, []);
+
+
 
   //After chatting with accepted chats
   const handleOpenChat = (chat) => {
@@ -1021,80 +1144,111 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
 
   //handle on clicking accept button
   // ✅ Accept Chat Request
-  const handleAcceptChat = async (senderEmail) => {
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) throw new Error("No token found.");
-
-      const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ senderEmail }),
-      });
-
-      const data = await res.json();
-      if (!res.ok)
-        throw new Error(data.message || "Failed to accept chat request");
-
-      // ✅ Remove the accepted chat from 'Received' section
-      setReceivedChats((prev) => prev.filter((r) => r.email !== senderEmail));
-
-      console.log("✅ Chat request accepted! Sender will see it.");
-
-      // ✅ Optionally refresh accepted chats after accepting
-      fetchAcceptedChats();
-    } catch (error) {
-      console.error("❌ Error accepting chat request:", error);
+  const fetchAcceptedChats = async () => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      console.error("No token found");
+      return;
     }
-  };
 
-  // Fetch accepted chats on component mount
-  // Fetch all accepted chats
-  useEffect(() => {
-    const fetchAcceptedChats = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        if (!token) return console.error("No token found — user not logged in");
+    const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
-        // Step 1️⃣ — Get list of accepted emails
-        const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const acceptedEmails = await res.json();
-        console.log("✅ Accepted Chats:", acceptedEmails);
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`Failed to fetch accepted chats: ${errorText}`);
+    }
 
-        if (!Array.isArray(acceptedEmails) || acceptedEmails.length === 0) {
-          setAcceptedChats([]);
-          return;
-        }
+    const acceptedData = await res.json();
+    console.log("✅ Accepted Chats (raw):", acceptedData);
 
-        // Step 2️⃣ — Fetch full user profiles for each accepted email
-        const users = await Promise.all(
-          acceptedEmails.map(async (email) => {
-            const resUser = await fetch(
-              `${API_BASE_URL}/api/user?search=${email}`,
-              {
-                headers: { Authorization: `Bearer ${token}` },
-              }
-            );
-            const data = await resUser.json();
-            return Array.isArray(data) ? data[0] : data; // sometimes backend sends array
-          })
-        );
+    if (!Array.isArray(acceptedData)) {
+      setAcceptedChats([]);
+      return;
+    }
 
-        // Step 3️⃣ — Filter out invalid responses
-        const validUsers = users.filter(Boolean);
-        setAcceptedChats(validUsers);
-      } catch (err) {
-        console.error("Error fetching accepted chats:", err);
-      }
-    };
+    // Normalize entire list
+    const normalizedChats = acceptedData
+      .filter(Boolean)
+      .map((chat) => ({
+        _id: chat._id || chat.email,
+        email: chat.email || "",
+        name: chat.name || chat.email?.split("@")[0] || "Unknown",
+        avatar:
+          chat.avatar ||
+          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+        message: chat.message || "",
+        date: chat.date ? new Date(chat.date) : new Date(),
+      }));
 
+    console.log("🔹 Normalized Accepted Chats:", normalizedChats);
+
+    setAcceptedChats(normalizedChats);
+    setFilteredAcceptedChats(normalizedChats); // important
+  } catch (err) {
+    console.error("Error fetching accepted chats:", err);
+    setAcceptedChats([]);
+  }
+};
+
+const handleAcceptChat = async (senderEmail) => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) throw new Error("No token found.");
+
+    const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ senderEmail }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message);
+
+    // Remove from received
+    setReceivedChats((prev) =>
+      prev.filter((c) => c.email !== senderEmail)
+    );
+
+    // Add to accepted instantly
+    if (data.acceptedChat) {
+      const normalized = {
+        _id: data.acceptedChat._id || data.acceptedChat.email,
+        email: data.acceptedChat.email,
+        name:
+          data.acceptedChat.name ||
+          data.acceptedChat.email?.split("@")[0] ||
+          "Unknown",
+        avatar:
+          data.acceptedChat.avatar ||
+          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+        message: data.acceptedChat.message || "",
+        date: new Date(),
+      };
+
+      setFilteredAcceptedChats((prev) => [...prev, normalized]);
+      setAcceptedChats((prev) => [...prev, normalized]);
+    }
+
+    console.log("✅ Chat accepted!");
+
+    // sync with backend
     fetchAcceptedChats();
-  }, []);
+  } catch (error) {
+    console.error("❌ Error accepting chat:", error);
+  }
+};
+
+useEffect(() => {
+  fetchAcceptedChats();
+}, []);
+
+
 
   // ✅ Run once when the component mounts (and on mobile view change if needed)
   // useEffect(() => {
@@ -1308,295 +1462,204 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   }, []);
 
   // Handle sending message from the MessageInput component-Updated
-  const handleSendMessageFromInput = useCallback(
-    (payload) => {
-      // payload can be a string (text) or an object (server message or attachment payload)
-      if (!payload || !selectedContact) return;
+  // Updated handleSendMessageFromInput function
+const handleSendMessageFromInput = useCallback(
+  (payload) => {
+    if (!payload || !selectedContact) return;
 
-      // If payload is a server-created message object (has _id), append directly
-      if (typeof payload === 'object' && (payload._id || payload.id || payload.createdAt)) {
-        try {
-          const chatId = payload.chat?._id || payload.chat || selectedContact.chatId || selectedContact.id || selectedContact._id;
-          const formatted = {
-            id: payload._id || payload.id || Date.now(),
-            type: payload.type || 'file',
-            content: payload.content || payload.text || '',
-            sender: payload.sender?._id || payload.sender || 'me',
-            timestamp: new Date(payload.createdAt || payload.createdAt || Date.now()).getTime(),
-            isRead: true,
-            attachments: payload.attachments || payload.files || [],
-          };
+    const getChatId = (payload) => {
+      return (
+        payload?.chat?._id ||
+        payload?.chat ||
+        selectedContact.chatId ||
+        selectedContact.id ||
+        selectedContact._id
+      );
+    };
 
-          setMessages((prevMessages) => ({
-            ...prevMessages,
-            [chatId]: [...(prevMessages[chatId] || []), formatted],
-          }));
+    const appendMessage = (chatId, message) => {
+      setMessages((prev) => ({
+        ...prev,
+        [chatId]: [...(prev[chatId] || []), message],
+      }));
+    };
 
-          // emit socket event if available
-          if (socketRef.current && socketRef.current.emit) {
-            socketRef.current.emit('new message', payload);
-          }
-
-          // update recentChats
-          setRecentChats((prevChats) => {
-            const exists = prevChats.find((c) => c.id === chatId || c.chatId === chatId);
-            if (exists) {
-              return prevChats.map((c) => (c.id === chatId || c.chatId === chatId ? { ...c, lastMessage: payload.content || payload.text || '', timestamp: Date.now() } : c));
-            } else {
-              return [
-                {
-                  id: chatId,
-                  chatId,
-                  name: selectedContact.name,
-                  avatar: selectedContact.avatar || '/default-avatar.png',
-                  lastMessage: payload.content || payload.text || '',
-                  timestamp: Date.now(),
-                  unreadCount: 0,
-                },
-                ...prevChats,
-              ];
-            }
-          });
-
-          return;
-        } catch (err) {
-          console.error('Error appending server message payload', err);
-          return;
+    const updateRecentChat = (chatId, preview) => {
+      setRecentChats((prev) => {
+        const exists = prev.find((c) => c.id === chatId || c.chatId === chatId);
+        if (exists) {
+          return prev.map((c) =>
+            c.id === chatId || c.chatId === chatId
+              ? { ...c, lastMessage: preview, timestamp: Date.now() }
+              : c
+          );
         }
-      }
+        return [
+          {
+            id: chatId,
+            chatId,
+            name: selectedContact.name,
+            avatar: selectedContact.avatar || '/default-avatar.png',
+            lastMessage: preview,
+            timestamp: Date.now(),
+            unreadCount: 0,
+          },
+          ...prev,
+        ];
+      });
+    };
 
-      // If payload is an object with attachments but not a server message, send via API
-      if (typeof payload === 'object' && payload.attachments) {
-        (async () => {
-          const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-          const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
-          if (!chatId || !token) {
-            // local fallback
-            const chatKey = chatId || selectedContact.email || selectedContact.id;
-            const newMessage = {
-              id: Date.now(),
-              type: payload.type || 'file',
-              content: payload.text || '',
-              sender: 'me',
-              timestamp: Date.now(),
-              attachments: payload.attachments,
-            };
+    // Case 1: Server message object
+    if (typeof payload === 'object' && (payload._id || payload.id || payload.createdAt)) {
+      try {
+        const chatId = getChatId(payload);
+        const formatted = {
+          id: payload._id || payload.id || Date.now(),
+          type: payload.type || 'file',
+          content: payload.content || payload.text || '',
+          sender: payload.sender?._id || payload.sender || 'me',
+          timestamp: new Date(payload.createdAt || Date.now()).getTime(),
+          isRead: true,
+          attachments: payload.attachments || payload.files || [],
+        };
 
-            setMessages((prevMessages) => ({
-              ...prevMessages,
-              [chatKey]: [...(prevMessages[chatKey] || []), newMessage],
-            }));
-            // Update recentChats preview for local fallback: prefer text, else attachment filename
-            setRecentChats((prevChats) => {
-              const previewFromAttachments = (atts) => {
-                if (!Array.isArray(atts) || atts.length === 0) return '';
-                const a = atts[0];
-                const possibleName = a.fileName || a.file_name || a.filename || a.name || a.url || a.fileUrl || '';
-                if (typeof possibleName === 'string' && possibleName.length > 0) {
-                  return possibleName.replace(/^[\d\-:.]+_/, '');
-                }
-                return 'Attachment';
-              };
+        appendMessage(chatId, formatted);
 
-              return prevChats.map((c) => {
-                if (c.id === chatKey || c.chatId === chatKey) {
-                  const newLast = newMessage.content && newMessage.content.trim() ? newMessage.content : previewFromAttachments(newMessage.attachments);
-                  return {
-                    ...c,
-                    lastMessage: newLast || 'Attachment',
-                    timestamp: Date.now(),
-                    hasAttachment: Array.isArray(newMessage.attachments) && newMessage.attachments.length > 0,
-                    attachmentName: Array.isArray(newMessage.attachments) && newMessage.attachments[0]?.fileName ? newMessage.attachments[0].fileName.replace(/^[\d\-:.]+_/, '') : undefined,
-                    attachmentMime: Array.isArray(newMessage.attachments) && (newMessage.attachments[0]?.mimeType || newMessage.attachments[0]?.fileType) ? (newMessage.attachments[0].mimeType || newMessage.attachments[0].fileType) : undefined,
-                  };
-                }
-                return c;
-              });
-            });
-            return;
-          }
+        if (socketRef.current?.emit) {
+          socketRef.current.emit('new message', payload);
+        }
 
-          try {
-            const res = await fetch(`${API_BASE_URL}/api/message`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ content: payload.text || '', chatId, attachments: payload.attachments, type: payload.type }),
-            });
-
-            if (!res.ok) throw new Error('Failed to send message with attachments');
-
-            const sent = await res.json();
-            const formatted = {
-              id: sent._id || sent.id || Date.now(),
-              type: sent.type || payload.type || 'file',
-              content: sent.content || sent.text || payload.text || '',
-              sender: sent.sender?._id || sent.sender || 'me',
-              timestamp: new Date(sent.createdAt || Date.now()).getTime(),
-              isRead: true,
-              attachments: sent.attachments || payload.attachments,
-            };
-
-            setMessages((prevMessages) => ({
-              ...prevMessages,
-              [chatId]: [...(prevMessages[chatId] || []), formatted],
-            }));
-
-            if (socketRef.current && socketRef.current.emit) {
-              socketRef.current.emit('new message', sent);
-            }
-
-            // Compute preview: prefer text, else first attachment filename (stripped)
-            const computePreview = (fmt) => {
-              const text = (fmt.content || fmt.text || '').toString().trim();
-              const atts = fmt.attachments || [];
-              if (text.length > 0) {
-                return atts.length > 0 ? `${text} 📎` : text;
-              }
-              if (atts.length > 0) {
-                const a = atts[0];
-                const name = a.fileName || a.file_name || a.filename || a.name || (a.fileUrl ? a.fileUrl.split('/').pop() : '') || '';
-                const stripped = (name || '').replace(/^[\d\-:.]+_/, '');
-                return stripped || 'Attachment';
-              }
-              return '';
-            };
-
-            const previewText = computePreview(formatted);
-
-            setRecentChats((prevChats) => {
-              const exists = prevChats.find((c) => c.id === chatId || c.chatId === chatId);
-              if (exists) {
-                return prevChats.map((c) =>
-                  c.id === chatId || c.chatId === chatId
-                    ? {
-                        ...c,
-                        lastMessage: previewText,
-                        timestamp: Date.now(),
-                        hasAttachment: Array.isArray(formatted.attachments) && formatted.attachments.length > 0,
-                        attachmentName: Array.isArray(formatted.attachments) && formatted.attachments[0]?.fileName ? formatted.attachments[0].fileName.replace(/^[\d\-:.]+_/, '') : undefined,
-                        attachmentMime: Array.isArray(formatted.attachments) && (formatted.attachments[0]?.mimeType || formatted.attachments[0]?.fileType) ? (formatted.attachments[0].mimeType || formatted.attachments[0].fileType) : undefined,
-                      }
-                    : c
-                );
-              } else {
-                return [
-                  {
-                    id: chatId,
-                    chatId,
-                    name: selectedContact.name,
-                    avatar: selectedContact.avatar || '/default-avatar.png',
-                    lastMessage: previewText,
-                    timestamp: Date.now(),
-                    unreadCount: 0,
-                    hasAttachment: Array.isArray(formatted.attachments) && formatted.attachments.length > 0,
-                    attachmentName: Array.isArray(formatted.attachments) && formatted.attachments[0]?.fileName ? formatted.attachments[0].fileName.replace(/^[\d\-:.]+_/, '') : undefined,
-                    attachmentMime: Array.isArray(formatted.attachments) && (formatted.attachments[0]?.mimeType || formatted.attachments[0]?.fileType) ? (formatted.attachments[0].mimeType || formatted.attachments[0].fileType) : undefined,
-                  },
-                  ...prevChats,
-                ];
-              }
-            });
-          } catch (err) {
-            console.error('Error sending attachment message:', err);
-          }
-        })();
-
+        updateRecentChat(chatId, formatted.content || 'Attachment');
+        return;
+      } catch (err) {
+        console.error('Error appending server message payload', err);
         return;
       }
+    }
 
-      // Otherwise treat payload as text message string
-      if (typeof payload === 'string') {
-        const messageText = payload;
-        if (!messageText.trim()) return;
+    // Case 2: Attachments message
+    if (typeof payload === 'object' && payload.attachments) {
+      (async () => {
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        const chatId = getChatId(payload);
 
-        (async () => {
-          const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-          const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
+        const localMessage = {
+          id: Date.now(),
+          type: payload.type || 'file',
+          content: payload.text || '',
+          sender: 'me',
+          timestamp: Date.now(),
+          attachments: payload.attachments,
+        };
 
-          // If we don't have a chatId or token, fall back to local append
-          if (!chatId || !token) {
-            const chatKey = chatId || selectedContact.email || selectedContact.id;
-            const newMessage = {
-              id: Date.now(),
-              type: 'text',
-              content: messageText,
-              sender: 'me',
-              timestamp: Date.now(),
-              isRead: true,
-            };
+        // Local fallback
+        if (!chatId || !token) {
+          appendMessage(chatId, localMessage);
+          updateRecentChat(chatId, localMessage.content || 'Attachment');
+          return;
+        }
 
-            setMessages((prevMessages) => ({
-              ...prevMessages,
-              [chatKey]: [...(prevMessages[chatKey] || []), newMessage],
-            }));
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/message`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              content: payload.text || '',
+              chatId,
+              attachments: payload.attachments,
+              type: payload.type,
+            }),
+          });
 
-            return;
-          }
+          if (!res.ok) throw new Error('Failed to send message with attachments');
 
-          try {
-            const res = await fetch(`${API_BASE_URL}/api/message`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ content: messageText, chatId }),
-            });
+          const sent = await res.json();
 
-            if (!res.ok) throw new Error('Failed to send message');
+          const formatted = {
+            id: sent._id || sent.id || Date.now(),
+            type: sent.type || payload.type || 'file',
+            content: sent.content || sent.text || payload.text || '',
+            sender: sent.sender?._id || sent.sender || 'me',
+            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            isRead: true,
+            attachments: sent.attachments || payload.attachments,
+          };
 
-            const sent = await res.json();
+          appendMessage(chatId, formatted);
 
-            const formatted = {
-              id: sent._id || sent.id || Date.now(),
-              type: 'text',
-              content: sent.content || sent.text || messageText,
-              sender: sent.sender?._id || sent.sender || 'me',
-              timestamp: new Date(sent.createdAt || Date.now()).getTime(),
-              isRead: true,
-            };
+          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
 
-            setMessages((prevMessages) => ({
-              ...prevMessages,
-              [chatId]: [...(prevMessages[chatId] || []), formatted],
-            }));
+          const preview = formatted.content || (formatted.attachments[0]?.fileName || 'Attachment');
+          updateRecentChat(chatId, preview);
+        } catch (err) {
+          console.error('Error sending attachment message:', err);
+        }
+      })();
 
-            // Emit socket event for realtime delivery
-            if (socketRef.current && socketRef.current.emit) {
-              socketRef.current.emit('new message', sent);
-            }
+      return;
+    }
 
-            // Update recentChats
-            setRecentChats((prevChats) => {
-              const exists = prevChats.find((c) => c.id === chatId || c.chatId === chatId);
-              if (exists) {
-                return prevChats.map((c) => (c.id === chatId || c.chatId === chatId ? { ...c, lastMessage: messageText, timestamp: Date.now() } : c));
-              } else {
-                return [
-                  {
-                    id: chatId,
-                    chatId,
-                    name: selectedContact.name,
-                    avatar: selectedContact.avatar || '/default-avatar.png',
-                    lastMessage: messageText,
-                    timestamp: Date.now(),
-                    unreadCount: 0,
-                  },
-                  ...prevChats,
-                ];
-              }
-            });
-          } catch (err) {
-            console.error('Error sending message:', err);
-          }
-        })();
-      }
-    },
-    [selectedContact]
-  );
+    // Case 3: Text message
+    if (typeof payload === 'string') {
+      const messageText = payload.trim();
+      if (!messageText) return;
+
+      (async () => {
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        const chatId = getChatId(payload);
+
+        const localMessage = {
+          id: Date.now(),
+          type: 'text',
+          content: messageText,
+          sender: 'me',
+          timestamp: Date.now(),
+          isRead: true,
+        };
+
+        if (!chatId || !token) {
+          appendMessage(chatId, localMessage);
+          return;
+        }
+
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/message`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ content: messageText, chatId }),
+          });
+
+          if (!res.ok) throw new Error('Failed to send message');
+
+          const sent = await res.json();
+
+          const formatted = {
+            id: sent._id || sent.id || Date.now(),
+            type: 'text',
+            content: sent.content || sent.text || messageText,
+            sender: sent.sender?._id || sent.sender || 'me',
+            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            isRead: true,
+          };
+
+          appendMessage(chatId, formatted);
+          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
+
+          updateRecentChat(chatId, messageText);
+        } catch (err) {
+          console.error('Error sending message:', err);
+        }
+      })();
+    }
+  },
+  [selectedContact]
+);
 
   // Initialize socket connection once
   useEffect(() => {
@@ -1845,24 +1908,23 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [documentChats, setDocumentChats] = useState([]);
   // Filter accepted chats to exclude users already present in recentChats
   const filteredAcceptedChats = React.useMemo(() => {
-    if (!Array.isArray(acceptedChats) || acceptedChats.length === 0) return [];
-    if (!Array.isArray(recentChats) || recentChats.length === 0) return acceptedChats;
+  if (!Array.isArray(acceptedChats) || acceptedChats.length === 0) return [];
+  if (!Array.isArray(recentChats) || recentChats.length === 0) return acceptedChats;
 
-    const recentIds = new Set(
-      recentChats
-        .map((r) => r.id || (r.otherUser && r.otherUser.id) || r.chatId || r.email)
-        .filter(Boolean)
-        .map((v) => String(v))
-    );
+  const recentEmails = new Set(
+    recentChats
+      .map((r) => r.email || r.otherUser?.email)
+      .filter(Boolean)
+      .map((email) => email.toLowerCase())
+  );
 
-    return acceptedChats.filter((a) => {
-      const aid = String(a._id || a.id || a.email || a.userId || a.emailAddress || '')
-        .trim();
-      // if any recent id matches accepted user's id/email, exclude
-      if (!aid) return true; // keep if we can't determine id
-      return !recentIds.has(aid);
-    });
-  }, [acceptedChats, recentChats]);
+  return acceptedChats.filter((a) => {
+    const email = (a.email || "").toLowerCase();
+    return !recentEmails.has(email);
+  });
+}, [acceptedChats, recentChats]);
+
+
   const [isExpanded, setIsExpanded] = useState(true);
 
   // ✅ Create a new chat/document
@@ -1957,7 +2019,11 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
 
           const otherId = otherUser?._id || otherUser?.id || null;
           const displayName =
-            otherUser?.email || otherUser?.username || otherUser?.name || "Unknown";
+  otherUser?.name ||
+  otherUser?.username ||
+  (otherUser?.email ? otherUser.email.split("@")[0] : null) ||
+  "Unknown";
+
 
           // Determine if lastMessage indicates attachments and extract preview text
           let preview = "";
@@ -2603,120 +2669,113 @@ useEffect(() => {
 
                     {/* 🔹 Accepted Chats Dropdown */}
                     <div className="rounded-md justify-between items-center px-2 py-1">
-                      <button
-  onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
-  className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
-    effectiveTheme.mode === 'dark'
-      ? 'hover:bg-green-900/30 text-green-200'
-      : 'hover:bg-green-50 text-green-800'
-  } transition-colors font-medium`}
->
-  <span className="flex items-center gap-2">
-    <img
-      src={chatAcceptIcon}
-      alt="Chats Accepted"
-      className="w-4 h-4"
-    />
-    Chat Invites Accepted ({filteredAcceptedChats?.length || 0})
-  </span>
-  {showAcceptedDropdown ? (
-    <ChevronUp className="w-4 h-4" />
-  ) : (
-    <ChevronDown className="w-4 h-4" />
-  )}
-</button>
-
-<AnimatePresence>
-                      {showAcceptedDropdown && (
-                            <motion.div
-  initial={{ height: 0, opacity: 0 }}
-  animate={{ height: "auto", opacity: 1 }}
-  exit={{ height: 0, opacity: 0 }}
-  transition={{ duration: 0.3, ease: "easeInOut" }}
-  className="overflow-hidden"
->
-  <div 
-    className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto"
-    style={{
-      scrollbarWidth: 'thin',
-      scrollbarColor: effectiveTheme.mode === 'dark' 
-        ? '#667eea transparent'
-        : '#8b5cf6 transparent'
-    }}
+  <button
+    onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
+    className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
+      effectiveTheme.mode === "dark"
+        ? "hover:bg-green-900/30 text-green-200"
+        : "hover:bg-green-50 text-green-800"
+    } transition-colors font-medium`}
   >
-                          {filteredAcceptedChats && filteredAcceptedChats.length > 0 ? (
-                            filteredAcceptedChats.map((chat, index) => (
-                              <motion.div
-  key={chat._id || chat.email || `accepted-${index}`}
-  whileHover={{ scale: 0.98 }}
-  className={`flex justify-between items-center p-2 rounded-md ${
-    effectiveTheme.mode === 'dark'
-      ? 'hover:bg-gray-700/50'
-      : 'hover:bg-gray-100'
-  } transition-colors`}
->
-  <div className="flex items-center gap-3 flex-1 overflow-hidden">
-    <div className="relative flex-shrink-0">
+    <span className="flex items-center gap-2">
       <img
-        src={
-          chat.avatar ||
-          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-        }
-        alt={chat.name || chat.email || "User"}
-        className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
+        src={chatAcceptIcon}
+        alt="Chats Accepted"
+        className="w-4 h-4"
       />
-    </div>
+      Chat Invites Accepted ({filteredAcceptedChats?.length || 0})
+    </span>
+    {showAcceptedDropdown ? (
+      <ChevronUp className="w-4 h-4" />
+    ) : (
+      <ChevronDown className="w-4 h-4" />
+    )}
+  </button>
 
-    <div className="overflow-hidden">
-      <p className={`font-medium truncate ${
-        effectiveTheme.mode === 'dark' ? 'text-gray-100' : 'text-gray-900'
-      }`}>
-        {chat.name?.trim() && chat.name !== "Unknown User"
-          ? chat.name
-          : chat.email?.split("@")[0] || "Unknown User"}
-      </p>
+  <AnimatePresence>
+    {showAcceptedDropdown && (
+      <motion.div
+        initial={{ height: 0, opacity: 0 }}
+        animate={{ height: "auto", opacity: 1 }}
+        exit={{ height: 0, opacity: 0 }}
+        transition={{ duration: 0.3, ease: "easeInOut" }}
+        className="overflow-hidden"
+      >
+        <div
+          className="mt-2 p-2 space-y-2 max-h-56 overflow-y-auto"
+          style={{
+            scrollbarWidth: "thin",
+            scrollbarColor:
+              effectiveTheme.mode === "dark"
+                ? "#667eea transparent"
+                : "#8b5cf6 transparent",
+          }}
+        >
+          {filteredAcceptedChats && filteredAcceptedChats.length > 0 ? (
+            filteredAcceptedChats.map((chat, index) => (
+              <motion.div
+                key={chat._id || chat.email || `accepted-${index}`}
+                whileHover={{ scale: 0.98 }}
+                className={`flex justify-between items-center p-2 rounded-md ${
+                  effectiveTheme.mode === "dark"
+                    ? "hover:bg-gray-700/50"
+                    : "hover:bg-gray-100"
+                } transition-colors`}
+              >
+                <div className="flex items-center gap-3 flex-1 overflow-hidden">
+                  <div className="relative flex-shrink-0">
+                    <img
+                      src={
+                        chat.avatar ||
+                        "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+                      }
+                      alt={chat.name || chat.email || "User"}
+                      className="w-11 h-11 rounded-full object-cover border border-gray-500 shadow-md"
+                    />
+                  </div>
 
-      {chat.message ? (
-        <p className={`text-sm truncate ${
-          effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-600'
-        }`}>
-          {chat.message}
-        </p>
-      ) : (
-        <p className="text-sm text-gray-500 truncate">
-          No message
-        </p>
-      )}
-    </div>
-  </div>
+                  <div className="overflow-hidden">
+                    <p
+                      className={`font-medium truncate ${
+                        effectiveTheme.mode === "dark"
+                          ? "text-gray-100"
+                          : "text-gray-900"
+                      }`}
+                    >
+                      {chat.name?.trim() && chat.name !== "Unknown User"
+                        ? chat.name
+                        : chat.email?.split("@")[0] || "Unknown User"}
+                    </p>
+                  </div>
+                </div>
 
-  <motion.button
-    whileHover={{ scale: 0.95 }}
-    onClick={() => handleOpenChat(chat)}
-    className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
-    title="Open Chat"
-  >
-    <MessageCircle className="w-5 h-5 text-white" />
-  </motion.button>
-</motion.div>
+                <motion.button
+                  whileHover={{ scale: 0.95 }}
+                  onClick={() => handleOpenChat(chat)}
+                  className="flex-shrink-0 ml-3 w-9 h-9 flex items-center justify-center rounded-full bg-green-500 hover:bg-green-600 transition"
+                  title="Open Chat"
+                >
+                  <MessageCircle className="w-5 h-5 text-white" />
+                </motion.button>
+              </motion.div>
+            ))
+          ) : (
+            <div
+              className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
+                effectiveTheme.searchBg
+                  ? effectiveTheme.searchBg
+                  : "bg-gray-100 dark:bg-gray-800"
+              } text-gray-400`}
+            >
+              No new accepted invites yet
+            </div>
+          )}
+        </div>
+      </motion.div>
+    )}
+  </AnimatePresence>
+</div>
 
-                            ))
-                          ) : (
-                            <div
-                              className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
-                                effectiveTheme.searchBg
-                                  ? effectiveTheme.searchBg
-                                  : "bg-gray-100 dark:bg-gray-800"
-                              } text-gray-400`}
-                            >
-                              No new accepted invites yet
-                            </div>
-                          )}
-                        </div>
-                        </motion.div>
-                      )}
-                      </AnimatePresence>
-                    </div>
                   </div>
   )}
 
