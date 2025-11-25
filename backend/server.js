@@ -19,7 +19,6 @@ import blockRoutes from "./routes/block.routes.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
 import cors from 'cors';
 
-// dotenv is loaded via the top-level import 'dotenv/config'
 connectDB();
 const app = express();
 
@@ -41,7 +40,6 @@ app.use(cors({
 
 app.use(express.json());
 
-// Routes
 app.use("/api/user", userRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatRoutes);
@@ -54,7 +52,6 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/archive", archiveRoutes); 
 app.use("/api/block", blockRoutes); 
 
-// Error Handling middlewares
 app.use(notFound);
 app.use(errorHandler);
 
@@ -78,7 +75,7 @@ io.on("connection", (socket) => {
   
   socket.on("setup", (userData) => {
     socket.join(userData._id);
-    socket.userId = userData._id; // Store userId for later use
+    socket.userId = userData._id;
     socket.emit("connected");
   });
 
@@ -95,7 +92,6 @@ io.on("connection", (socket) => {
       try {
         let chat = newMessageRecieved.chat;
 
-        // If chat is an id (string) or not populated, try fetching it from DB
         if (!chat || typeof chat === "string" || (!chat.users && !chat.participants)) {
           try {
             chat = await Chat.findById(newMessageRecieved.chat || chat)
@@ -109,7 +105,6 @@ io.on("connection", (socket) => {
           }
         }
 
-        // NEW: Check block status for one-on-one chats
         if (!chat.isGroupChat) {
           const senderId = newMessageRecieved.sender?._id
             ? String(newMessageRecieved.sender._id)
@@ -121,7 +116,6 @@ io.on("connection", (socket) => {
           
           if (otherUser && otherUser.blockedUsers && 
               otherUser.blockedUsers.includes(senderId)) {
-            // Don't deliver message if sender is blocked
             socket.emit("message blocked", { 
               chatId: chat._id, 
               reason: "You are blocked by this user" 
@@ -152,7 +146,166 @@ io.on("connection", (socket) => {
     })();
   });
 
-  // NEW: Socket events for block and archive
+  socket.on("delete message", async (data) => {
+    try {
+      const { messageId, chatId, deleteForEveryone } = data;
+      const userId = socket.userId;
+      
+      if (!userId) {
+        socket.emit("delete message error", { message: "User not authenticated" });
+        return;
+      }
+
+      const message = await Message.findById(messageId);
+      if (!message) {
+        socket.emit("delete message error", { message: "Message not found" });
+        return;
+      }
+
+      const chat = await Chat.findById(chatId);
+      if (!chat) {
+        socket.emit("delete message error", { message: "Chat not found" });
+        return;
+      }
+
+      const isSender = message.sender.toString() === userId.toString();
+      const isGroupAdmin = chat.isGroupChat && chat.admins.includes(userId);
+      const isChatAdmin = chat.admins.includes(userId);
+
+      if (!isSender && !isGroupAdmin && !isChatAdmin) {
+        socket.emit("delete message error", { message: "Not authorized to delete this message" });
+        return;
+      }
+
+      if (deleteForEveryone) {
+        await Message.findByIdAndDelete(messageId);
+        socket.to(chatId).emit("message deleted", { messageId, chatId, deletedForEveryone: true });
+      } else {
+        if (!message.deletedFor) {
+          message.deletedFor = [];
+        }
+        if (!message.deletedFor.includes(userId)) {
+          message.deletedFor.push(userId);
+          await message.save();
+        }
+      }
+
+      socket.emit("message deleted", { messageId, chatId, deletedForEveryone: deleteForEveryone });
+      
+    } catch (error) {
+      console.error("Error in delete message socket event:", error);
+      socket.emit("delete message error", { message: error.message });
+    }
+  });
+
+  socket.on("delete chat", async (data) => {
+    try {
+      const { chatId } = data;
+      const userId = socket.userId;
+      
+      if (!userId) {
+        socket.emit("delete chat error", { message: "User not authenticated" });
+        return;
+      }
+
+      const chat = await Chat.findById(chatId);
+      if (!chat) {
+        socket.emit("delete chat error", { message: "Chat not found" });
+        return;
+      }
+
+      if (chat.isGroupChat) {
+        if (!chat.admins.includes(userId)) {
+          socket.emit("delete chat error", { message: "Only admins can delete group chats" });
+          return;
+        }
+        
+        await Message.deleteMany({ chat: chatId });
+        await Chat.findByIdAndDelete(chatId);
+        
+        socket.to(chatId).emit("chat deleted", { chatId, deletedBy: userId });
+      } else {
+        if (!chat.users.includes(userId)) {
+          socket.emit("delete chat error", { message: "Not authorized to delete this chat" });
+          return;
+        }
+
+        await Message.deleteMany({ chat: chatId });
+        await Chat.findByIdAndDelete(chatId);
+        
+        const otherUser = chat.users.find(user => user.toString() !== userId.toString());
+        if (otherUser) {
+          socket.to(otherUser.toString()).emit("chat deleted", { chatId, deletedBy: userId });
+        }
+      }
+
+      socket.emit("chat deleted", { chatId });
+      
+    } catch (error) {
+      console.error("Error in delete chat socket event:", error);
+      socket.emit("delete chat error", { message: error.message });
+    }
+  });
+
+  socket.on("leave group", async (data) => {
+    try {
+      const { chatId } = data;
+      const userId = socket.userId;
+      
+      if (!userId) {
+        socket.emit("leave group error", { message: "User not authenticated" });
+        return;
+      }
+
+      const chat = await Chat.findById(chatId);
+      if (!chat) {
+        socket.emit("leave group error", { message: "Chat not found" });
+        return;
+      }
+
+      if (!chat.isGroupChat) {
+        socket.emit("leave group error", { message: "This is not a group chat" });
+        return;
+      }
+
+      if (!chat.users.includes(userId)) {
+        socket.emit("leave group error", { message: "You are not a member of this group" });
+        return;
+      }
+
+      const updatedChat = await Chat.findByIdAndUpdate(
+        chatId,
+        {
+          $pull: { users: userId, participants: userId, admins: userId },
+        },
+        { new: true }
+      )
+        .populate("users", "-password")
+        .populate("groupAdmin", "-password")
+        .populate("admins", "name email avatar");
+
+      if (updatedChat.users.length === 0) {
+        await Message.deleteMany({ chat: chatId });
+        await Chat.findByIdAndDelete(chatId);
+        
+        socket.emit("group left", { chatId, groupDeleted: true });
+      } else {
+        if (updatedChat.admins.length === 0 && updatedChat.users.length > 0) {
+          updatedChat.admins = [updatedChat.users[0]._id];
+          updatedChat.groupAdmin = updatedChat.users[0]._id;
+          await updatedChat.save();
+        }
+        
+        socket.to(chatId).emit("user left group", { chatId, userId, updatedChat });
+        socket.emit("group left", { chatId, groupDeleted: false });
+      }
+      
+    } catch (error) {
+      console.error("Error in leave group socket event:", error);
+      socket.emit("leave group error", { message: error.message });
+    }
+  });
+
   socket.on("block user", async (data) => {
     try {
       const { userId } = data;
@@ -163,12 +316,10 @@ io.on("connection", (socket) => {
         return;
       }
       
-      // Update user's blocked list
       await User.findByIdAndUpdate(currentUserId, {
         $addToSet: { blockedUsers: userId }
       });
       
-      // Archive any existing one-on-one chats
       const existingChat = await Chat.findOne({
         isGroupChat: false,
         $and: [
@@ -188,7 +339,6 @@ io.on("connection", (socket) => {
         });
       }
       
-      // Notify both users about the block
       socket.to(userId).emit("user blocked you", { blockedBy: currentUserId });
       socket.emit("user blocked", { blockedUserId: userId });
       

@@ -3,14 +3,15 @@ import mongoose, { Schema } from "mongoose";
 const chatSchema = new Schema(
   {
     name: { type: String },
+    chatName: { type: String, trim: true },
     isGroupChat: { type: Boolean, default: false },
     lastMessage: { type: Schema.Types.ObjectId, ref: "Message" },
-    // Keep both `users` and `participants` to support existing controller code
     users: [{ type: Schema.Types.ObjectId, ref: "User" }],
     participants: [{ type: Schema.Types.ObjectId, ref: "User" }],
-    admins: [{ type: Schema.Types.ObjectId, ref: "User" }], // multiple admins
-
-    //Archive functionality (for group admins)
+    admins: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    groupAdmin: { type: Schema.Types.ObjectId, ref: "User" },
+    
+    // Archive functionality (for group admins)
     isArchived: {
       type: Boolean,
       default: false
@@ -20,7 +21,7 @@ const chatSchema = new Schema(
       ref: "User"
     },
     archivedAt: Date,
-    
+
     // For soft deletion
     isDeleted: {
       type: Boolean,
@@ -48,5 +49,8 @@ chatSchema.pre("save", function (next) {
   }
   next();
 });
+
+chatSchema.index({ users: 1 });
+chatSchema.index({ isGroupChat: 1, users: 1 });
 
 export default mongoose.model("Chat", chatSchema);

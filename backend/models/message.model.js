@@ -8,6 +8,8 @@ const messageSchema = new Schema(
     chat: { type: Schema.Types.ObjectId, ref: "Chat" },
     documentSession: { type: Schema.Types.ObjectId, ref: "Document" },
     attachments: [{ type: Schema.Types.ObjectId, ref: "Attachment" }],
+    deletedFor: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    isDeleted: { type: Boolean, default: false }
   },
   { timestamps: true }
 );
