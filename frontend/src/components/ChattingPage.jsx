@@ -1,3 +1,4 @@
+/* eslint-disable no-empty */
 /* eslint-disable no-unused-vars */
 /* eslint-disable no-undef */
 import React, {
@@ -51,7 +52,7 @@ import ArchiveManager from "./ArchiveManager";
 import { useTheme } from "../context/ThemeContext";
 import MessageInput from "./MessageInput";
 import ContactItem from "./ContactItem";
-import GroupCreation from "./GroupCreation";
+//import GroupCreation from "./GroupCreation";
 import NewChat from "./NewChat";
 import Profile from "./Profile";
 import SettingsPage from "./Settings";
@@ -67,6 +68,8 @@ import DocumentChat from "./DocumentChat";
 import NewDocumentUploader from "./NewDocumentUploader";
 import DocumentChatWrapper from "./DocumentChat";
 import Community from "./Community";
+import GroupCreation from "./GroupCreation";
+
 
 // Memoized Chat Header Component
 const ChatHeader = React.memo(
@@ -2129,13 +2132,13 @@ const handleSendMessageFromInput = useCallback(
     setShowFloatingMenu(false);
   }, []);
 
-  const handleCreateGroup = useCallback(() => {
-    setShowGroupCreation(true);
-    setShowFloatingMenu(false);
-    if (isMobileView) {
-      setShowSidebar(false);
-    }
-  }, [isMobileView]);
+   const handleCreateGroup = useCallback(() => {
+      setShowGroupCreation(true);
+      setShowFloatingMenu(false);
+      if (isMobileView) {
+        setShowSidebar(false);
+      }
+    }, [isMobileView]);
 
   const handleNewChat = useCallback(() => {
     setShowNewChat(true);
@@ -2862,7 +2865,7 @@ useEffect(() => {
                     />
                     <input
                       type="text"
-                      placeholder={
+                       placeholder={
                         activeNavItem === "chats"
                           ? "Search conversations..."
                           : activeNavItem === "documents"
@@ -2878,6 +2881,7 @@ useEffect(() => {
 
                 {/* Chat Sidebar Area */}
                 <div className="flex-1 flex flex-col overflow-hidden">
+                  
   {/* Alerts Section: Chat Requests & Accepted - Hide for documents section */}
   {activeSection !== 'documents' && (
   <div className="flex-shrink-0">
@@ -3105,27 +3109,107 @@ useEffect(() => {
   {activeSection === 'documents' ? (
     /* Documents List */
     <>
-      <div className="flex flex-col gap-2">
-        <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-          My Documents
-        </h4>
-        {contacts.length > 0 ? (
-          contacts.map((contact) => (
-            <ContactItem
-              key={contact.id}
-              contact={contact}
-              effectiveTheme={effectiveTheme}
-              onSelect={(c) => handleOpenChat(c)}
-            />
-          ))
-        ) : (
-          <div className="text-center space-y-4 mt-10">
-            <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
-              No documents uploaded yet
-            </p>
-          </div>
-        )}
-      </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                      {/* Header with dropdown toggle */}
+                      <div
+                        className="flex items-center justify-between cursor-pointer"
+                        onClick={() => setIsExpanded(!isExpanded)}
+                      >
+                        <h4 className="text-gray-300 dark:text-gray-100 font-semibold">
+                          Document History
+                        </h4>
+                        {isExpanded ? (
+                          <ChevronUp className="w-5 h-5 text-gray-500" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-gray-500" />
+                        )}
+                      </div>
+
+                      {/* Animated Dropdown */}
+                      <AnimatePresence initial={false}>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="space-y-3 overflow-hidden"
+                          >
+                            {loading ? (
+                              <div className="text-gray-500 text-center py-4">
+                                Loading...
+                              </div>
+                            ) : documentChats.length > 0 ? (
+                              documentChats.map((doc) => (
+                                <motion.div
+                                  key={doc._id}
+                                  whileHover={{ scale: 1.02 }}
+                                  whileTap={{ scale: 0.97 }}
+                                  onClick={() => {
+                                    if (
+                                      !selectedDocument ||
+                                      selectedDocument._id !== doc._id
+                                    ) {
+                                      setSelectedDocument(doc);
+                                      setIsNewDocumentChat(false);
+                                    }
+                                  }}
+                                  className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
+                ${effectiveTheme.secondary || "bg-white dark:bg-[#1f1f1f]"} 
+                border ${effectiveTheme.border} hover:${effectiveTheme.hover}`}
+                                >
+                                  <div className="flex flex-col">
+                                    <p className="font-medium truncate text-gray-300 dark:text-gray-200">
+                                      {doc.fileName || "Untitled Document"}
+                                    </p>
+                                   <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+  {doc.updatedAt
+    ? new Date(doc.updatedAt).toLocaleString()
+    : "No date available"}
+</p>
+
+                                  </div>
+                                </motion.div>
+                              ))
+                            ) : (
+                              <div
+                                className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
+                                  effectiveTheme.searchBg ||
+                                  "bg-gray-100 dark:bg-gray-800"
+                                } text-gray-400 dark:text-gray-400`}
+                              >
+                                No document history found
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      {/* 🆕 Floating New Chat Button */}
+                      <div className="flex justify-center mt-8">
+                        <motion.button
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          transition={{ type: "spring", stiffness: 220 }}
+                          onClick={() => {
+                            setSelectedDocument(null);
+                            setIsNewDocumentChat(true);
+                          }}
+                          className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-5 py-3 rounded-xl shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-all duration-200 group`}
+                        >
+                          <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
+                            <MessageSquare className="w-5 h-5 text-white" />
+                          </div>
+                          <span
+                            className={`${effectiveTheme.text} font-semibold`}
+                          >
+                            New Chat
+                          </span>
+                        </motion.button>
+                      </div>
+                    </div>
     </>
   ) : (
     /* Regular Chats and Contacts */
@@ -3183,6 +3267,7 @@ useEffect(() => {
 </div>
                 </div>
 
+
                 {/* Floating Add Button with Menu */}
                 <div className="relative">
                   {/* Floating Action Menu */}
@@ -3196,7 +3281,7 @@ useEffect(() => {
                       className={`absolute ${isMobileView ? "bottom-20 right-6 fixed" : "bottom-20 right-6"} flex flex-col space-y-3 z-30`}
                     >
                       {/* Create Group */}
-                      <motion.button
+                      {/* <motion.button
                         initial={{ opacity: 0, x: 20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.1 }}
@@ -3211,7 +3296,23 @@ useEffect(() => {
                         >
                           Create a group
                         </span>
-                      </motion.button>
+                      </motion.button> */}
+                       <motion.button
+                                              initial={{ opacity: 0, x: 20 }}
+                                              animate={{ opacity: 1, x: 0 }}
+                                              transition={{ delay: 0.1 }}
+                                              onClick={handleCreateGroup}
+                                              className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
+                                            >
+                                              <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+                                                <Users className="w-5 h-5 text-white" />
+                                              </div>
+                                              <span
+                                                className={`${effectiveTheme.text} font-medium whitespace-nowrap`}
+                                              >
+                                                Create a group
+                                              </span>
+                                            </motion.button>
 
                       {/* New Chat */}
                       <motion.button
