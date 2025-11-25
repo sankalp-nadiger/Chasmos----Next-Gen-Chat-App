@@ -396,6 +396,184 @@ io.on("connection", (socket) => {
       socket.emit("archive error", { message: error.message });
     }
   });
+  
+socket.on("star message", async (data) => {
+  try {
+    const { messageId } = data;
+    const userId = socket.userId;
+    
+    if (!userId) {
+      socket.emit("star error", { message: "User not authenticated" });
+      return;
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      socket.emit("star error", { message: "Message not found" });
+      return;
+    }
+
+    // Check if already starred
+    const alreadyStarred = message.starredBy.some(star => 
+      star.user.toString() === userId.toString()
+    );
+
+    if (alreadyStarred) {
+      socket.emit("star error", { message: "Message already starred" });
+      return;
+    }
+
+    message.starredBy.push({
+      user: userId,
+      starredAt: new Date()
+    });
+
+    await message.save();
+    await message.populate("starredBy.user", "name avatar");
+
+    socket.to(message.chat.toString()).emit("message starred", {
+      messageId: message._id,
+      starredBy: message.starredBy
+    });
+
+    socket.emit("message starred", {
+      messageId: message._id,
+      starredBy: message.starredBy
+    });
+    
+  } catch (error) {
+    console.error("Error in star message socket event:", error);
+    socket.emit("star error", { message: error.message });
+  }
+});
+
+socket.on("unstar message", async (data) => {
+  try {
+    const { messageId } = data;
+    const userId = socket.userId;
+    
+    if (!userId) {
+      socket.emit("unstar error", { message: "User not authenticated" });
+      return;
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      socket.emit("unstar error", { message: "Message not found" });
+      return;
+    }
+
+    message.starredBy = message.starredBy.filter(star => 
+      star.user.toString() !== userId.toString()
+    );
+
+    await message.save();
+
+    socket.to(message.chat.toString()).emit("message unstarred", {
+      messageId: message._id,
+      starredBy: message.starredBy
+    });
+
+    socket.emit("message unstarred", {
+      messageId: message._id,
+      starredBy: message.starredBy
+    });
+    
+  } catch (error) {
+    console.error("Error in unstar message socket event:", error);
+    socket.emit("unstar error", { message: error.message });
+  }
+});
+
+socket.on("add reaction", async (data) => {
+  try {
+    const { messageId, emoji } = data;
+    const userId = socket.userId;
+    
+    if (!userId) {
+      socket.emit("reaction error", { message: "User not authenticated" });
+      return;
+    }
+
+    if (!emoji) {
+      socket.emit("reaction error", { message: "Emoji is required" });
+      return;
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      socket.emit("reaction error", { message: "Message not found" });
+      return;
+    }
+
+    // Remove existing reaction from same user
+    message.reactions = message.reactions.filter(
+      reaction => reaction.user.toString() !== userId.toString()
+    );
+
+    // Add new reaction
+    message.reactions.push({
+      user: userId,
+      emoji: emoji,
+      reactedAt: new Date()
+    });
+
+    await message.save();
+    await message.populate("reactions.user", "name avatar");
+
+    socket.to(message.chat.toString()).emit("reaction added", {
+      messageId: message._id,
+      reactions: message.reactions
+    });
+
+    socket.emit("reaction added", {
+      messageId: message._id,
+      reactions: message.reactions
+    });
+    
+  } catch (error) {
+    console.error("Error in add reaction socket event:", error);
+    socket.emit("reaction error", { message: error.message });
+  }
+});
+
+socket.on("remove reaction", async (data) => {
+  try {
+    const { messageId } = data;
+    const userId = socket.userId;
+    
+    if (!userId) {
+      socket.emit("reaction error", { message: "User not authenticated" });
+      return;
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      socket.emit("reaction error", { message: "Message not found" });
+      return;
+    }
+
+    message.reactions = message.reactions.filter(
+      reaction => reaction.user.toString() !== userId.toString()
+    );
+
+    await message.save();
+
+    socket.to(message.chat.toString()).emit("reaction removed", {
+      messageId: message._id,
+      reactions: message.reactions
+    });
+
+    socket.emit("reaction removed", {
+      messageId: message._id,
+      reactions: message.reactions
+    });
+    
+  } catch (error) {
+    console.error("Error in remove reaction socket event:", error);
+    socket.emit("reaction error", { message: error.message });
+  }
+});
 
   socket.on("unarchive chat", async (data) => {
     try {

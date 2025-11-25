@@ -1,22 +1,16 @@
 import asyncHandler from "express-async-handler";
 import Message from "../models/message.model.js";
-import User from "../models/user.model.js";
 import Chat from "../models/chat.model.js";
+import User from "../models/user.model.js";
 
 export const allMessages = asyncHandler(async (req, res) => {
   try {
-    console.log("Fetching messages for chatId:", req.params.chatId);
     const messages = await Message.find({ chat: req.params.chatId })
       .populate("sender", "name avatar email")
-      .populate({ path: 'attachments' })
-      .populate("chat");
-    
-    await User.populate(messages, {
-      path: 'chat.participants',
-      select: 'name avatar email',
-    });
-    
-    console.log("Populating messages with chat participants:", messages);
+      .populate("attachments")
+      .populate("starredBy.user", "name avatar")
+      .populate("reactions.user", "name avatar")
+      .sort({ createdAt: 1 });
     res.json(messages);
   } catch (error) {
     res.status(400);
@@ -25,30 +19,28 @@ export const allMessages = asyncHandler(async (req, res) => {
 });
 
 export const sendMessage = asyncHandler(async (req, res) => {
-  const { content, chatId } = req.body;
+  const { content, chatId, attachments, type = "text" } = req.body;
 
-  if (!content || !chatId) {
+  if (!content && (!attachments || attachments.length === 0)) {
     console.log("Invalid data passed into request");
     return res.sendStatus(400);
   }
 
-  const chat = await Chat.findById(chatId)
-    .populate("users", "blockedUsers")
-    .populate("participants", "blockedUsers");
-
+  const chat = await Chat.findById(chatId);
   if (!chat) {
     res.status(404);
     throw new Error("Chat not found");
   }
 
+  // Check if user is blocked in 1-on-1 chat
   if (!chat.isGroupChat) {
-    const otherUser = chat.users.find(user => 
-      user._id.toString() !== req.user._id.toString()
-    );
-    
-    if (otherUser && otherUser.blockedUsers.includes(req.user._id)) {
-      res.status(403);
-      throw new Error("You cannot send messages to this user as you have been blocked");
+    const otherUser = chat.users.find(user => user.toString() !== req.user._id.toString());
+    if (otherUser) {
+      const userDoc = await User.findById(otherUser);
+      if (userDoc && userDoc.blockedUsers.includes(req.user._id)) {
+        res.status(403);
+        throw new Error("You are blocked by this user");
+      }
     }
   }
 
@@ -56,41 +48,22 @@ export const sendMessage = asyncHandler(async (req, res) => {
     sender: req.user._id,
     content: content,
     chat: chatId,
+    type: type,
+    attachments: attachments || [],
   };
-
-  if (req.body.attachments && Array.isArray(req.body.attachments)) {
-    newMessage.attachments = req.body.attachments;
-  }
-  if (req.body.type) newMessage.type = req.body.type;
 
   try {
     var message = await Message.create(newMessage);
 
-    message = await message.populate("sender", "name avatar email");
+    message = await message.populate("sender", "name avatar");
+    message = await message.populate("attachments");
     message = await message.populate("chat");
-    message = await message.populate({ path: 'attachments' });
     message = await User.populate(message, {
-      path: "chat.participants",
+      path: "chat.users",
       select: "name avatar email",
     });
 
-    if (!message.chat.participants || message.chat.participants.length === 0) {
-      try {
-        const chatWithUsers = await Chat.findById(message.chat._id).populate(
-          "users",
-          "name avatar email"
-        );
-        if (chatWithUsers && chatWithUsers.users && chatWithUsers.users.length > 0) {
-          message.chat.participants = chatWithUsers.users;
-        }
-      } catch (e) {
-      }
-    }
-
-    try {
-      await Chat.findByIdAndUpdate(req.body.chatId, { lastMessage: message._id });
-    } catch (e) {
-    }
+    await Chat.findByIdAndUpdate(chatId, { lastMessage: message });
 
     res.json(message);
   } catch (error) {
@@ -104,7 +77,6 @@ export const deleteMessage = asyncHandler(async (req, res) => {
   const userId = req.user._id;
 
   const message = await Message.findById(messageId);
-  
   if (!message) {
     res.status(404);
     throw new Error("Message not found");
@@ -118,34 +90,33 @@ export const deleteMessage = asyncHandler(async (req, res) => {
 
   const isSender = message.sender.toString() === userId.toString();
   const isGroupAdmin = chat.isGroupChat && chat.admins.includes(userId);
-  const isChatAdmin = chat.admins.includes(userId);
 
-  if (!isSender && !isGroupAdmin && !isChatAdmin) {
+  if (!isSender && !isGroupAdmin) {
     res.status(403);
     throw new Error("Not authorized to delete this message");
   }
 
   await Message.findByIdAndDelete(messageId);
 
-  res.status(200).json({
-    message: "Message deleted successfully",
-    messageId: messageId
-  });
+  // Update last message if needed
+  if (chat.lastMessage && chat.lastMessage.toString() === messageId) {
+    const previousMessage = await Message.findOne({ chat: chat._id })
+      .sort({ createdAt: -1 });
+    await Chat.findByIdAndUpdate(chat._id, { lastMessage: previousMessage });
+  }
+
+  res.json({ message: "Message deleted successfully" });
 });
+
 
 export const deleteMessagesForMe = asyncHandler(async (req, res) => {
   const { messageId } = req.params;
   const userId = req.user._id;
 
   const message = await Message.findById(messageId);
-  
   if (!message) {
     res.status(404);
     throw new Error("Message not found");
-  }
-
-  if (!message.deletedFor) {
-    message.deletedFor = [];
   }
 
   if (!message.deletedFor.includes(userId)) {
@@ -153,8 +124,137 @@ export const deleteMessagesForMe = asyncHandler(async (req, res) => {
     await message.save();
   }
 
-  res.status(200).json({
-    message: "Message deleted for you",
-    messageId: messageId
+  res.json({ message: "Message deleted for you" });
+});
+
+export const starMessage = asyncHandler(async (req, res) => {
+  const { messageId } = req.params;
+  const userId = req.user._id;
+
+  const message = await Message.findById(messageId);
+  if (!message) {
+    res.status(404);
+    throw new Error("Message not found");
+  }
+
+  // Check if already starred
+  const alreadyStarred = message.starredBy.some(star => 
+    star.user.toString() === userId.toString()
+  );
+
+  if (alreadyStarred) {
+    res.status(400);
+    throw new Error("Message already starred");
+  }
+
+  message.starredBy.push({
+    user: userId,
+    starredAt: new Date()
+  });
+
+  await message.save();
+  await message.populate("starredBy.user", "name avatar");
+
+  res.json({
+    message: "Message starred successfully",
+    starredBy: message.starredBy
+  });
+});
+
+export const unstarMessage = asyncHandler(async (req, res) => {
+  const { messageId } = req.params;
+  const userId = req.user._id;
+
+  const message = await Message.findById(messageId);
+  if (!message) {
+    res.status(404);
+    throw new Error("Message not found");
+  }
+
+  message.starredBy = message.starredBy.filter(star => 
+    star.user.toString() !== userId.toString()
+  );
+
+  await message.save();
+
+  res.json({
+    message: "Message unstarred successfully",
+    starredBy: message.starredBy
+  });
+});
+
+export const getStarredMessages = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  const userId = req.user._id;
+
+  const messages = await Message.find({
+    chat: chatId,
+    "starredBy.user": userId
+  })
+    .populate("sender", "name avatar email")
+    .populate("attachments")
+    .populate("starredBy.user", "name avatar")
+    .sort({ createdAt: -1 });
+
+  res.json(messages);
+});
+
+export const addReaction = asyncHandler(async (req, res) => {
+  const { messageId } = req.params;
+  const { emoji } = req.body;
+  const userId = req.user._id;
+
+  if (!emoji) {
+    res.status(400);
+    throw new Error("Emoji is required");
+  }
+
+  const message = await Message.findById(messageId);
+  if (!message) {
+    res.status(404);
+    throw new Error("Message not found");
+  }
+
+  // Remove existing reaction from same user
+  message.reactions = message.reactions.filter(
+    reaction => reaction.user.toString() !== userId.toString()
+  );
+
+  // Add new reaction
+  message.reactions.push({
+    user: userId,
+    emoji: emoji,
+    reactedAt: new Date()
+  });
+
+  await message.save();
+  await message.populate("reactions.user", "name avatar");
+
+  res.json({
+    message: "Reaction added successfully",
+    reactions: message.reactions
+  });
+});
+
+
+export const removeReaction = asyncHandler(async (req, res) => {
+  const { messageId } = req.params;
+  const userId = req.user._id;
+
+  const message = await Message.findById(messageId);
+  if (!message) {
+    res.status(404);
+    throw new Error("Message not found");
+  }
+
+  message.reactions = message.reactions.filter(
+    reaction => reaction.user.toString() !== userId.toString()
+  );
+
+  await message.save();
+
+  res.json({
+    message: "Reaction removed successfully",
+    reactions: message.reactions
   });
 });

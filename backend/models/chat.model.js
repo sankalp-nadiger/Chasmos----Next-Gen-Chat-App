@@ -11,6 +11,16 @@ const chatSchema = new Schema(
     admins: [{ type: Schema.Types.ObjectId, ref: "User" }],
     groupAdmin: { type: Schema.Types.ObjectId, ref: "User" },
     
+    // Group settings
+    groupSettings: {
+      description: { type: String, default: "" },
+      avatar: { type: String, default: "" },
+      isPublic: { type: Boolean, default: false },
+      inviteLink: { type: String, unique: true, sparse: true },
+      allowInvites: { type: Boolean, default: true },
+      maxMembers: { type: Number, default: 100 }
+    },
+    
     // Archive functionality (for group admins)
     isArchived: {
       type: Boolean,
@@ -36,7 +46,7 @@ const chatSchema = new Schema(
   { timestamps: true }
 );
 
-// Ensure both arrays stay in sync when saving (covers code that sets either field)
+// Ensure both arrays stay in sync when saving
 chatSchema.pre("save", function (next) {
   try {
     if (this.users && (!this.participants || this.participants.length === 0)) {
@@ -50,7 +60,16 @@ chatSchema.pre("save", function (next) {
   next();
 });
 
+// Generate invite link before save
+chatSchema.pre("save", function (next) {
+  if (this.isGroupChat && !this.groupSettings.inviteLink) {
+    this.groupSettings.inviteLink = `chasmos_${this._id}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+  next();
+});
+
 chatSchema.index({ users: 1 });
 chatSchema.index({ isGroupChat: 1, users: 1 });
+chatSchema.index({ "groupSettings.inviteLink": 1 });
 
 export default mongoose.model("Chat", chatSchema);
