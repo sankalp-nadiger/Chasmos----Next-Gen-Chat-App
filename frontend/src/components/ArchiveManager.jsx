@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import archiveService from '../utils/archiveService';
 import { X, Archive } from 'lucide-react';
+import Logo from './Logo';
 
 const ArchiveManager = ({ onClose, effectiveTheme, onOpenChat }) => {
   const [archived, setArchived] = useState([]);
@@ -40,7 +41,9 @@ const ArchiveManager = ({ onClose, effectiveTheme, onOpenChat }) => {
     <div className={`fixed inset-0 z-50 p-6 ${effectiveTheme.primary} overflow-auto`}> 
       <div className={`max-w-3xl mx-auto ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-lg`}> 
         <div className={`p-4 flex items-center justify-between border-b ${effectiveTheme.border}`}>
-          <h3 className={`font-semibold ${effectiveTheme.text}`}>Archived Chats</h3>
+          <div className="flex items-center gap-3">
+            <Logo size="sm" showText={true} textClassName={`${effectiveTheme.text}`} containerClassName="" />
+          </div>
           <div className="flex items-center space-x-2">
             <button className={`p-2 rounded hover:${effectiveTheme.hover}`} onClick={onClose}><X className={effectiveTheme.text}/> </button>
           </div>

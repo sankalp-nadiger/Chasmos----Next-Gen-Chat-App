@@ -162,82 +162,85 @@ const ChatHeader = React.memo(
             </div>
           </div>
 
-          <div className="flex items-center space-x-3 relative">
-            <Search
-              className={`w-5 h-5 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-colors duration-200`}
-              onClick={onToggleChatSearch}
-            />
+          <div className="flex items-center space-x-2">
+            <div className="relative">
+              <Search
+                className={`w-5 h-5 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-colors duration-200`}
+                onClick={onToggleChatSearch}
+              />
 
-            {/* Search bar */}
-            {showChatSearch && (
-              <div
-                ref={chatSearchRef}
-                className={`absolute top-8 right-0 w-80 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50`}
-              >
-                <div className="flex items-center space-x-2">
-                  <Search
-                    className={`h-4 w-4 ${effectiveTheme.textSecondary}`}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Search messages..."
-                    className={`flex-1 outline-none text-sm bg-transparent ${effectiveTheme.text} placeholder-gray-400`}
-                    value={chatSearchTerm}
-                    onChange={onChatSearchChange}
-                    autoFocus
-                  />
-                  <X
-                    className={`h-4 w-4 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-opacity`}
-                    onClick={() => {
-                      onCloseChatSearch();
-                    }}
-                  />
+              {/* Search bar */}
+              {showChatSearch && (
+                <div
+                  ref={chatSearchRef}
+                  className={`absolute top-8 right-0 w-80 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50`}
+                >
+                  <div className="flex items-center space-x-2">
+                    <Search
+                      className={`h-4 w-4 ${effectiveTheme.textSecondary}`}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Search messages..."
+                      className={`flex-1 outline-none text-sm bg-transparent ${effectiveTheme.text} placeholder-gray-400`}
+                      value={chatSearchTerm}
+                      onChange={onChatSearchChange}
+                      autoFocus
+                    />
+                    <X
+                      className={`h-4 w-4 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-opacity`}
+                      onClick={() => {
+                        onCloseChatSearch();
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-          <div className="relative ml-2" ref={menuRef}>
-            <button aria-label="Open chat menu" className={`p-2 rounded ${effectiveTheme.hover} ${effectiveTheme.text}`} onClick={(e)=>{e.stopPropagation(); setMenuOpen(s=>!s)}}>
-              <MoreVertical className={`w-5 h-5 ${effectiveTheme.text}`} />
-            </button>
-            {menuOpen && (
-              <div className={`absolute right-0 top-10 w-56 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded shadow-lg z-50`}>
-                <ul className="divide-y">
-                  <li>
-                    {!isBlocked ? (
-                      <button className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onBlockUser && onBlockUser(selectedContact); setMenuOpen(false); }}>
-                        <UserMinus className="w-4 h-4 opacity-80" />
-                        <span>Block User</span>
+              )}
+            </div>
+
+            <div className="relative ml-0" ref={menuRef}>
+              <button aria-label="Open chat menu" className={`p-2 rounded ${effectiveTheme.hover} ${effectiveTheme.text}`} onClick={(e)=>{e.stopPropagation(); setMenuOpen(s=>!s)}}>
+                <MoreVertical className={`w-5 h-5 ${effectiveTheme.text}`} />
+              </button>
+              {menuOpen && (
+                <div className={`absolute right-0 top-10 w-44 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded shadow-lg z-50`}>
+                  <ul className="divide-y">
+                    <li>
+                      {!isBlocked ? (
+                        <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onBlockUser && onBlockUser(selectedContact); setMenuOpen(false); }}>
+                          <UserMinus className="w-4 h-4 opacity-80" />
+                          <span>Block User</span>
+                        </button>
+                      ) : (
+                        <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onUnblockUser && onUnblockUser(selectedContact); setMenuOpen(false); }}>
+                          <UserPlus className="w-4 h-4 opacity-80" />
+                          <span>Unblock User</span>
+                        </button>
+                      )}
+                    </li>
+                    <li>
+                      {!isArchived ? (
+                        <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onArchiveChat && onArchiveChat(selectedContact); setMenuOpen(false); }}>
+                          <Archive className="w-4 h-4 opacity-80" />
+                          <span>Archive Chat</span>
+                        </button>
+                      ) : (
+                        <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onUnarchiveChat && onUnarchiveChat(selectedContact); setMenuOpen(false); }}>
+                          <Archive className="w-4 h-4 opacity-80" />
+                          <span>Unarchive Chat</span>
+                        </button>
+                      )}
+                    </li>
+                    <li>
+                      <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ navigator.clipboard?.writeText(selectedContact?.id || ''); setMenuOpen(false); }}>
+                        <Copy className="w-4 h-4 opacity-80" />
+                        <span>Copy Chat ID</span>
                       </button>
-                    ) : (
-                      <button className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onUnblockUser && onUnblockUser(selectedContact); setMenuOpen(false); }}>
-                        <UserPlus className="w-4 h-4 opacity-80" />
-                        <span>Unblock User</span>
-                      </button>
-                    )}
-                  </li>
-                  <li>
-                    {!isArchived ? (
-                      <button className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onArchiveChat && onArchiveChat(selectedContact); setMenuOpen(false); }}>
-                        <Archive className="w-4 h-4 opacity-80" />
-                        <span>Archive Chat</span>
-                      </button>
-                    ) : (
-                      <button className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onUnarchiveChat && onUnarchiveChat(selectedContact); setMenuOpen(false); }}>
-                        <Archive className="w-4 h-4 opacity-80" />
-                        <span>Unarchive Chat</span>
-                      </button>
-                    )}
-                  </li>
-                  <li>
-                    <button className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ navigator.clipboard?.writeText(selectedContact?.id || ''); setMenuOpen(false); }}>
-                      <Copy className="w-4 h-4 opacity-80" />
-                      <span>Copy Chat ID</span>
-                    </button>
-                  </li>
-                </ul>
-              </div>
-            )}
+                    </li>
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -2843,17 +2846,19 @@ useEffect(() => {
                           letterSpacing: "2px",
                         }}
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="inline-flex items-center gap-0">
                           <span>Chasmos</span>
-                          <button
-                            title="Open archived chats"
-                            onClick={() => setShowArchiveModal(true)}
-                            className={`p-1 rounded hover:${effectiveTheme.hover} ${effectiveTheme.text} ml-1`}
-                          >
-                            <Archive className="w-4 h-4" />
-                          </button>
                         </div>
                       </h1>
+                    </div>
+                    <div className="flex items-center">
+                      <button
+                        title="Open archived chats"
+                        onClick={() => setShowArchiveModal(true)}
+                        className={`p-2 rounded ${effectiveTheme.hover} ${effectiveTheme.text}`}
+                      >
+                        <Archive className="w-5 h-5" />
+                      </button>
                     </div>
                   </div>
 
