@@ -472,3 +472,40 @@ export const generateTypingIndicator = () => {
 export const generateAvatarFallback = (name) => {
   return name.split(' ').map(n => n[0]).join('').toUpperCase();
 };
+
+// Returns the hover label for a message date.
+// If the message is within the current week (Monday -> Saturday),
+// return the weekday name (e.g. "Monday"). Otherwise return a short
+// locale date string like "Apr 12, 2024".
+export const formatHoverDate = (timestamp) => {
+  if (!timestamp) return "";
+  const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+  if (isNaN(date.getTime())) return "";
+
+  const now = new Date();
+  // If the date is today, return "Today"
+  const isSameDay = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  if (isSameDay) return "Today";
+  // Compute Monday of current week
+  const todayDay = now.getDay(); // 0 (Sun) - 6 (Sat)
+  const daysSinceMonday = (todayDay + 6) % 7; // 0 for Mon, 6 for Sun
+  const monday = new Date(now);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(now.getDate() - daysSinceMonday);
+
+  // Saturday is monday + 5 days
+  const saturday = new Date(monday);
+  saturday.setDate(monday.getDate() + 5);
+  saturday.setHours(23, 59, 59, 999);
+
+  // If date falls between monday and saturday (inclusive), show day name
+  if (date >= monday && date <= saturday) {
+    return date.toLocaleDateString(undefined, { weekday: "long" });
+  }
+
+  // Otherwise show locale short date (month day, year if different)
+  const sameYear = date.getFullYear() === now.getFullYear();
+  const opts = { month: "short", day: "numeric" };
+  if (!sameYear) opts.year = "numeric";
+  return date.toLocaleDateString(undefined, opts);
+};

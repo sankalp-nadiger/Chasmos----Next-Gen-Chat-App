@@ -61,6 +61,7 @@ import {
   mockContacts,
   mockMessages,
   formatMessageTime,
+  formatHoverDate,
   searchContacts,
   generateAvatarFallback,
 } from "../utils/mockData";
@@ -90,6 +91,7 @@ const ChatHeader = React.memo(
     onUnblockUser,
     onArchiveChat,
     onUnarchiveChat,
+    onDeleteChat,
     isBlocked,
     isArchived,
   }) => {
@@ -231,12 +233,18 @@ const ChatHeader = React.memo(
                         </button>
                       )}
                     </li>
-                    <li>
-                      <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ navigator.clipboard?.writeText(selectedContact?.id || ''); setMenuOpen(false); }}>
-                        <Copy className="w-4 h-4 opacity-80" />
-                        <span>Copy Chat ID</span>
-                      </button>
-                    </li>
+                    {/* <li>
+                          <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ navigator.clipboard?.writeText(selectedContact?.id || ''); setMenuOpen(false); }}>
+                            <Copy className="w-4 h-4 opacity-80" />
+                            <span>Copy Chat ID</span>
+                          </button>
+                    </li> */}
+                        <li>
+                          <button className={`w-full text-left px-4 py-3 flex items-center gap-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900 ${effectiveTheme.text}`} onClick={()=>{ if(window.confirm('Delete this chat? This will remove the chat for everyone if you are allowed. Continue?')){ onDeleteChat && onDeleteChat(selectedContact); } setMenuOpen(false); }}>
+                            <Trash2 className="w-4 h-4 opacity-90" />
+                            <span>Delete Chat</span>
+                          </button>
+                        </li>
                   </ul>
                 </div>
               )}
@@ -263,7 +271,7 @@ const ChatHeader = React.memo(
 
 // MessageBubble component definition
 const MessageBubble = React.memo(
-  ({ message, isPinned, onPinToggle, effectiveTheme, currentUserId }) => {
+  ({ message, isPinned, onPinToggle, onDeleteMessage, effectiveTheme, currentUserId, onHoverDateChange }) => {
     const sender = message.sender;
     const isOwnMessage = (() => {
       if (!sender) return false;
@@ -295,6 +303,14 @@ const MessageBubble = React.memo(
           },
         }}
         whileHover={{ scale: 1.02 }}
+        onMouseEnter={() => {
+          try {
+            onHoverDateChange && onHoverDateChange(formatHoverDate(message.timestamp));
+          } catch (e) {
+            // ignore
+          }
+        }}
+        onMouseLeave={() => { /* keep auto-hide timer; do not clear immediately */ }}
         className={`flex mb-4 ${
           isOwnMessage ? "justify-end" : "justify-start"
         } group relative`}
@@ -354,7 +370,7 @@ const MessageBubble = React.memo(
               transition: { duration: 0.4 },
             }}
             className={`absolute -top-2 ${
-              isOwnMessage ? "-left-8" : "-right-8"
+              isOwnMessage ? "-left-12" : "-right-12"
             } opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 rounded-full bg-white shadow-lg`}
             onClick={handlePinClick}
           >
@@ -364,6 +380,18 @@ const MessageBubble = React.memo(
               } hover:text-yellow-400 transition-colors`}
             />
           </motion.button>
+
+          {isOwnMessage && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8 }}
+              whileHover={{ opacity: 1, scale: 1.05 }}
+              className={`absolute -top-2 ${isOwnMessage ? "-left-8" : "-right-8"} opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 rounded-full bg-white shadow-lg text-red-600`}
+              onClick={() => onDeleteMessage && onDeleteMessage(message)}
+              title="Delete message"
+            >
+              <Trash2 className="w-3 h-3" />
+            </motion.button>
+          )}
 
           {hasAttachments ? (
             <AttachmentRenderer
@@ -658,6 +686,8 @@ const MessagesArea = ({
   isTyping,
   selectedContactId,
   currentUserId,
+  onDeleteMessage,
+  onHoverDateChange,
 }) => {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -698,6 +728,8 @@ const MessagesArea = ({
     }
   }, [selectedContactId]);
 
+  
+  
   return (
     <div className="relative h-full overflow-hidden">
    {/* Day time diagonal comets - Tail at top, Head at bottom (vertical) */}
@@ -760,8 +792,10 @@ const MessagesArea = ({
                 message={message}
                 isPinned={pinnedMessages[message.id] || false}
                 onPinToggle={onPinMessage}
+                onDeleteMessage={onDeleteMessage}
                 effectiveTheme={effectiveTheme}
                 currentUserId={currentUserId}
+                onHoverDateChange={onHoverDateChange}
               />
             ))}
           </AnimatePresence>
@@ -898,6 +932,31 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [activeNavItem, setActiveNavItem] = useState(activeSection); // 'chats', 'groups', 'documents', 'community', 'profile', 'settings'
 
+  // Hovered message date label (single place below header)
+  const [hoverDateLabel, setHoverDateLabel] = useState("");
+  const hoverClearTimeoutRef = useRef(null);
+
+  // Centralized hover handler: shows label and auto-clears after timeout
+  const handleHoverDateChange = useCallback((label) => {
+    // clear any existing timeout
+    if (hoverClearTimeoutRef.current) {
+      clearTimeout(hoverClearTimeoutRef.current);
+      hoverClearTimeoutRef.current = null;
+    }
+
+    if (!label) {
+      setHoverDateLabel("");
+      return;
+    }
+
+    setHoverDateLabel(label);
+    // auto-hide after 1800ms
+    hoverClearTimeoutRef.current = setTimeout(() => {
+      setHoverDateLabel("");
+      hoverClearTimeoutRef.current = null;
+    }, 1800);
+  }, []);
+
   // Block / Archive UI state
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
@@ -947,6 +1006,113 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   // API Base URL from environment variable
   const API_BASE_URL =
     import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+
+  // Delete chat handler (lifted here so it has access to state setters)
+  const handleDeleteChat = async (contact) => {
+    const chatId = contact?.id || contact?._id || selectedContact?.id || selectedContact?._id;
+    if (!chatId) return;
+    if (!window.confirm('Are you sure you want to delete this chat? This will remove all messages.')) return;
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const res = await fetch(`${API_BASE_URL}/api/chat/${chatId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to delete chat');
+      // update local state
+      setRecentChats((prev) => prev.filter(c => String(c.id) !== String(chatId) && String(c.chatId) !== String(chatId)));
+      setMessages((prev) => {
+        const copy = { ...prev };
+        delete copy[chatId];
+        return copy;
+      });
+      if (socketRef.current?.emit) socketRef.current.emit('delete chat', { chatId });
+      setSelectedContact(null);
+    } catch (err) {
+      console.error('Delete chat failed', err);
+    }
+  };
+
+  // Delete message handler (lifted here so it has access to state setters)
+  const handleDeleteMessage = async (message) => {
+    if (!message) return;
+    const chatId = selectedContact?.id || selectedContact?._id;
+    if (!chatId) return;
+    const deleteForEveryone = window.confirm('Delete for everyone? Press OK to delete for everyone, Cancel to delete only for you.');
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const messageId = message._id || message.id;
+      if (!messageId) throw new Error('Message id not found');
+      if (deleteForEveryone) {
+        const res = await fetch(`${API_BASE_URL}/api/message/${messageId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Failed to delete message for everyone');
+        // remove message locally
+        setMessages((prev) => {
+          const existing = prev[chatId] || [];
+          const newList = existing.filter((m) => String(m.id || m._id) !== String(messageId));
+          const next = { ...prev, [chatId]: newList };
+
+          // compute preview from last message
+          const last = newList.length ? newList[newList.length - 1] : null;
+          const preview = last ? (last.content || (last.attachments && last.attachments[0]?.fileName) || '') : '';
+          // update recentChats
+          setRecentChats((rcPrev) =>
+            rcPrev.map((c) =>
+              String(c.id) === String(chatId) || String(c.chatId) === String(chatId)
+                ? { ...c, lastMessage: preview, timestamp: Date.now() }
+                : c
+            )
+          );
+          // update contacts preview
+          setContacts((ctPrev) =>
+            ctPrev.map((c) =>
+              String(c.id) === String(chatId) || String(c.chatId) === String(chatId)
+                ? { ...c, lastMessage: preview, hasAttachment: Boolean(last && Array.isArray(last.attachments) && last.attachments.length) }
+                : c
+            )
+          );
+
+          return next;
+        });
+        if (socketRef.current?.emit) socketRef.current.emit('delete message', { messageId, chatId, deleteForEveryone: true });
+      } else {
+        const res = await fetch(`${API_BASE_URL}/api/message/${messageId}/delete-for-me`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        });
+        if (!res.ok) throw new Error('Failed to delete message for you');
+        setMessages((prev) => {
+          const existing = prev[chatId] || [];
+          const newList = existing.filter((m) => String(m.id || m._id) !== String(messageId));
+          const next = { ...prev, [chatId]: newList };
+
+          const last = newList.length ? newList[newList.length - 1] : null;
+          const preview = last ? (last.content || (last.attachments && last.attachments[0]?.fileName) || '') : '';
+          setRecentChats((rcPrev) =>
+            rcPrev.map((c) =>
+              String(c.id) === String(chatId) || String(c.chatId) === String(chatId)
+                ? { ...c, lastMessage: preview, timestamp: Date.now() }
+                : c
+            )
+          );
+          setContacts((ctPrev) =>
+            ctPrev.map((c) =>
+              String(c.id) === String(chatId) || String(c.chatId) === String(chatId)
+                ? { ...c, lastMessage: preview, hasAttachment: Boolean(last && Array.isArray(last.attachments) && last.attachments.length) }
+                : c
+            )
+          );
+
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error('Delete message failed', err);
+    }
+  };
 
   // Socket reference
   const socketRef = useRef(null);
@@ -1113,6 +1279,17 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             }));
 
             setMessages((prev) => ({ ...prev, [normalizedChatId]: formatted }));
+            try {
+              const last = formatted.length ? formatted[formatted.length - 1] : null;
+              if (last) {
+                const preview = last.content || (last.attachments && last.attachments[0]?.fileName) || 'Attachment';
+                updateRecentChat && updateRecentChat(normalizedChatId, preview);
+                updateContactPreview && updateContactPreview(normalizedChatId, preview, Boolean(last.attachments && last.attachments.length), {
+                  attachmentFileName: last.attachments && last.attachments[0]?.fileName,
+                  attachmentMime: last.attachments && last.attachments[0]?.mimeType,
+                });
+              }
+            } catch (e) {}
           }
         }
 
@@ -1125,6 +1302,9 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
       }
     })();
   };
+
+  
+  
 
   // Fetch both received and accepted requests
   // useEffect(() => {
@@ -1402,6 +1582,20 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
           setMessages((prev) => {
             const next = { ...prev, [normalizedChatId]: formatted };
             console.debug("handleOpenChat: setMessages updated for chat", { normalizedChatId, newCount: formatted.length });
+            try {
+              // update recent/contact preview based on last message loaded from DB
+              const last = formatted.length ? formatted[formatted.length - 1] : null;
+              if (last) {
+                const preview = last.content || (last.attachments && last.attachments[0]?.fileName) || 'Attachment';
+                updateRecentChat && updateRecentChat(normalizedChatId, preview);
+                updateContactPreview && updateContactPreview(normalizedChatId, preview, Boolean(last.attachments && last.attachments.length), {
+                  attachmentFileName: last.attachments && last.attachments[0]?.fileName,
+                  attachmentMime: last.attachments && last.attachments[0]?.mimeType,
+                });
+              }
+            } catch (e) {
+              // ignore
+            }
             return next;
           });
         }
@@ -1585,20 +1779,30 @@ useEffect(() => {
 
           const otherId = otherUser?._id || otherUser?.id || null;
           const displayName =
-            otherUser?.email || otherUser?.username || otherUser?.name || "Unknown";
+            otherUser?.name || otherUser?.username || otherUser?.email || "Unknown";
+
+          // Backend may send a preview string that includes a paperclip emoji when attachments exist
+          const rawLast = chat.lastMessage || "";
+          const hasAttachmentFromMarker = typeof rawLast === 'string' && /📎/.test(rawLast);
+          const looksLikeAttachmentOnly = rawLast === 'Attachment' || rawLast === 'Attachment' || /\.(png|jpe?g|gif|webp|bmp|mp4|pdf)$/i.test(rawLast);
+          const hasAttachment = Boolean(chat.hasAttachment || hasAttachmentFromMarker || looksLikeAttachmentOnly || (chat.lastMessage && chat.lastMessage.attachments && chat.lastMessage.attachments.length));
+          // If backend returned filename (e.g., "doc.pdf"), use it as attachmentFileName
+          const attachmentFileName = hasAttachment && typeof rawLast === 'string' ? (rawLast.replace(/📎/g, '').trim() || '') : '';
 
           return {
             id: otherId,
             chatId: chat.chatId || chat._id,
             name: displayName,
             avatar: otherUser?.avatar || otherUser?.pic || null,
-            lastMessage: chat.lastMessage || (chat.lastMessage && chat.lastMessage.text) || "",
+            lastMessage: rawLast || "",
             timestamp: chat.timestamp || chat.updatedAt,
             isOnline: otherUser?.isOnline || false,
             unreadCount:
               typeof chat.unreadCount === "number"
                 ? chat.unreadCount
                 : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
+            hasAttachment,
+            attachmentFileName,
           };
         });
 
@@ -1766,7 +1970,7 @@ const handleSendMessageFromInput = useCallback(
       }));
     };
 
-    const updateRecentChat = (chatId, preview) => {
+    const updateRecentChat = (chatId, preview, hasAttachment = false, meta = {}) => {
       setRecentChats((prev) => {
         // don't add/archive update if this chat is archived
         if (archivedChatIds && archivedChatIds.has(String(chatId))) {
@@ -1777,25 +1981,58 @@ const handleSendMessageFromInput = useCallback(
         if (exists) {
           return prev.map((c) =>
             c.id === chatId || c.chatId === chatId
-              ? { ...c, lastMessage: preview, timestamp: Date.now() }
+              ? Object.assign({}, c, {
+                  lastMessage: preview,
+                  timestamp: Date.now(),
+                  hasAttachment: !!hasAttachment,
+                  ...(hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {}),
+                  ...(hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {}),
+                })
               : c
           );
         }
         return [
-          {
-            id: chatId,
-            chatId,
-            name: selectedContact.name,
-            avatar: selectedContact.avatar || '/default-avatar.png',
-            lastMessage: preview,
-            timestamp: Date.now(),
-            unreadCount: 0,
-          },
+          Object.assign(
+            {
+              id: chatId,
+              chatId,
+              name: selectedContact?.name || '',
+              avatar: selectedContact?.avatar || '/default-avatar.png',
+              lastMessage: preview,
+              hasAttachment: !!hasAttachment,
+              timestamp: Date.now(),
+              unreadCount: 0,
+            },
+            hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {},
+            hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {}
+          ),
           ...prev,
         ];
       });
     };
 
+    // Also update the contacts list preview so sidebar reflects latest message/icon
+    const updateContactPreview = (chatId, preview, hasAttachment = false, meta = {}) => {
+      setContacts((prev) =>
+        prev.map((c) => {
+          if (String(c.id) !== String(chatId) && String(c.chatId) !== String(chatId)) return c;
+          // base update
+          const updated = { ...c, lastMessage: preview };
+          if (hasAttachment) {
+            updated.hasAttachment = true;
+            if (meta.attachmentFileName) updated.attachmentFileName = meta.attachmentFileName;
+            if (meta.attachmentMime) updated.attachmentMime = meta.attachmentMime;
+          } else {
+            // clear attachment markers when no attachment
+            updated.hasAttachment = false;
+            delete updated.attachmentFileName;
+            delete updated.attachmentMime;
+            delete updated.attachments;
+          }
+          return updated;
+        })
+      );
+    };
     // Case 1: Server message object
     if (typeof payload === 'object' && (payload._id || payload.id || payload.createdAt)) {
       try {
@@ -1816,7 +2053,15 @@ const handleSendMessageFromInput = useCallback(
           socketRef.current.emit('new message', payload);
         }
 
-        updateRecentChat(chatId, formatted.content || 'Attachment');
+        const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
+        updateRecentChat(chatId, preview, Boolean(formatted.attachments && formatted.attachments.length), {
+          attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+          attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+        });
+        updateContactPreview(chatId, preview, Boolean(formatted.attachments && formatted.attachments.length), {
+          attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+          attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+        });
         return;
       } catch (err) {
         console.error('Error appending server message payload', err);
@@ -1842,7 +2087,10 @@ const handleSendMessageFromInput = useCallback(
         // Local fallback
         if (!chatId || !token) {
           appendMessage(chatId, localMessage);
-          updateRecentChat(chatId, localMessage.content || 'Attachment');
+          updateRecentChat(chatId, localMessage.content || 'Attachment', Boolean(localMessage.attachments && localMessage.attachments.length), {
+            attachmentFileName: localMessage.attachments && localMessage.attachments[0]?.fileName,
+            attachmentMime: localMessage.attachments && localMessage.attachments[0]?.mimeType,
+          });
           return;
         }
 
@@ -1879,8 +2127,15 @@ const handleSendMessageFromInput = useCallback(
 
           if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
 
-          const preview = formatted.content || (formatted.attachments[0]?.fileName || 'Attachment');
-          updateRecentChat(chatId, preview);
+          const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
+          updateRecentChat(chatId, preview, Boolean(formatted.attachments && formatted.attachments.length), {
+            attachmentFileName: (formatted.attachments && formatted.attachments[0]?.fileName) || undefined,
+            attachmentMime: (formatted.attachments && formatted.attachments[0]?.mimeType) || undefined,
+          });
+          updateContactPreview(chatId, preview, Boolean(formatted.attachments && formatted.attachments.length), {
+            attachmentFileName: (formatted.attachments && formatted.attachments[0]?.fileName) || undefined,
+            attachmentMime: (formatted.attachments && formatted.attachments[0]?.mimeType) || undefined,
+          });
         } catch (err) {
           console.error('Error sending attachment message:', err);
         }
@@ -1938,7 +2193,8 @@ const handleSendMessageFromInput = useCallback(
           appendMessage(chatId, formatted);
           if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
 
-          updateRecentChat(chatId, messageText);
+          updateRecentChat(chatId, messageText, false);
+          updateContactPreview(chatId, messageText, false);
         } catch (err) {
           console.error('Error sending message:', err);
         }
@@ -1994,13 +2250,30 @@ const handleSendMessageFromInput = useCallback(
             }));
 
             // update recentChats/unread when not currently selected
-            setRecentChats((prev) => {
-              const exists = prev.find((c) => c.chatId === key || c.id === key);
-              if (exists) {
-                return prev.map((c) => (c.chatId === key || c.id === key ? { ...c, lastMessage: formatted.content, unreadCount: (c.unreadCount || 0) + 1 } : c));
-              }
-              return prev;
+            const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
+            const hasAttachment = Boolean(formatted.attachments && formatted.attachments.length);
+            updateRecentChat(key, preview, hasAttachment, {
+              attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+              attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
             });
+            // increment unread count
+            setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
+
+            // keep contact sidebar in sync (attachment flag + filename/mime)
+            updateContactPreview(key, preview, hasAttachment, {
+              attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+              attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+            });
+
+            // keep contact sidebar in sync (attachment flag + filename/mime)
+            try {
+              updateContactPreview && updateContactPreview(key, preview, Boolean(formatted.attachments && formatted.attachments.length), {
+                attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+                attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+              });
+            } catch (e) {
+              // ignore if updateContactPreview not available
+            }
           } catch (err) {
             console.error('Error processing incoming socket message', err);
           }
@@ -3594,10 +3867,28 @@ useEffect(() => {
                 onUnblockUser={handleUnblockUser}
                 onArchiveChat={handleArchiveChat}
                 onUnarchiveChat={handleUnarchiveChat}
+                onDeleteChat={handleDeleteChat}
                 isBlocked={isBlockedState}
                 isArchived={isArchivedState}
               />
               <div className="flex-1 overflow-hidden relative">
+                {/* Hovered message date (overlay, does not affect layout) */}
+                <div className="absolute top-3 left-1/2 transform -translate-x-1/2 z-40 pointer-events-none">
+                  <AnimatePresence>
+                    {hoverDateLabel && (
+                      <motion.div
+                        key={hoverDateLabel}
+                        initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                        transition={{ duration: 0.18, ease: "easeOut" }}
+                        className={`text-sm px-3 py-1 rounded-full shadow-md backdrop-blur-sm border ${effectiveTheme.border} ${effectiveTheme.mode === 'dark' ? 'bg-gradient-to-r from-purple-600/70 to-blue-600/70 text-white' : 'bg-gradient-to-r from-blue-400/70 to-indigo-400/70 text-white'}`}
+                      >
+                        {hoverDateLabel}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
                 <MessagesArea
                   key={selectedContact.id}
                   filteredMessages={getMessagesForContact(
@@ -3606,10 +3897,12 @@ useEffect(() => {
                   )}
                   pinnedMessages={pinnedMessages}
                   onPinMessage={handlePinMessage}
+                  onHoverDateChange={handleHoverDateChange}
                   effectiveTheme={effectiveTheme}
                   isTyping={isTyping}
                   selectedContactId={selectedContact.id}
                   currentUserId={currentUserId}
+                    onDeleteMessage={handleDeleteMessage}
                 />
               </div>
               <MessageInput

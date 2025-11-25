@@ -291,6 +291,7 @@ export const getRecentChats = async (req, res) => {
 };
 
 export const deleteChat = asyncHandler(async (req, res) => {
+  console.log("Delete chat request received");
   const { chatId } = req.params;
   const userId = req.user._id;
 
