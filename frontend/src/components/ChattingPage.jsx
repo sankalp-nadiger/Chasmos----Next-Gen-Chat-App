@@ -70,6 +70,7 @@ import NewDocumentUploader from "./NewDocumentUploader";
 import DocumentChatWrapper from "./DocumentChat";
 import Community from "./Community";
 import GroupCreation from "./GroupCreation";
+import DateTag from "./DateTag";
 
 
 // Memoized Chat Header Component
@@ -694,6 +695,38 @@ const MessagesArea = ({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const shouldAutoScrollRef = useRef(true); // ✅ Track if we should auto-scroll
 
+  // Helper: format day label like WhatsApp (Today / Yesterday / date)
+  const formatDayLabel = useCallback((ts) => {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const today = new Date();
+
+    const isSameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+
+    if (isSameDay(d, today)) return 'Today';
+    if (isSameDay(d, yesterday)) return 'Yesterday';
+
+    return d.toLocaleDateString();
+  }, []);
+
+  // Inject date markers before the first message of each day
+  const messagesWithDates = useMemo(() => {
+    const out = [];
+    let lastDayKey = null;
+    (filteredMessages || []).forEach((m) => {
+      const dt = new Date(m.timestamp || m.time || Date.now());
+      const dayKey = `${dt.getFullYear()}-${dt.getMonth() + 1}-${dt.getDate()}`;
+      if (dayKey !== lastDayKey) {
+        out.push({ _isDate: true, id: `date-${m.id || m.timestamp || Math.random()}`, timestamp: m.timestamp });
+        lastDayKey = dayKey;
+      }
+      out.push(m);
+    });
+    return out;
+  }, [filteredMessages]);
+
   const scrollToBottom = (e) => {
     if (e) {
       e.stopPropagation();
@@ -786,17 +819,23 @@ const MessagesArea = ({
       >
         <div className="relative z-10">
           <AnimatePresence mode="popLayout">
-            {filteredMessages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                isPinned={pinnedMessages[message.id] || false}
-                onPinToggle={onPinMessage}
-                onDeleteMessage={onDeleteMessage}
-                effectiveTheme={effectiveTheme}
-                currentUserId={currentUserId}
-                onHoverDateChange={onHoverDateChange}
-              />
+            {messagesWithDates.map((item) => (
+              item && item._isDate ? (
+                <div key={item.id} className="w-full flex justify-center">
+                  <DateTag label={formatDayLabel(item.timestamp)} />
+                </div>
+              ) : (
+                <MessageBubble
+                  key={item.id}
+                  message={item}
+                  isPinned={pinnedMessages[item.id] || false}
+                  onPinToggle={onPinMessage}
+                  onDeleteMessage={onDeleteMessage}
+                  effectiveTheme={effectiveTheme}
+                  currentUserId={currentUserId}
+                  onHoverDateChange={onHoverDateChange}
+                />
+              )
             ))}
           </AnimatePresence>
 
@@ -3882,7 +3921,7 @@ useEffect(() => {
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: -6, scale: 0.98 }}
                         transition={{ duration: 0.18, ease: "easeOut" }}
-                        className={`text-sm px-3 py-1 rounded-full shadow-md backdrop-blur-sm border ${effectiveTheme.border} ${effectiveTheme.mode === 'dark' ? 'bg-gradient-to-r from-purple-600/70 to-blue-600/70 text-white' : 'bg-gradient-to-r from-blue-400/70 to-indigo-400/70 text-white'}`}
+                        className={`text-xs px-2 py-0.5 rounded-full shadow-sm backdrop-blur-sm border ${effectiveTheme.border} ${effectiveTheme.mode === 'dark' ? 'bg-gradient-to-r from-purple-600/60 to-blue-600/60 text-white' : 'bg-gradient-to-r from-blue-400/60 to-indigo-400/60 text-white'}`}
                       >
                         {hoverDateLabel}
                       </motion.div>

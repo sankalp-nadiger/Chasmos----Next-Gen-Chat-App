@@ -1,18 +1,30 @@
 import React from "react";
 import { Image, FileText, File, Video } from "lucide-react";
 
-// Utility to format timestamp nicely
+// Utility to format timestamp nicely (today: time, yesterday: 'Yesterday', older: locale date)
 const formatTimestamp = (timestamp) => {
   if (!timestamp) return "";
-  const date = new Date(timestamp);
+  const date = typeof timestamp === 'number' || typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
+  if (!(date instanceof Date) || isNaN(date)) return "";
+
   const now = new Date();
-  const diff = (now - date) / 1000; // seconds
+  const diffSeconds = Math.floor((now - date) / 1000);
 
-  if (diff < 60) return "Just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
+  if (diffSeconds < 60) return "Just now";
+  if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)} min ago`;
 
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const isSameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const yesterday = new Date();
+  yesterday.setDate(now.getDate() - 1);
+
+  if (isSameDay(date, now)) {
+    return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase();
+  }
+
+  if (isSameDay(date, yesterday)) return 'Yesterday';
+
+  // Older: show short localized date (e.g., Nov 26)
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
 const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
