@@ -8,7 +8,9 @@ import {
   deleteDocument,
   testFlaskConnection,
   getAllDocumentChats,   // ✅ new
-  getDocumentChatById,   // ✅ new
+  getDocumentChatById,
+  pinDocument,
+  unpinDocument,   // ✅ new
 } from "../controllers/document.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import multer from "multer";
@@ -40,5 +42,17 @@ router.get("/history/document", protect, getAllDocumentChats);
 
 // GET /api/ai/history/document/:id → Fetch chats for a specific document
 router.get("/history/document/:id", protect, getDocumentChatById);
+router.post("/:documentId/pin", protect,pinDocument);
+router.post("/:documentId/unpin", protect,unpinDocument);
+
+router.get("/pinned",protect, async (req, res) => {
+  const pinnedDocs = await Document.find({
+    createdBy: req.user._id,
+    isPinned: true
+  }).sort({ updatedAt: -1 });
+
+  res.json(pinnedDocs);
+});
+
 
 export default router;

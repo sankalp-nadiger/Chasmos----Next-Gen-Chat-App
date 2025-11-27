@@ -62,6 +62,11 @@ const documentSchema = new Schema(
       type: Boolean,
       default: false
     },
+    isPinned: {
+  type: Boolean,
+  default: false
+},
+
     processingStatus: {
       type: String,
       enum: ["pending", "processing", "completed", "failed"],
