@@ -19,7 +19,7 @@ const oauth2Client = new google.auth.OAuth2(
 console.log("Google OAuth2 Client initialized with ID:", CLIENT_ID);
 
 // Define the scopes needed. 'contacts.readonly' is for reading contacts.
-const CONTACTS_SCOPES = [
+export const CONTACTS_SCOPES = [
     'https://www.googleapis.com/auth/contacts.readonly',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile'

@@ -12,7 +12,9 @@ const router = express.Router();
 router.route("/google/connect").get(protect, googleConnect);
 
 // 2. Handles the redirect from Google, exchanges code for tokens
-router.route("/google/callback").get(protect, googleCallback);
+// Note: Google will redirect to this endpoint and include the `state` query param
+// which carries the user's JWT so we do not require `protect` here.
+router.route("/google/callback").get(googleCallback);
 
 // 3. Manually trigger contacts sync
 router.route("/sync").post(protect, syncGoogleContacts);

@@ -422,7 +422,22 @@ const NewChat = ({
         (user) => !existingContacts.some((contact) => contact.id === user.id)
       );
 
-      setAllContacts(knownContacts);
+      // Also include existingContacts that are NOT registered users (e.g., Google contacts)
+      const existingNotRegistered = (existingContacts || []).filter(
+        (c) => !formattedUsers.some((u) => String(u.id) === String(c.id))
+      );
+
+      const existingNotRegisteredMapped = existingNotRegistered.map((c) => ({
+        id: c.id || c._id || c.googleId || c.email || c.phone || `${c.name}`,
+        name: c.name || c.email || c.phone || "Unknown",
+        email: c.email || undefined,
+        avatar: c.avatar || null,
+        isOnline: c.isOnline || false,
+        type: c.isGoogleContact ? "google-contact" : "contact",
+      }));
+
+      // Merge: put non-registered existing contacts first, then known registered contacts
+      setAllContacts([...existingNotRegisteredMapped, ...knownContacts]);
       setRegisteredUsers(newUsers);
     } catch (err) {
       setError(err.message);

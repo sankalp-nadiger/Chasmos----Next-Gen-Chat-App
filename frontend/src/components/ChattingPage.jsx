@@ -951,6 +951,18 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [chatSearchTerm, setChatSearchTerm] = useState("");
   const [contacts, setContacts] = useState([]);
+  const [googleContacts, setGoogleContacts] = useState([]);
+
+  // Clear any stale contacts on mount (helps when user account was deleted and re-created)
+  useEffect(() => {
+    setContacts([]);
+    setGoogleContacts([]);
+    try {
+      localStorage.removeItem('googleContacts');
+    } catch (e) {
+      // ignore
+    }
+  }, []);
   const [messages, setMessages] = useState(mockMessages);
   const [isTyping, setIsTyping] = useState({});
   const [isMobileView, setIsMobileView] = useState(false);
@@ -1045,6 +1057,37 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   // API Base URL from environment variable
   const API_BASE_URL =
     import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+
+  // Load synced Google contacts (if any) and merge into contacts list
+  useEffect(() => {
+    let cancelled = false;
+    const loadGoogleContacts = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        const res = await fetch(`${API_BASE_URL}/api/sync/google-contacts`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        const googleContactsResp = Array.isArray(json.data) ? json.data : [];
+        const formatted = googleContactsResp.map((c) => ({
+          id: `google-${(c.email || c.phone || c.name)}`,
+          name: c.name,
+          email: c.email,
+          avatar: c.avatar,
+          isGoogleContact: true,
+        }));
+        if (!cancelled) {
+          setGoogleContacts(formatted);
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    loadGoogleContacts();
+    return () => { cancelled = true; };
+  }, []);
 
   // Delete chat handler (lifted here so it has access to state setters)
   const handleDeleteChat = async (contact) => {
@@ -3866,7 +3909,7 @@ useEffect(() => {
             />
           ) : showNewChat ? (
             <NewChat
-              contacts={contacts}
+              existingContacts={[...googleContacts, ...contacts]}
               effectiveTheme={effectiveTheme}
               onClose={handleCloseNewChat}
               onStartChat={handleStartNewChat}

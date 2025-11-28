@@ -93,9 +93,30 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
         throw new Error(data.message || "Failed to complete signup");
       }
 
+      // Save token and user data under the keys the app expects
+      localStorage.setItem("chasmos_user_data", JSON.stringify(data));
+      localStorage.setItem("chasmos_auth_token", data.token);
+      // Keep backward-compatible keys as well
       localStorage.setItem("userInfo", JSON.stringify(data));
       localStorage.setItem("token", data.token);
       
+      // If user opted to sync Google contacts, initiate OAuth connect flow
+      if (formData.enableGoogleContacts) {
+        try {
+          const connectRes = await fetch(`${API_BASE_URL}/api/contacts/google/connect`, {
+            headers: { Authorization: `Bearer ${data.token}` },
+          });
+          const connectJson = await connectRes.json();
+          if (connectRes.ok && connectJson.url) {
+            // Redirect user to Google's OAuth consent screen
+            window.location.href = connectJson.url;
+            return;
+          }
+        } catch (e) {
+          console.error('Failed to initiate Google contacts sync', e);
+        }
+      }
+
       onSuccess(data);
     } catch (err) {
       setError(err.message || "Something went wrong");

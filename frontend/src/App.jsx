@@ -10,6 +10,72 @@ import Profile from "./components/Profile.jsx";
 import Settings from "./components/Settings.jsx";
 import Community from "./components/Community.jsx";
 
+// OAuth Callback Handler Component
+const OAuthCallback = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    // Parse query parameters
+    const searchParams = new URLSearchParams(location.search);
+    const syncStatus = searchParams.get('sync');
+    const token = searchParams.get('token');
+    
+    if (syncStatus === 'success') {
+      // If token is provided in URL, store it in localStorage
+      if (token) {
+        localStorage.setItem('chasmos_auth_token', token);
+      }
+      
+        // Show success message (optional)
+        console.log('Google Contacts sync successful!');
+        
+        // Redirect to ChattingPage (chats section)
+        setTimeout(() => {
+          navigate('/chats', { replace: true });
+        }, 800);
+    } else if (syncStatus === 'error') {
+      // Handle error
+        // Handle error - redirect to chats anyway but show error
+        const reason = searchParams.get('reason');
+        console.error('Google Contacts sync failed:', reason);
+        setTimeout(() => {
+          navigate('/chats', { replace: true });
+        }, 800);
+    } else {
+      // No sync parameter, just redirect to chats
+      setTimeout(() => {
+        navigate('/chats', { replace: true });
+      }, 800);
+    }
+  }, [location, navigate]);
+
+  return (
+    <div style={{ 
+      display: 'flex', 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      height: '100vh',
+      background: '#1a1d29'
+    }}>
+      <div style={{ textAlign: 'center', color: '#fff' }}>
+        <div style={{ fontSize: '18px', marginBottom: '10px' }}>
+          Completing Google Contacts sync...
+        </div>
+        <div style={{ 
+          width: '40px', 
+          height: '40px', 
+          border: '4px solid #333', 
+          borderTop: '4px solid #4285f4',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite',
+          margin: '0 auto'
+        }} />
+      </div>
+    </div>
+  );
+};
+
 // Protected Route Component
 const ProtectedRoute = ({ children, isAuthenticated }) => {
   return isAuthenticated ? children : <Navigate to="/auth" replace />;
@@ -17,7 +83,7 @@ const ProtectedRoute = ({ children, isAuthenticated }) => {
 
 // Auth Route Component (redirect to home if already authenticated)
 const AuthRoute = ({ children, isAuthenticated }) => {
-  return !isAuthenticated ? children : <Navigate to="/home" replace />;
+  return !isAuthenticated ? children : <Navigate to="/chats" replace />;
 };
 
 // Main App Content Component
@@ -51,8 +117,8 @@ const AppContent = () => {
         setIsAuthenticated(true);
       } else {
         setIsAuthenticated(false);
-        // Only redirect to auth if not already there
-        if (location.pathname !== '/auth') {
+        // Only redirect to auth if not already there and not on OAuth callback
+        if (location.pathname !== '/auth' && location.pathname !== '/home') {
           navigate('/auth', { replace: true });
         }
       }
@@ -71,7 +137,7 @@ const AppContent = () => {
         localStorage.setItem('chasmos_user_data', JSON.stringify(userData));
       }
       setIsAuthenticated(true);
-      navigate('/home', { replace: true });
+      navigate('/chats', { replace: true });
     } else {
       // Clear authentication data
       localStorage.removeItem('chasmos_auth_token');
@@ -95,6 +161,12 @@ const AppContent = () => {
       <Route 
         path="/auth" 
         element={<AuthPage onAuthenticated={handleAuthentication} />} 
+      />
+      
+      {/* OAuth Callback Route - handles Google OAuth redirect */}
+      <Route 
+        path="/home" 
+        element={<OAuthCallback />} 
       />
       
       {/* Home/Chats Route */}
@@ -167,12 +239,6 @@ const AppContent = () => {
               <Navigate to="/auth" replace />
             )
         } 
-      />
-      
-      {/* Home Route - redirect to chats */}
-      <Route 
-        path="/home" 
-        element={<Navigate to="/chats" replace />} 
       />
       
       {/* Default route */}

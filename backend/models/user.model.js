@@ -76,6 +76,16 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    // Stored synced Google contacts (basic info needed for NewChat / GroupCreation)
+    googleContacts: [
+      {
+        name: { type: String },
+        email: { type: String, lowercase: true },
+        phone: { type: String },
+        avatar: { type: String },
+        googleId: { type: String }
+      }
+    ],
 
     // Block functionality
     blockedUsers: [{

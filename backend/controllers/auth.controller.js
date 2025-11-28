@@ -2,11 +2,17 @@ import asyncHandler from "express-async-handler";
 import User from "../models/user.model.js";
 import generateToken from "../config/generatetoken.js";
 import { google } from "googleapis";
+import { getOAuth2Client, CONTACTS_SCOPES } from "../config/google-auth.config.js";
 
 export const handleGoogleAuth = asyncHandler(async (req, res) => {
-  // Accept either `idToken` or `credential` (frontend may send `credential`)
+  // Accept idToken from Google Sign-In button
   const { idToken, credential } = req.body;
   const token = idToken || credential;
+
+  if (!token) {
+    res.status(400);
+    throw new Error('No token provided');
+  }
 
   // Verify the token and get user info
   const client = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID);
@@ -56,7 +62,7 @@ export const completeGoogleSignup = asyncHandler(async (req, res) => {
     avatar, 
     phoneNumber, 
     password = "", // Optional
-    enableGoogleContacts 
+    enableGoogleContacts
   } = req.body;
 
   // Validate required fields (phone number is optional)

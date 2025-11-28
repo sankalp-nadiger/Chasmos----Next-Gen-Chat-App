@@ -232,15 +232,18 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
       setError("");
       setIsLoading(true);
       try {
+        // Support both authorization code and idToken
+        const bodyPayload = googleResponse.code
+          ? { code: googleResponse.code }
+          : { idToken: googleResponse.credential };
+
         const res = await fetch(`${API_BASE_URL}/api/auth/google`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ idToken: googleResponse.credential }),
-        });
-
-        const data = await res.json();
+          body: JSON.stringify(bodyPayload),
+        });        const data = await res.json();
 
         if (!res.ok) {
           throw new Error(data.message || "Google login failed");
