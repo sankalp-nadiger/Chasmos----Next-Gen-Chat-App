@@ -419,7 +419,6 @@ export const getRecentChats = async (req, res) => {
       };
     });
     
-    console.log("Formatted Recent Chats:", formattedChats);
     res.status(200).json(formattedChats);
   } catch (err) {
     console.error(err);
