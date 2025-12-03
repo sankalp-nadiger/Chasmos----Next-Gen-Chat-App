@@ -29,48 +29,49 @@ class OCRService {
     }
   }
 
-  async extractTextFromImage(imageFileOrBuffer) {
-    try {
-      const workerReady = await this.ensureWorkerInitialized();
-      if (!workerReady) {
-        throw new Error('OCR worker failed to initialize');
-      }
+ async extractTextFromImage(imageFileOrBuffer) {
+  try {
+    const workerReady = await this.ensureWorkerInitialized();
+    if (!workerReady) throw new Error('OCR worker failed to initialize');
 
-      let imageBuffer;
-      
-      if (typeof imageFileOrBuffer === 'string') {
-        return await this.worker.recognize(imageFileOrBuffer);
-      } else if (imageFileOrBuffer.buffer) {
-        imageBuffer = imageFileOrBuffer.buffer;
-      } else if (Buffer.isBuffer(imageFileOrBuffer)) {
-        imageBuffer = imageFileOrBuffer;
-      } else {
-        throw new Error('Unsupported file type for OCR processing');
-      }
+    let imageData;
 
-      const base64Image = imageBuffer.toString('base64');
-      const imageDataUrl = `data:image/jpeg;base64,${base64Image}`;
-
-      const { data: { text, confidence } } = await this.worker.recognize(imageDataUrl);
-
-      const cleanedText = this.cleanExtractedText(text);
-
-      return {
-        success: true,
-        text: cleanedText,
-        confidence: confidence || 0.85,
-        originalLength: text.length,
-        cleanedLength: cleanedText.length
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-        text: '',
-        confidence: 0
-      };
+    // CASE 1: MemoryStorage Buffer
+    if (imageFileOrBuffer.buffer) {
+      const base64 = imageFileOrBuffer.buffer.toString("base64");
+      imageData = `data:${imageFileOrBuffer.mimetype};base64,${base64}`;
     }
+
+    // CASE 2: DiskStorage (Multer dest:"uploads/")
+    else if (imageFileOrBuffer.path) {
+      imageData = imageFileOrBuffer.path; // Tesseract can read file path directly
+    }
+
+    else {
+      throw new Error("Unsupported file input — no buffer or path found");
+    }
+
+    const { data: { text, confidence } } = await this.worker.recognize(imageData);
+
+    const cleanedText = this.cleanExtractedText(text);
+
+    return {
+      success: true,
+      text: cleanedText,
+      confidence: confidence || 0.85,
+      originalLength: text.length,
+      cleanedLength: cleanedText.length
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      text: '',
+      confidence: 0
+    };
   }
+}
 
   cleanExtractedText(text) {
     if (!text) return '';

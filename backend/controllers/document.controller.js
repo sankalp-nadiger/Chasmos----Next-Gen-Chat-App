@@ -1,6 +1,7 @@
 import asyncHandler from "express-async-handler";
 import Document from "../models/document.model.js";
 import supabase from "../utils/supabaseHelper.js";
+import axios from "axios";
 import { v4 as uuidv4 } from "uuid";
 
 
@@ -83,46 +84,116 @@ export const uploadDocument = asyncHandler(async (req, res) => {
 });
 
 
+export const pinDocument = asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const documentId = req.params.documentId;
+
+    const doc = await Document.findOneAndUpdate(
+      { _id: documentId, createdBy: userId },
+      { isPinned: true },
+      { new: true }
+    );
+
+    if (!doc) return res.status(404).json({ message: "Document not found" });
+
+    return res.status(200).json({
+      message: "Pinned successfully",
+      document: doc,
+    });
+  } catch (err) {
+    console.error("PIN ERROR:", err);
+    return res.status(500).json({ message: "Error pinning document" });
+  }
+});
+
+export const unpinDocument = asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const documentId = req.params.documentId;
+
+    const doc = await Document.findOneAndUpdate(
+      { _id: documentId, createdBy: userId },
+      { isPinned: false },
+      { new: true }
+    );
+
+    if (!doc) return res.status(404).json({ message: "Document not found" });
+
+    return res.status(200).json({
+      message: "Unpinned successfully",
+      document: doc,
+    });
+  } catch (err) {
+    console.error("UNPIN ERROR:", err);
+    return res.status(500).json({ message: "Error unpinning document" });
+  }
+});
+
+
+
 // 🧩 Ask a question on an existing document
 export const processDocument = asyncHandler(async (req, res) => {
   const { documentId } = req.params;
   const { question } = req.body;
   const userId = req.user._id;
 
+  // Find document for this user
   const doc = await Document.findOne({ _id: documentId, createdBy: userId });
   if (!doc) {
-    res.status(404);
-    throw new Error("Document not found or unauthorized");
+    return res.status(404).json({ message: "Document not found or unauthorized" });
   }
 
-  // Send question to Flask AI server
-  const response = await axios.post(`${process.env.FLASK_SERVER_URL}/process`, {
+  try {
+    // Call Flask AI server
+   const flaskURL = `${process.env.FLASK_SERVER_URL}/api/document/${documentId}/process`;
+
+const response = await axios.post(
+  flaskURL,
+  {
     file_url: doc.fileUrl,
     question,
-  });
+  },
+  {
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    timeout: 20_000, // prevents hanging
+  }
+);
 
-  const aiAnswer = response.data.answer || "No answer received from AI";
+    const aiAnswer = response.data.answer || "No answer received from AI";
 
-  // Append Q&A to document history
-  doc.questions.push({ question, answer: aiAnswer });
-  await doc.save();
+    // Save question + answer to document history
+    doc.questions.push({ question, answer: aiAnswer });
+    await doc.save();
 
-  res.status(200).json({ question, answer: aiAnswer });
+    res.status(200).json({ question, answer: aiAnswer });
+  } catch (err) {
+    console.error("🔥 AI processing error:", err.message);
+    res.status(500).json({
+      message: "AI processing failed",
+      error: err.message,
+    });
+  }
 });
+
+
 
 // 🧩 Get all documents for the logged-in user (chat history list)
 export const getUserDocuments = asyncHandler(async (req, res) => {
   const userId = req.user._id;
 
   const documents = await Document.find({ createdBy: userId })
-    .select("originalName questions updatedAt createdAt")
     .sort({ updatedAt: -1 });
 
   const result = documents.map((doc) => ({
     _id: doc._id,
-    fileName: doc.originalName,
+    fileName: doc.originalName,   // frontend uses fileName
+    isPinned: doc.isPinned,       // ✅ VERY IMPORTANT
     questionCount: doc.questions?.length || 0,
-    updatedAt: doc.updatedAt, // ✅ renamed key
+    updatedAt: doc.updatedAt,
     lastQuestion: doc.questions?.[doc.questions.length - 1]?.question || null,
     lastAnswer: doc.questions?.[doc.questions.length - 1]?.answer || null,
   }));
