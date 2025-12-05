@@ -21,8 +21,11 @@ export const allMessages = asyncHandler(async (req, res) => {
 export const sendMessage = asyncHandler(async (req, res) => {
   const { content, chatId, attachments, type = "text" } = req.body;
 
-  if (!content && (!attachments || attachments.length === 0)) {
-    console.log("Invalid data passed into request");
+  if (!content && !req.body.attachments) { 
+    return res.status(400).json({ message: "Message content or attachment is required" });
+  }
+
+  if (!chatId) {
     return res.sendStatus(400);
   }
 
@@ -44,16 +47,17 @@ export const sendMessage = asyncHandler(async (req, res) => {
     }
   }
 
-  var newMessage = {
+  // Create message object
+  let newMessage = {
     sender: req.user._id,
-    content: content,
+    content: content || "",
     chat: chatId,
     type: type,
     attachments: attachments || [],
   };
 
   try {
-    var message = await Message.create(newMessage);
+    let message = await Message.create(newMessage);
 
     message = await message.populate("sender", "name avatar");
     message = await message.populate("attachments");
@@ -67,6 +71,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
 
     res.json(message);
   } catch (error) {
+    console.error(error);
     res.status(400);
     throw new Error(error.message);
   }

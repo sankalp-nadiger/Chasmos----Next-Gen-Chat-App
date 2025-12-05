@@ -4,23 +4,77 @@ import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
 import path from "path";
 
+// export const accessChat = asyncHandler(async (req, res) => {
+//   const { userId } = req.body;
+
+//   if (!userId) {
+//     console.log("UserId param not sent with request");
+//     return res.sendStatus(400);
+//   }
+
+//   const currentUser = await User.findById(req.user._id);
+//   const targetUser = await User.findById(userId);
+  
+//   if (currentUser.blockedUsers.includes(userId) || targetUser.blockedUsers.includes(req.user._id)) {
+//     res.status(403);
+//     throw new Error("Cannot access chat with blocked user");
+//   }
+
+//   var isChat = await Chat.find({
+//     isGroupChat: false,
+//     $and: [
+//       { users: { $elemMatch: { $eq: req.user._id } } },
+//       { users: { $elemMatch: { $eq: userId } } },
+//     ],
+//   })
+//     .populate("users", "-password")
+//     .populate("lastMessage");
+
+//   isChat = await User.populate(isChat, {
+//     path: "lastMessage.sender",
+//     select: "name avatar email",
+//   });
+
+//   if (isChat.length > 0) {
+//     res.send(isChat[0]);
+//   } else {
+//     var chatData = {
+//       chatName: "sender",
+//       isGroupChat: false,
+//       users: [req.user._id, userId],
+//       participants: [req.user._id, userId],
+//     };
+
+//     try {
+//       const createdChat = await Chat.create(chatData);
+//       const FullChat = await Chat.findOne({ _id: createdChat._id }).populate(
+//         "users",
+//         "-password"
+//       );
+//       res.status(200).json(FullChat);
+//     } catch (error) {
+//       res.status(400);
+//       throw new Error(error.message);
+//     }
+//   }
+// });
+
 export const accessChat = asyncHandler(async (req, res) => {
   const { userId } = req.body;
 
   if (!userId) {
-    console.log("UserId param not sent with request");
     return res.sendStatus(400);
   }
 
   const currentUser = await User.findById(req.user._id);
   const targetUser = await User.findById(userId);
-  
+
   if (currentUser.blockedUsers.includes(userId) || targetUser.blockedUsers.includes(req.user._id)) {
-    res.status(403);
-    throw new Error("Cannot access chat with blocked user");
+    return res.status(403).json({ message: "Cannot access chat with blocked user" });
   }
 
-  var isChat = await Chat.find({
+  // Try to find existing chat
+  let chat = await Chat.find({
     isGroupChat: false,
     $and: [
       { users: { $elemMatch: { $eq: req.user._id } } },
@@ -28,34 +82,40 @@ export const accessChat = asyncHandler(async (req, res) => {
     ],
   })
     .populate("users", "-password")
+    .populate("participants", "-password")
+    .populate("groupAdmin", "-password")
+    .populate("admins", "name email avatar")
     .populate("lastMessage");
 
-  isChat = await User.populate(isChat, {
+  chat = await User.populate(chat, {
     path: "lastMessage.sender",
     select: "name avatar email",
   });
 
-  if (isChat.length > 0) {
-    res.send(isChat[0]);
-  } else {
-    var chatData = {
-      chatName: "sender",
-      isGroupChat: false,
-      users: [req.user._id, userId],
-      participants: [req.user._id, userId],
-    };
+  if (chat.length > 0) {
+    return res.json(chat[0]);
+  }
 
-    try {
-      const createdChat = await Chat.create(chatData);
-      const FullChat = await Chat.findOne({ _id: createdChat._id }).populate(
-        "users",
-        "-password"
-      );
-      res.status(200).json(FullChat);
-    } catch (error) {
-      res.status(400);
-      throw new Error(error.message);
-    }
+  // If no chat exists — create one
+  const chatData = {
+    chatName: "sender",
+    isGroupChat: false,
+    users: [req.user._id, userId],
+    participants: [req.user._id, userId],
+  };
+
+  try {
+    const createdChat = await Chat.create(chatData);
+
+    const FullChat = await Chat.findOne({ _id: createdChat._id })
+      .populate("users", "-password")
+      .populate("participants", "-password")
+      .populate("groupAdmin", "-password")
+      .populate("admins", "name email avatar");
+
+    return res.status(200).json(FullChat);
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
   }
 });
 
@@ -364,61 +424,73 @@ export const getRecentChats = async (req, res) => {
       .populate({ path: 'lastMessage.sender', select: '_id email name' })
       .lean();
 
-    const formattedChats = chats.map((chat) => {
-      const otherUser =
-        (Array.isArray(chat.participants) &&
-          chat.participants.find((p) => String(p._id) !== String(userId))) ||
-        (Array.isArray(chat.participants) ? chat.participants[0] : null);
+ const formattedChats = chats.map((chat) => {
+  const isGroup = chat.isGroupChat;
 
-      let unread = 0;
-      if (typeof chat.unreadCount === "number") {
-        unread = chat.unreadCount;
-      } else if (chat.unreadCount && typeof chat.unreadCount === "object") {
-        unread = chat.unreadCount[String(userId)] || chat.unreadCount[userId] || 0;
-      }
+  // DIRECT CHAT — get other user
+  let otherUser = null;
+  if (!isGroup) {
+    otherUser = chat.participants.find(
+      (p) => String(p._id) !== String(userId)
+    );
+  }
 
-      let lastMessageText = "";
-      if (chat.lastMessage) {
-        const msg = chat.lastMessage;
-        const text = (msg.content || msg.text || "").toString().trim();
+  // LAST MESSAGE PREVIEW
+  let lastMessagePreview = "Say hi!";
+  if (chat.lastMessage) {
+    const text = chat.lastMessage.content || chat.lastMessage.text || "";
+    const hasAttachments =
+      chat.lastMessage.attachments?.length > 0;
 
-        const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+    if (text.length > 0) {
+      lastMessagePreview = text.split(/\s+/).slice(0, 10).join(" ");
+      if (hasAttachments) lastMessagePreview += " 📎";
+    } else if (hasAttachments) {
+      lastMessagePreview = "📎 Attachment";
+    }
+  }
 
-        if (text && text.length > 0) {
-          const preview = text.split(/\s+/).slice(0, 8).join(" ");
-          lastMessageText = hasAttachments ? `${preview} 📎` : preview;
-        } else if (hasAttachments) {
-          const att = msg.attachments[0];
-          let filename = att.fileName || att.file_name || att.filename || "";
-          if (!filename && att.fileUrl) {
-            try {
-              filename = path.basename(new URL(att.fileUrl).pathname);
-            } catch (e) {
-              filename = path.basename(att.fileUrl || "");
-            }
-          }
+  // UNREAD COUNT
+  const unread =
+    chat.unreadCount?.[userId] ??
+    chat.unreadCount ??
+    0;
 
-          filename = filename.replace(/^[\d\-:.]+_/, "");
-          lastMessageText = filename || "Attachment";
-        }
-      }
+  return {
+    chatId: chat._id,
+    isGroupChat: isGroup,
 
-      return {
-        chatId: chat._id,
-        participants: chat.participants,
-        lastMessage: lastMessageText || "Say hi!",
-        timestamp: chat.updatedAt || chat.timestamp,
-        unreadCount: unread,
-        otherUser: {
-          id: otherUser?._id ? String(otherUser._id) : null,
-          username: otherUser?.name || otherUser?.email || null,
-          email: otherUser?.email || null,
-          avatar: otherUser?.avatar || null,
-          isOnline: !!otherUser?.isOnline,
-        },
-      };
-    });
-    
+    // ⬇️ ALWAYS return the same fields
+    name: isGroup
+      ? chat.chatName || "Unnamed Group"
+      : otherUser?.name || otherUser?.email,
+
+    avatar: isGroup ? chat.groupImage || null : otherUser?.avatar,
+
+    otherUser: !isGroup ? {
+      id: otherUser?._id,
+      name: otherUser?.name,
+      avatar: otherUser?.avatar
+    } : null,
+
+    groupInfo: isGroup ? {
+      name: chat.chatName,
+      image: chat.groupImage || null,
+      members: chat.participants.map((p) => ({
+        id: p._id,
+        name: p.name,
+        avatar: p.avatar
+      }))
+    } : null,
+
+    lastMessage: lastMessagePreview,
+    timestamp: chat.updatedAt,
+    unreadCount: unread,
+  };
+});
+
+
+    console.log("Formatted Recent Chats:", formattedChats);
     res.status(200).json(formattedChats);
   } catch (err) {
     console.error(err);

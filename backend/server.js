@@ -216,17 +216,18 @@ io.on("connection", (socket) => {
         return;
       }
 
-      if (chat.isGroupChat) {
-        if (!chat.admins.includes(userId)) {
-          socket.emit("delete chat error", { message: "Only admins can delete group chats" });
-          return;
-        }
-        
-        await Message.deleteMany({ chat: chatId });
-        await Chat.findByIdAndDelete(chatId);
-        
-        socket.to(chatId).emit("chat deleted", { chatId, deletedBy: userId });
-      } else {
+     if (chat.isGroupChat) {
+  chat.participants.forEach((user) => {
+    const userId = String(user._id || user);   // normalize ID
+    const senderIdStr = String(senderId);
+
+    // Do NOT send message back to sender
+    if (userId !== senderIdStr) {
+      io.to(userId).emit("groupMessage", msg);
+    }
+  });
+}
+else {
         if (!chat.users.includes(userId)) {
           socket.emit("delete chat error", { message: "Not authorized to delete this chat" });
           return;

@@ -67,35 +67,10 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
           </div>
 
           <div className="flex items-center gap-2 min-w-0 mt-1">
-            {hasAttachment && (
-              <div className="flex-shrink-0">
-                {(() => {
-                  if (
-                    attachmentMime.startsWith("image/") ||
-                    /\.(png|jpe?g|gif|webp|bmp)$/i.test(previewText)
-                  ) {
-                    return <Image className={`w-4 h-4 ${iconColor}`} />;
-                  }
-                  if (
-                    attachmentMime.startsWith("video/") ||
-                    /\.(mp4|webm|ogg)$/i.test(previewText)
-                  ) {
-                    return <Video className={`w-4 h-4 ${iconColor}`} />;
-                  }
-                  if (attachmentMime.includes("pdf") || /\.pdf$/i.test(previewText)) {
-                    return <FileText className={`w-4 h-4 ${iconColor}`} />;
-                  }
-                  return <File className={`w-4 h-4 ${iconColor}`} />;
-                })()}
-              </div>
-            )}
-            <p
-              className={`text-sm truncate ${
-                effectiveTheme.textSecondary || "text-gray-500"
-              }`}
-            >
-              {previewText || (contact.isTyping ? "Typing..." : "Say hi!")}
-            </p>
+                <p className={`text-sm ${effectiveTheme.textSecondary}`}>
+          {contact.bio || contact.about || "No bio available"}
+        </p>
+            
           </div>
         </div>
       </div>
@@ -114,8 +89,7 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
         </div>
       </div>
 
-      {/* (existing unread bubble — untouched) */}
-      {/* DO NOT REMOVE — YOU SAID DO NOT TOUCH LOGIC */}
+      
       {contact.unreadCount > 0 && (
         <div className="flex-shrink-0 ml-3">
           <div className="w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center font-semibold">

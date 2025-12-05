@@ -11,7 +11,8 @@ import React, {
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from "socket.io-client";
-
+import GroupInfoModal from "./GroupInfoModal";
+import BusinessGroupInfoModal from "./BuisnessGroupInfoModal";
 import { motion, AnimatePresence } from "framer-motion";
 import chatReqIcon from "../assets/Chat-reuest.png";
 import chatAcceptIcon from "../assets/chat-accepted.png";
@@ -74,11 +75,13 @@ import GroupCreation from "./GroupCreation";
 import DateTag from "./DateTag";
 
 
+
 // Memoized Chat Header Component
+
 const ChatHeader = React.memo(
   ({
-    selectedContact,
-    effectiveTheme,
+    selectedContact = {},
+    effectiveTheme = {},
     isMobileView,
     onBackToContacts,
     onToggleChatSearch,
@@ -87,8 +90,8 @@ const ChatHeader = React.memo(
     onChatSearchChange,
     chatSearchRef,
     onCloseChatSearch,
-    pinnedMessages,
-    onShowPinnedMessages,
+    pinnedMessages = {},
+    onShowGroupInfo, // callback from parent
     onBlockUser,
     onUnblockUser,
     onArchiveChat,
@@ -97,52 +100,49 @@ const ChatHeader = React.memo(
     isBlocked,
     isArchived,
   }) => {
-    const [menuOpen, setMenuOpen] = React.useState(false);
-    const menuRef = React.useRef(null);
+    const [menuOpen, setMenuOpen] = useState(false);
+    const menuRef = useRef(null);
 
-    React.useEffect(() => {
+    useEffect(() => {
+  console.log("ChatHeader selectedContact:", selectedContact);
+}, [selectedContact]);
+
+
+    // Close menu when clicked outside
+    useEffect(() => {
       const handler = (e) => {
         if (!menuRef.current) return;
-        if (menuOpen && !menuRef.current.contains(e.target)) {
-          setMenuOpen(false);
-        }
+        if (menuOpen && !menuRef.current.contains(e.target)) setMenuOpen(false);
       };
-      document.addEventListener('mousedown', handler);
-      return () => document.removeEventListener('mousedown', handler);
+      document.addEventListener("mousedown", handler);
+      return () => document.removeEventListener("mousedown", handler);
     }, [menuOpen]);
-    const pinnedCount = Object.values(pinnedMessages || {}).filter(
-      Boolean
-    ).length;
+
+    const pinnedCount = Object.values(pinnedMessages).filter(Boolean).length;
+
+    const generateAvatarFallback = (name) => (name ? name.charAt(0) : "?");
+
     return (
       <div className={`${effectiveTheme.secondary} relative`}>
         <div className="p-4 flex items-center justify-between">
+          {/* Left: Back + Avatar + Name */}
           <div className="flex items-center space-x-3">
             {isMobileView && (
-              <button
-                onClick={onBackToContacts}
-                className={`${effectiveTheme.text} hover:${effectiveTheme.accent} p-1 rounded`}
-              >
+              <button onClick={onBackToContacts} className={`${effectiveTheme.text} hover:${effectiveTheme.accent} p-1 rounded`}>
                 ←
               </button>
             )}
 
+            {/* Avatar */}
             <div className="relative">
               {selectedContact.isDocument ? (
-                <div
-                  className={`w-10 h-10 rounded-full ${effectiveTheme.accent} flex items-center justify-center`}
-                >
+                <div className={`w-10 h-10 rounded-full ${effectiveTheme.accent} flex items-center justify-center`}>
                   <FileText className="w-5 h-5 text-white" />
                 </div>
               ) : selectedContact.avatar ? (
-                <img
-                  src={selectedContact.avatar}
-                  alt={selectedContact.name}
-                  className="w-10 h-10 rounded-full object-cover"
-                />
+                <img src={selectedContact.avatar} alt={selectedContact.name} className="w-10 h-10 rounded-full object-cover" />
               ) : (
-                <div
-                  className={`w-10 h-10 rounded-full ${effectiveTheme.accent} flex items-center justify-center text-white font-semibold`}
-                >
+                <div className={`w-10 h-10 rounded-full ${effectiveTheme.accent} flex items-center justify-center text-white font-semibold`}>
                   {generateAvatarFallback(selectedContact.name)}
                 </div>
               )}
@@ -152,20 +152,38 @@ const ChatHeader = React.memo(
               )}
             </div>
 
+            {/* Name + Description */}
             <div>
-              <h2 className={`font-semibold ${effectiveTheme.text}`}>
-                {selectedContact.name}
-              </h2>
-              <p className={`text-sm ${effectiveTheme.textSecondary}`}>
-                {selectedContact.isTyping
-                  ? "typing..."
-                  : selectedContact.isOnline && !selectedContact.isDocument
+              <h2 className={`font-semibold ${effectiveTheme.text}`}>{selectedContact.name}</h2>
+
+              {selectedContact?.isGroup ? (
+               <button
+  onClick={() =>  {
+    console.log("Clicked group info button", selectedContact);
+    onShowGroupInfo && onShowGroupInfo(selectedContact);
+  }}
+
+  className={`text-sm ${effectiveTheme.textSecondary}`}
+  aria-label="Open group info"
+>
+  {selectedContact?.participants?.length 
+    ? `${selectedContact.participants.length} members`
+    : "Group info"}
+</button>
+
+              ) : (
+                <p className={`text-sm ${effectiveTheme.textSecondary}`}>
+                  {selectedContact.isTyping
+                    ? "typing..."
+                    : selectedContact.isOnline && !selectedContact.isDocument
                     ? "Online"
                     : "Offline"}
-              </p>
+                </p>
+              )}
             </div>
           </div>
 
+          {/* Right: Search + Menu */}
           <div className="flex items-center space-x-2">
             <div className="relative">
               <Search
@@ -173,16 +191,13 @@ const ChatHeader = React.memo(
                 onClick={onToggleChatSearch}
               />
 
-              {/* Search bar */}
               {showChatSearch && (
                 <div
                   ref={chatSearchRef}
                   className={`absolute top-8 right-0 w-80 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50`}
                 >
                   <div className="flex items-center space-x-2">
-                    <Search
-                      className={`h-4 w-4 ${effectiveTheme.textSecondary}`}
-                    />
+                    <Search className={`h-4 w-4 ${effectiveTheme.textSecondary}`} />
                     <input
                       type="text"
                       placeholder="Search messages..."
@@ -193,60 +208,93 @@ const ChatHeader = React.memo(
                     />
                     <X
                       className={`h-4 w-4 ${effectiveTheme.textSecondary} cursor-pointer hover:${effectiveTheme.text} transition-opacity`}
-                      onClick={() => {
-                        onCloseChatSearch();
-                      }}
+                      onClick={onCloseChatSearch}
                     />
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="relative ml-0" ref={menuRef}>
-              <button aria-label="Open chat menu" className={`p-2 rounded ${effectiveTheme.hover} ${effectiveTheme.text}`} onClick={(e)=>{e.stopPropagation(); setMenuOpen(s=>!s)}}>
+            {/* Menu */}
+            <div className="relative" ref={menuRef}>
+              <button
+                aria-label="Open chat menu"
+                className={`p-2 rounded ${effectiveTheme.hover} ${effectiveTheme.text}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen((s) => !s);
+                }}
+              >
                 <MoreVertical className={`w-5 h-5 ${effectiveTheme.text}`} />
               </button>
+
               {menuOpen && (
                 <div className={`absolute right-0 top-10 w-44 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded shadow-lg z-50`}>
                   <ul className="divide-y">
                     <li>
                       {!isBlocked ? (
-                        <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onBlockUser && onBlockUser(selectedContact); setMenuOpen(false); }}>
+                        <button
+                          className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`}
+                          onClick={() => {
+                            onBlockUser && onBlockUser(selectedContact);
+                            setMenuOpen(false);
+                          }}
+                        >
                           <UserMinus className="w-4 h-4 opacity-80" />
                           <span>Block User</span>
                         </button>
                       ) : (
-                        <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onUnblockUser && onUnblockUser(selectedContact); setMenuOpen(false); }}>
+                        <button
+                          className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`}
+                          onClick={() => {
+                            onUnblockUser && onUnblockUser(selectedContact);
+                            setMenuOpen(false);
+                          }}
+                        >
                           <UserPlus className="w-4 h-4 opacity-80" />
                           <span>Unblock User</span>
                         </button>
                       )}
                     </li>
+
                     <li>
                       {!isArchived ? (
-                        <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onArchiveChat && onArchiveChat(selectedContact); setMenuOpen(false); }}>
+                        <button
+                          className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`}
+                          onClick={() => {
+                            onArchiveChat && onArchiveChat(selectedContact);
+                            setMenuOpen(false);
+                          }}
+                        >
                           <Archive className="w-4 h-4 opacity-80" />
                           <span>Archive Chat</span>
                         </button>
                       ) : (
-                        <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ onUnarchiveChat && onUnarchiveChat(selectedContact); setMenuOpen(false); }}>
+                        <button
+                          className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`}
+                          onClick={() => {
+                            onUnarchiveChat && onUnarchiveChat(selectedContact);
+                            setMenuOpen(false);
+                          }}
+                        >
                           <Archive className="w-4 h-4 opacity-80" />
                           <span>Unarchive Chat</span>
                         </button>
                       )}
                     </li>
-                    {/* <li>
-                          <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ navigator.clipboard?.writeText(selectedContact?.id || ''); setMenuOpen(false); }}>
-                            <Copy className="w-4 h-4 opacity-80" />
-                            <span>Copy Chat ID</span>
-                          </button>
-                    </li> */}
-                        <li>
-                          <button className={`w-full text-left px-4 py-3 flex items-center gap-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900 ${effectiveTheme.text}`} onClick={()=>{ if(window.confirm('Delete this chat? This will remove the chat for everyone if you are allowed. Continue?')){ onDeleteChat && onDeleteChat(selectedContact); } setMenuOpen(false); }}>
-                            <Trash2 className="w-4 h-4 opacity-90" />
-                            <span>Delete Chat</span>
-                          </button>
-                        </li>
+
+                    <li>
+                      <button
+                        className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${effectiveTheme.text}`}
+                        onClick={() => {
+                          navigator.clipboard?.writeText(selectedContact?.id || "");
+                          setMenuOpen(false);
+                        }}
+                      >
+                        <Copy className="w-4 h-4 opacity-80" />
+                        <span>Copy Chat ID</span>
+                      </button>
+                    </li>
                   </ul>
                 </div>
               )}
@@ -256,19 +304,14 @@ const ChatHeader = React.memo(
       </div>
     );
   },
-  (prevProps, nextProps) => {
-    return (
-      prevProps.selectedContact?.id === nextProps.selectedContact?.id &&
-      prevProps.selectedContact?.isTyping ===
-        nextProps.selectedContact?.isTyping &&
-      prevProps.showChatSearch === nextProps.showChatSearch &&
-      prevProps.chatSearchTerm === nextProps.chatSearchTerm &&
-      JSON.stringify(prevProps.pinnedMessages) ===
-        JSON.stringify(nextProps.pinnedMessages) &&
-      prevProps.isBlocked === nextProps.isBlocked &&
-      prevProps.isArchived === nextProps.isArchived
-    );
-  }
+  (prevProps, nextProps) =>
+    prevProps.selectedContact?.id === nextProps.selectedContact?.id &&
+    prevProps.selectedContact?.isTyping === nextProps.selectedContact?.isTyping &&
+    prevProps.showChatSearch === nextProps.showChatSearch &&
+    prevProps.chatSearchTerm === nextProps.chatSearchTerm &&
+    JSON.stringify(prevProps.pinnedMessages) === JSON.stringify(nextProps.pinnedMessages) &&
+    prevProps.isBlocked === nextProps.isBlocked &&
+    prevProps.isArchived === nextProps.isArchived
 );
 
 // MessageBubble component definition
@@ -1145,6 +1188,21 @@ const togglePin = async (docId, isPinnedNow) => {
   const threeDotsMenuRef = useRef(null);
   const floatingMenuRef = useRef(null);
   const userMenuRef = useRef(null);
+
+  //Group chat handling functions
+ 
+// update group
+ const handleUpdateGroup = (updatedGroup) => {
+    setChats(prev => prev.map(c => c.id === updatedGroup.id ? updatedGroup : c));
+    setCurrentGroup(updatedGroup);
+  };
+
+// delete group
+const handleDeleteGroup = (groupId) => {
+  setChats(prev => prev.filter(c => c.id !== groupId));
+  handleCloseGroupInfo();
+};
+
   // API Base URL from environment variable
   const API_BASE_URL =
     import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
@@ -1477,70 +1535,6 @@ const togglePin = async (docId, isPinnedNow) => {
   };
 
   
-  
-
-  // Fetch both received and accepted requests
-  // useEffect(() => {
-  //   const fetchRequests = async () => {
-  //     try {
-  //       const token = localStorage.getItem("token");
-  //       if (!token) {
-  //         console.error("No token found — user might not be logged in.");
-  //         return;
-  //       }
-
-  //       // 1️⃣ Fetch received chat requests
-  //       const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
-  //         headers: { Authorization: `Bearer ${token}` },
-  //       });
-  //       const receivedData = await resReceived.json();
-  //       console.log("Received Emails:", receivedData);
-  //       const receivedEmails = Array.isArray(receivedData) ? receivedData : [];
-
-  //       // 2️⃣ Fetch accepted chat requests
-  //       const resAccepted = await fetch(
-  //         `${API_BASE_URL}/api/user/requests/accepted`,
-  //         {
-  //           headers: { Authorization: `Bearer ${token}` },
-  //         }
-  //       );
-  //       const acceptedData = await resAccepted.json();
-  //       const acceptedEmails = Array.isArray(acceptedData) ? acceptedData : [];
-
-  //       // 3️⃣ Helper: fetch user profiles by email
-  //       const fetchUsersByEmails = async (emails) => {
-  //         if (!Array.isArray(emails) || emails.length === 0) return [];
-  //         const results = await Promise.all(
-  //           emails.map(async (email) => {
-  //             const res = await fetch(
-  //               `${API_BASE_URL}/api/user?search=${email}`,
-  //               {
-  //                 headers: { Authorization: `Bearer ${token}` },
-  //               }
-  //             );
-  //             const data = await res.json();
-  //             return Array.isArray(data) ? data[0] : data; // handle array response
-  //           })
-  //         );
-  //         return results.filter(Boolean);
-  //       };
-
-  //       // 4️⃣ Fetch both user lists
-  //       const [receivedUsers, acceptedUsers] = await Promise.all([
-  //         fetchUsersByEmails(receivedEmails),
-  //         fetchUsersByEmails(acceptedEmails),
-  //       ]);
-
-  //       // 5️⃣ Update states
-  //       setReceivedChats(receivedUsers);
-  //       setAcceptedChats(acceptedUsers);
-  //     } catch (err) {
-  //       console.error("Error fetching chat requests:", err);
-  //     }
-  //   };
-
-  //   fetchRequests();
-  // }, []);
   useEffect(() => {
   let mounted = true;
 
@@ -1780,7 +1774,7 @@ const togglePin = async (docId, isPinnedNow) => {
   };
 
   //handle on clicking accept button
-  // ✅ Accept Chat Request
+  //  Accept Chat Request
   const fetchAcceptedChats = async () => {
   try {
     const token = localStorage.getItem("token");
@@ -1887,10 +1881,7 @@ useEffect(() => {
 
 
 
-  // ✅ Run once when the component mounts (and on mobile view change if needed)
-  // useEffect(() => {
-  //   fetchAcceptedChats();
-  // }, [isMobileView]);
+
 
   // Fetch contacts from APi
   const handleContactSelect = useCallback(
@@ -2378,92 +2369,89 @@ const handleSendMessageFromInput = useCallback(
 );
 
   // Initialize socket connection once
-  useEffect(() => {
-    const initSocket = () => {
-      try {
-        const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
-        socketRef.current = io(API_BASE_URL, {
-          transports: ['websocket'],
-          withCredentials: true,
-        });
+useEffect(() => {
+  const initSocket = () => {
+    try {
+      const userData = JSON.parse(
+        localStorage.getItem("chasmos_user_data") || "{}"
+      );
 
-        socketRef.current.on('connect', () => {
-          socketRef.current.emit('setup', userData);
-          setSocketConnected(true);
-        });
+      socketRef.current = io(API_BASE_URL, {
+        transports: ["websocket"],
+        withCredentials: true,
+      });
 
-        socketRef.current.on('connected', () => setSocketConnected(true));
+      socketRef.current.on("connect", () => {
+        socketRef.current.emit("setup", userData);
+        setSocketConnected(true);
+      });
 
-        socketRef.current.on('message recieved', (newMessage) => {
-          try {
-            const chatId = newMessage.chat?._id || newMessage.chat;
-            const senderId = newMessage.sender?._id || newMessage.sender;
-            const key = chatId || senderId;
+      //-----------------------------------------
+      // DM event from backend
+      //-----------------------------------------
+      socketRef.current.on("messageReceived", (msg) => {
+        handleIncomingMessage(msg);
+      });
 
-            const attachments = Array.isArray(newMessage.attachments) ? newMessage.attachments : [];
+      //-----------------------------------------
+      // Group event from backend
+      //-----------------------------------------
+      socketRef.current.on("groupMessage", (msg) => {
+        handleIncomingMessage(msg);
+      });
 
-            const inferredType = newMessage.type || (attachments.length ? (
-              (attachments[0].mimeType && attachments[0].mimeType.startsWith('image/')) ? 'image' :
-              (attachments[0].mimeType && attachments[0].mimeType.startsWith('video/')) ? 'video' : 'file'
-            ) : 'text');
+    } catch (err) {
+      console.error("Socket init error:", err);
+    }
+  };
 
-            const formatted = {
-              id: newMessage._id || newMessage.id || Date.now(),
-              type: inferredType,
-              content: newMessage.content || newMessage.text || '',
-              sender: newMessage.sender?._id || newMessage.sender,
-              timestamp: new Date(newMessage.createdAt || Date.now()).getTime(),
-              isRead: false,
-              attachments: attachments,
-            };
+  initSocket();
+  return () => socketRef.current?.disconnect();
+}, [API_BASE_URL]);
 
-            setMessages((prev) => ({
-              ...prev,
-              [key]: [...(prev[key] || []), formatted],
-            }));
+const handleIncomingMessage = (newMessage) => {
+  try {
+    const chatId = newMessage.chat?._id || newMessage.chat;
 
-            // update recentChats/unread when not currently selected
-            const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
-            const hasAttachment = Boolean(formatted.attachments && formatted.attachments.length);
-            updateRecentChat(key, preview, hasAttachment, {
-              attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
-              attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
-            });
-            // increment unread count
-            setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
+    const formatted = {
+      id: newMessage._id || Date.now(),
+      type: newMessage.type || "text",
+      content: newMessage.content || "",
+      sender: newMessage.sender?._id || newMessage.sender,
+      timestamp: new Date(newMessage.createdAt || Date.now()).getTime(),
+      attachments: newMessage.attachments || [],
+      isRead: false,
+    };
 
-            // keep contact sidebar in sync (attachment flag + filename/mime)
-            updateContactPreview(key, preview, hasAttachment, {
-              attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
-              attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
-            });
+    // Add to messages list
+    setMessages((prev) => ({
+      ...prev,
+      [chatId]: [...(prev[chatId] || []), formatted],
+    }));
 
-            // keep contact sidebar in sync (attachment flag + filename/mime)
-            try {
-              updateContactPreview && updateContactPreview(key, preview, Boolean(formatted.attachments && formatted.attachments.length), {
-                attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
-                attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
-              });
-            } catch (e) {
-              // ignore if updateContactPreview not available
-            }
-          } catch (err) {
-            console.error('Error processing incoming socket message', err);
-          }
-        });
-      } catch (err) {
-        console.error('Socket init error', err);
+    // Update recent chat
+    setRecentChats((prev) => {
+      const exists = prev.find(
+        (c) => c.chatId === chatId || c.id === chatId
+      );
+      if (exists) {
+        return prev.map((c) =>
+          c.chatId === chatId || c.id === chatId
+            ? {
+                ...c,
+                lastMessage: formatted.content || "Attachment",
+                unreadCount: (c.unreadCount || 0) + 1,
+              }
+            : c
+        );
       }
-    };
+      return prev;
+    });
+  } catch (err) {
+    console.error("Error handling incoming message:", err);
+  }
+};
 
-    initSocket();
-
-    return () => {
-      try {
-        if (socketRef.current) socketRef.current.disconnect();
-      } catch (err) {}
-    };
-  }, [API_BASE_URL]);
 
   const handleBackToContacts = useCallback(() => {
     if (isMobileView) {
@@ -2581,6 +2569,22 @@ const handleSendMessageFromInput = useCallback(
     setShowFloatingMenu(false);
   }, []);
 
+  const [showGroupInfoModal, setShowGroupInfoModal] = React.useState(false);
+const [currentGroup, setCurrentGroup] = React.useState(null);
+
+const handleOpenGroupInfo = (group) => {
+  console.log("Opening group info for:", group);
+  setCurrentGroup(group);
+  setShowGroupInfoModal(true);
+};
+
+
+const handleCloseGroupInfo = () => {
+  setCurrentGroup(null);
+  setShowGroupInfoModal(false);
+};
+
+
    const handleCreateGroup = useCallback(() => {
       setShowGroupCreation(true);
       setShowFloatingMenu(false);
@@ -2610,13 +2614,46 @@ const handleSendMessageFromInput = useCallback(
     setShowNewChat(false);
   }, []);
 
-  const handleCreateGroupComplete = useCallback((newGroup) => {
-    // Add the new group to contacts
-    setContacts((prev) => [newGroup, ...prev]);
-    setShowGroupCreation(false);
-    // Optionally select the new group
-    setSelectedContact(newGroup);
-  }, []);
+  const [chats, setChats] = React.useState([]);
+
+
+// Load chats from localStorage on mount
+React.useEffect(() => {
+  const saved = localStorage.getItem("chats");
+  if (saved) setChats(JSON.parse(saved));
+}, []);
+
+
+// const handleCreateGroupComplete = useCallback((newGroup) => {
+//   // 1. Add to recents / chats list
+//   setChats((prev) => {
+//     const updated = [newGroup, ...prev];
+
+//     // 2. Save to localStorage for persistence
+//     localStorage.setItem("chats", JSON.stringify(updated));
+
+//     return updated;
+//   });
+
+//   // 3. Close modal
+//   setShowGroupCreation(false);
+
+//   // 4. Select/open the new chat
+//   setSelectedContact(newGroup);
+
+// }, []);
+
+const handleCreateGroupComplete = React.useCallback((newGroup) => {
+  setChats(prev => {
+    const updated = [newGroup, ...prev];
+    localStorage.setItem("chats", JSON.stringify(updated));
+    return updated;
+  });
+
+  setShowGroupCreation(false);
+  setSelectedContact(newGroup);
+}, []);
+
 
   const handleStartNewChat = useCallback(
     (contact) => {
@@ -2742,65 +2779,19 @@ const handleSendMessageFromInput = useCallback(
         const loggedInUserId = localUser._id || localUser.id || null;
 
         const formatted = (Array.isArray(data) ? data : []).map((chat) => {
-          const otherUser =
-            chat.otherUser ||
-            (chat.participants &&
-              chat.participants.find(
-                (p) => String(p._id) !== String(loggedInUserId)
-              )) ||
-            (Array.isArray(chat.participants) ? chat.participants[0] : null);
+  return {
+    chatId: chat.chatId,
+    id: chat.otherUser?.id || chat.chatId,   // group chat uses chatId
+    name: chat.name,
+    avatar: chat.avatar,
+    lastMessage: chat.lastMessage,
+    timestamp: chat.timestamp,
+    unreadCount: chat.unreadCount || 0,
+    isGroupChat: chat.isGroupChat,
+    groupInfo: chat.groupInfo || null,
+  };
+});
 
-          const otherId = otherUser?._id || otherUser?.id || null;
-          const displayName =
-  otherUser?.name ||
-  otherUser?.username ||
-  (otherUser?.email ? otherUser.email.split("@")[0] : null) ||
-  "Unknown";
-
-
-          // Determine if lastMessage indicates attachments and extract preview text
-          let preview = "";
-          let hasAttachment = false;
-          let attachmentMime = null;
-
-          if (chat.lastMessage) {
-            if (typeof chat.lastMessage === "string") {
-              // backend may append a paperclip emoji for attachments
-              hasAttachment = chat.lastMessage.includes("📎");
-              preview = chat.lastMessage.replace(/📎/g, "").trim();
-            } else if (typeof chat.lastMessage === "object") {
-              const lm = chat.lastMessage;
-              const text = (lm.content || lm.text || "").toString().trim();
-              const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
-              hasAttachment = atts.length > 0;
-              if (text) {
-                preview = text.split(/\s+/).slice(0, 8).join(" ") + (hasAttachment ? " 📎" : "");
-              } else if (hasAttachment) {
-                const first = atts[0] || {};
-                preview = first.fileName || first.file_name || first.filename || (first.fileUrl ? first.fileUrl.split('/').pop() : "Attachment");
-                // strip paperclip or timestamp if present
-                preview = preview.replace(/^[\d\-:.]+_/, "");
-                attachmentMime = first.mimeType || first.type || null;
-              }
-            }
-          }
-
-          return {
-            id: otherId,
-            chatId: chat.chatId || chat._id,
-            name: displayName,
-            avatar: otherUser?.avatar || otherUser?.pic || null,
-            lastMessage: preview || "",
-            hasAttachment,
-            attachmentMime,
-            timestamp: chat.timestamp || chat.updatedAt,
-            isOnline: otherUser?.isOnline || false,
-            unreadCount:
-              typeof chat.unreadCount === "number"
-                ? chat.unreadCount
-                : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
-          };
-        });
 
         // Filter using archivedChatIds state in case it's already loaded
         if (archivedChatIds && archivedChatIds.size > 0) {
@@ -3791,23 +3782,7 @@ useEffect(() => {
                       transition={{ duration: 0.2 }}
                       className={`absolute ${isMobileView ? "bottom-20 right-6 fixed" : "bottom-20 right-6"} flex flex-col space-y-3 z-30`}
                     >
-                      {/* Create Group */}
-                      {/* <motion.button
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.1 }}
-                        onClick={handleCreateGroup}
-                        className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
-                      >
-                        <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
-                          <Users className="w-5 h-5 text-white" />
-                        </div>
-                        <span
-                          className={`${effectiveTheme.text} font-medium whitespace-nowrap`}
-                        >
-                          Create a group
-                        </span>
-                      </motion.button> */}
+                      
                        <motion.button
                                               initial={{ opacity: 0, x: 20 }}
                                               animate={{ opacity: 1, x: 0 }}
@@ -4053,11 +4028,21 @@ useEffect(() => {
             </div>
           ) : showGroupCreation ? (
             <GroupCreation
-              contacts={contacts}
-              effectiveTheme={effectiveTheme}
-              onClose={handleCloseGroupCreation}
-              onCreateGroup={handleCreateGroupComplete}
-            />
+  effectiveTheme={effectiveTheme}
+  contacts={contacts}
+  onClose={() => setShowGroupCreation(false)}
+  onCreateGroup={(group) => {
+    // USE THE REAL open chat function
+    handleOpenChat(group);
+
+    // Initialize empty messages
+    setMessages((prev) => ({
+      ...prev,
+      [group.chatId]: [],
+    }));
+  }}
+/>
+
           ) : showNewChat ? (
             <NewChat
               existingContacts={[...googleContacts, ...contacts]}
@@ -4103,7 +4088,41 @@ useEffect(() => {
                 onDeleteChat={handleDeleteChat}
                 isBlocked={isBlockedState}
                 isArchived={isArchivedState}
+                onShowGroupInfo={handleOpenGroupInfo} 
+
               />
+          {showGroupInfoModal && currentGroup && (
+  <>
+    {console.log("Rendering modal for:", currentGroup)}
+{showGroupInfoModal && currentGroup && (
+  currentGroup.type === "Business" ? (
+    <BusinessGroupInfoModal
+      open={showGroupInfoModal}
+      group={currentGroup}
+      currentUserId={localStorage.getItem("userId")}
+      onClose={handleCloseGroupInfo}
+      onUpdateGroup={handleUpdateGroup}
+      onDeleteGroup={handleDeleteGroup}
+      effectiveTheme={effectiveTheme}
+    />
+  ) : (
+    <GroupInfoModal
+      open={showGroupInfoModal}
+      group={currentGroup}
+      currentUserId={localStorage.getItem("userId")}
+      onClose={handleCloseGroupInfo}
+      onUpdateGroup={handleUpdateGroup}
+      onDeleteGroup={handleDeleteGroup}
+      effectiveTheme={effectiveTheme}
+    />
+  )
+)}
+  </>
+)}
+
+
+
+
               <div className="flex-1 overflow-hidden relative">
                 {/* Hovered message date (overlay, does not affect layout) */}
                 <div className="absolute top-3 left-1/2 transform -translate-x-1/2 z-40 pointer-events-none">
