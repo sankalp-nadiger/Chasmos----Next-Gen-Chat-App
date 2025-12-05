@@ -8,18 +8,12 @@ export const archiveChat = asyncHandler(async (req, res) => {
   const { chatId } = req.params;
   const userId = req.user._id;
 
-  // Check if chat exists and user is participant
-  const chat = await Chat.findOne({
-    _id: chatId,
-    $or: [
-      { users: { $elemMatch: { $eq: userId } } },
-      { participants: { $elemMatch: { $eq: userId } } }
-    ]
-  });
+  // Check if chat exists (don't restrict by participant - allow archiving even if blocked)
+  const chat = await Chat.findById(chatId);
 
   if (!chat) {
     res.status(404);
-    throw new Error("Chat not found or you are not a participant");
+    throw new Error("Chat not found");
   }
 
   // Add to user's archived chats

@@ -323,25 +323,6 @@ else {
         $addToSet: { blockedUsers: userId }
       });
       
-      const existingChat = await Chat.findOne({
-        isGroupChat: false,
-        $and: [
-          { users: { $elemMatch: { $eq: currentUserId } } },
-          { users: { $elemMatch: { $eq: userId } } }
-        ]
-      });
-
-      if (existingChat) {
-        await User.findByIdAndUpdate(currentUserId, {
-          $addToSet: {
-            archivedChats: {
-              chat: existingChat._id,
-              archivedAt: new Date()
-            }
-          }
-        });
-      }
-      
       socket.to(userId).emit("user blocked you", { blockedBy: currentUserId });
       socket.emit("user blocked", { blockedUserId: userId });
       

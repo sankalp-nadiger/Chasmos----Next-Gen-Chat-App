@@ -73,7 +73,8 @@ import DocumentChatWrapper from "./DocumentChat";
 import Community from "./Community";
 import GroupCreation from "./GroupCreation";
 import DateTag from "./DateTag";
-
+import ForwardMessageModal from "./ForwardMessageModal";
+import PinnedMessagesBar from "./PinnedMessagesBar";
 
 
 // Memoized Chat Header Component
@@ -316,7 +317,7 @@ const ChatHeader = React.memo(
 
 // MessageBubble component definition
 const MessageBubble = React.memo(
-  ({ message, isPinned, onPinToggle, onDeleteMessage, effectiveTheme, currentUserId, onHoverDateChange }) => {
+  ({ message, isPinned, onPinToggle, onDeleteMessage, onForwardMessage, effectiveTheme, currentUserId, onHoverDateChange }) => {
     const sender = message.sender;
     const isOwnMessage = (() => {
       if (!sender) return false;
@@ -330,12 +331,17 @@ const MessageBubble = React.memo(
       onPinToggle(message.id);
     }, [message.id, onPinToggle]);
 
+    const handleForwardClick = useCallback(() => {
+      onForwardMessage(message);
+    }, [message, onForwardMessage]);
+
     const messageText = message.content || '';
     const hasAttachments = message.attachments && message.attachments.length > 0;
     const isShortMessage = messageText.length < 30 && !hasAttachments;
 
     return (
       <motion.div
+        id={`message-${message._id || message.id}`}
         initial={{ opacity: 0, y: 20, scale: 0.8 }}
         animate={{
           opacity: 1,
@@ -418,6 +424,7 @@ const MessageBubble = React.memo(
               isOwnMessage ? "-left-12" : "-right-12"
             } opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 rounded-full bg-white shadow-lg`}
             onClick={handlePinClick}
+            title={isPinned ? "Unpin message" : "Pin message"}
           >
             <Pin
               className={`w-3 h-3 ${
@@ -427,15 +434,46 @@ const MessageBubble = React.memo(
           </motion.button>
 
           {isOwnMessage && (
+            <>
+              <motion.button
+                initial={{ opacity: 0, scale: 0.8 }}
+                whileHover={{ opacity: 1, scale: 1.05 }}
+                className={`absolute -top-2 -left-8 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 rounded-full bg-white shadow-lg text-red-600`}
+                onClick={() => onDeleteMessage && onDeleteMessage(message)}
+                title="Delete message"
+              >
+                <Trash2 className="w-3 h-3" />
+              </motion.button>
+              <motion.button
+                initial={{ opacity: 0, scale: 0.8 }}
+                whileHover={{ opacity: 1, scale: 1.05 }}
+                className={`absolute -top-2 -left-16 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 rounded-full bg-white shadow-lg text-blue-600`}
+                onClick={handleForwardClick}
+                title="Forward message"
+              >
+                <Share2 className="w-3 h-3" />
+              </motion.button>
+            </>
+          )}
+          
+          {!isOwnMessage && (
             <motion.button
               initial={{ opacity: 0, scale: 0.8 }}
               whileHover={{ opacity: 1, scale: 1.05 }}
-              className={`absolute -top-2 ${isOwnMessage ? "-left-8" : "-right-8"} opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 rounded-full bg-white shadow-lg text-red-600`}
-              onClick={() => onDeleteMessage && onDeleteMessage(message)}
-              title="Delete message"
+              className={`absolute -top-2 -right-8 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 rounded-full bg-white shadow-lg text-blue-600`}
+              onClick={handleForwardClick}
+              title="Forward message"
             >
-              <Trash2 className="w-3 h-3" />
+              <Share2 className="w-3 h-3" />
             </motion.button>
+          )}
+
+          {/* Forwarded indicator */}
+          {message.isForwarded && (
+            <div className={`flex items-center space-x-1 mb-2 text-xs ${effectiveTheme.textSecondary} italic`}>
+              <Share2 className="w-3 h-3" />
+              <span>Forwarded</span>
+            </div>
           )}
 
           {hasAttachments ? (
@@ -732,6 +770,7 @@ const MessagesArea = ({
   selectedContactId,
   currentUserId,
   onDeleteMessage,
+  onForwardMessage,
   onHoverDateChange,
 }) => {
   const messagesEndRef = useRef(null);
@@ -875,6 +914,7 @@ const MessagesArea = ({
                   isPinned={pinnedMessages[item.id] || false}
                   onPinToggle={onPinMessage}
                   onDeleteMessage={onDeleteMessage}
+                  onForwardMessage={onForwardMessage}
                   effectiveTheme={effectiveTheme}
                   currentUserId={currentUserId}
                   onHoverDateChange={onHoverDateChange}
@@ -1014,6 +1054,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [showChatSearch, setShowChatSearch] = useState(false);
   const [showThreeDotsMenu, setShowThreeDotsMenu] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState({});
+  const [pinnedMessagesData, setPinnedMessagesData] = useState([]);
 
   const [selectedDocument, setSelectedDocument] = useState(null);
 
@@ -1026,6 +1067,10 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [showProfile, setShowProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [activeNavItem, setActiveNavItem] = useState(activeSection); // 'chats', 'groups', 'documents', 'community', 'profile', 'settings'
+
+  // Forward message state
+  const [showForwardModal, setShowForwardModal] = useState(false);
+  const [messageToForward, setMessageToForward] = useState(null);
 
   // Hovered message date label (single place below header)
   const [hoverDateLabel, setHoverDateLabel] = useState("");
@@ -1053,6 +1098,8 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   }, []);
 
   // Block / Archive UI state
+  const [showBlockConfirmModal, setShowBlockConfirmModal] = useState(false);
+  const [userToBlock, setUserToBlock] = useState(null);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [isBlockedState, setIsBlockedState] = useState(false);
@@ -1148,6 +1195,10 @@ const togglePin = async (docId, isPinnedNow) => {
   }
 };
 
+  
+  // Pin replace modal state
+  const [showPinReplaceModal, setShowPinReplaceModal] = useState(false);
+  const [pendingPinMessageId, setPendingPinMessageId] = useState(null);
 
   // Keep archivedChatIds in sync (reload when archive modal toggles)
   useEffect(() => {
@@ -1345,6 +1396,83 @@ const handleDeleteGroup = (groupId) => {
     }
   };
 
+  // Forward message handlers
+  const handleForwardMessage = useCallback((message) => {
+    setMessageToForward(message);
+    setShowForwardModal(true);
+  }, []);
+
+  const handleForwardToChats = async (selectedChats) => {
+    if (!messageToForward || selectedChats.length === 0) return;
+
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      if (!token) {
+        console.error('No token found');
+        return;
+      }
+
+      // Forward the message to each selected chat
+      for (const chat of selectedChats) {
+        // Prioritize chatId (the actual MongoDB chat document _id) over id (other user's id)
+        const chatId = chat.chatId || chat._id || chat.id;
+        
+        const forwardData = {
+          chatId: chatId,
+          content: messageToForward.content,
+          attachments: messageToForward.attachments || [],
+          type: messageToForward.type || 'text',
+          isForwarded: true,
+        };
+
+        const res = await fetch(`${API_BASE_URL}/api/message/forward`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(forwardData),
+        });
+
+        if (!res.ok) {
+          console.error(`Failed to forward message to ${chat.name || chat.chatName}`);
+          continue;
+        }
+
+        const forwardedMessage = await res.json();
+
+        // Emit socket event for real-time update
+        if (socketRef.current?.emit) {
+          socketRef.current.emit('new message', forwardedMessage);
+        }
+
+        // Update local messages state if the chat is already loaded
+        setMessages((prev) => {
+          const existing = prev[chatId] || [];
+          return {
+            ...prev,
+            [chatId]: [...existing, forwardedMessage],
+          };
+        });
+
+        // Update recent chats preview
+        setRecentChats((prev) =>
+          prev.map((c) =>
+            (String(c.id) === String(chatId) || String(c.chatId) === String(chatId))
+              ? { ...c, lastMessage: forwardedMessage.content || 'Forwarded message', timestamp: Date.now() }
+              : c
+          )
+        );
+      }
+
+      // Show success notification (you can customize this)
+      console.log(`Message forwarded to ${selectedChats.length} chat(s)`);
+      
+    } catch (err) {
+      console.error('Forward message failed', err);
+    }
+  };
+
   // Socket reference
   const socketRef = useRef(null);
   const [socketConnected, setSocketConnected] = useState(false);
@@ -1396,16 +1524,88 @@ const handleDeleteGroup = (groupId) => {
 
   // Handlers for block / archive actions
   const handleBlockUser = async (contact) => {
-    const userId = contact?.userId || contact?._id || contact?.id;
-    if (!userId) return;
+    // Show confirmation modal instead of blocking immediately
+    setUserToBlock(contact);
+    setShowBlockConfirmModal(true);
+  };
+
+  const confirmBlockUser = async () => {
+    if (!userToBlock) return;
+    
+    console.log('🔍 Full userToBlock object:', JSON.stringify(userToBlock, null, 2));
+    
+    // Get current user ID
+    const currentUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+    const currentUserId = currentUser._id || currentUser.id;
+    
+    // Try to get the userId from the contact object
+    let userId = userToBlock?.id;
+    
+    // If id matches chatId or if we have participants array, extract from participants
+    if ((userId === userToBlock?.chatId) || (!userId && userToBlock?.participants)) {
+      // Find the other user from participants array
+      const otherUser = userToBlock.participants?.find(
+        p => String(p._id) !== String(currentUserId)
+      );
+      userId = otherUser?._id;
+      console.log('✅ Extracted userId from participants:', userId);
+    }
+    
+    // Fallback to other fields
+    if (!userId) {
+      userId = userToBlock?.userId || userToBlock?._id;
+    }
+    
+    console.log('🔍 Attempting to block user:', {
+      extractedUserId: userId,
+      contactId: userToBlock?.id,
+      contactChatId: userToBlock?.chatId
+    });
+    
+    // If we still don't have userId and we have a chatId, fetch the chat
+    if (!userId && userToBlock?.chatId) {
+      try {
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        const res = await fetch(`${API_BASE_URL}/api/chat/${userToBlock.chatId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (res.ok) {
+          const chatData = await res.json();
+          const currentUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+          const currentUserId = currentUser._id || currentUser.id;
+          
+          // Find the other user in the chat
+          const otherUser = chatData.users?.find(u => String(u._id) !== String(currentUserId));
+          userId = otherUser?._id;
+          console.log('✅ Found userId from chat:', userId);
+        }
+      } catch (chatErr) {
+        console.error('Failed to fetch chat for user ID:', chatErr);
+      }
+    }
+    
+    if (!userId) {
+      console.error('❌ No valid userId found');
+      alert('Unable to identify user to block');
+      setShowBlockConfirmModal(false);
+      setUserToBlock(null);
+      return;
+    }
+    
     try {
       await blockService.blockUser(userId);
       if (socketRef.current?.emit) socketRef.current.emit('block user', { userId });
       setIsBlockedState(true);
       setShowBlockedModal(true);
+      setShowBlockConfirmModal(false);
+      setUserToBlock(null);
     } catch (err) {
       console.error('Block failed', err);
+      alert(err.message || 'Failed to block user');
       setIsBlockedState(false);
+      setShowBlockConfirmModal(false);
+      setUserToBlock(null);
     }
   };
 
@@ -1422,7 +1622,7 @@ const handleDeleteGroup = (groupId) => {
   };
 
   const handleArchiveChat = async (contact) => {
-    const chatId = contact?.id || contact?._id;
+    const chatId = contact?.chatId || contact?._id || contact?.id;
     if (!chatId) return;
     try {
       await archiveService.archiveChat(chatId);
@@ -1433,6 +1633,18 @@ const handleDeleteGroup = (groupId) => {
         s.add(String(chatId));
         return s;
       });
+      
+      // Remove from recent chats immediately
+      setRecentChats(prev => prev.filter(c => String(c.chatId || c._id) !== String(chatId)));
+      
+      // Clear selection if the archived chat was selected
+      if (selectedContact && (String(selectedContact.chatId) === String(chatId) || String(selectedContact._id) === String(chatId))) {
+        setSelectedContact(null);
+        if (isMobileView) {
+          setShowSidebar(true);
+        }
+      }
+      
       setShowArchiveModal(true);
     } catch (err) {
       console.error('Archive failed', err);
@@ -1440,7 +1652,7 @@ const handleDeleteGroup = (groupId) => {
   };
 
   const handleUnarchiveChat = async (contact) => {
-    const chatId = contact?.id || contact?._id;
+    const chatId = contact?.chatId || contact?.id || contact?._id;
     if (!chatId) return;
     try {
       await archiveService.unarchiveChat(chatId);
@@ -1451,6 +1663,9 @@ const handleDeleteGroup = (groupId) => {
         s.delete(String(chatId));
         return s;
       });
+      
+      // Refresh recent chats to show the unarchived chat
+      await refreshRecentChats();
     } catch (err) {
       console.error('Unarchive failed', err);
     }
@@ -2017,6 +2232,82 @@ useEffect(() => {
       const filtered = formatted.filter(
         (c) => !archivedSet.has(String(c.chatId || c.id || ""))
       );
+  // Fetch pinned messages when chat is selected
+  useEffect(() => {
+    const fetchPinnedMessages = async () => {
+      if (!selectedContact) {
+        setPinnedMessagesData([]);
+        setPinnedMessages({});
+        return;
+      }
+
+      const chatId = selectedContact.id || selectedContact._id;
+      if (!chatId) return;
+
+      try {
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        if (!token) return;
+
+        const res = await fetch(`${API_BASE_URL}/api/message/pinned/${chatId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) {
+          console.error('Failed to fetch pinned messages');
+          return;
+        }
+
+        const data = await res.json();
+        setPinnedMessagesData(data || []);
+
+        // Update pinnedMessages state for UI
+        const pinnedMap = {};
+        (data || []).forEach(pinned => {
+          if (pinned.message) {
+            const msgId = pinned.message._id || pinned.message.id;
+            pinnedMap[msgId] = true;
+          }
+        });
+        setPinnedMessages(pinnedMap);
+
+      } catch (err) {
+        console.error('Error fetching pinned messages:', err);
+      }
+    };
+
+    fetchPinnedMessages();
+  }, [selectedContact, API_BASE_URL]);
+
+  // Function to refresh recent chats (can be called from anywhere)
+  const refreshRecentChats = useCallback(async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) throw new Error("No token found.");
+
+      // Fetch archived chats to exclude them from the recent list
+      let archived = [];
+      let archivedChatIdsSet = new Set();
+      try {
+        archived = await archiveService.getArchivedChats();
+        // Build set of archived chat IDs for filtering
+        archived.forEach(archivedChat => {
+          const chatId = archivedChat._id || archivedChat.id || (archivedChat.chat && archivedChat.chat._id);
+          if (chatId) {
+            archivedChatIdsSet.add(String(chatId));
+          }
+        });
+        setArchivedChatIds(archivedChatIdsSet);
+      } catch (e) {
+        archived = [];
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) throw new Error("Failed to fetch recent chats");
+
+      const data = await res.json();
 
       setRecentChats(filtered);
     } catch (err) {
@@ -2029,6 +2320,21 @@ useEffect(() => {
   fetchRecentChats();
 }, []);
 
+      // Filter out archived chats using the chatId
+      const filtered = formatted.filter(c => {
+        const chatIdToCheck = String(c.chatId || c._id || '');
+        return !archivedChatIdsSet.has(chatIdToCheck);
+      });
+      setRecentChats(filtered);
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [API_BASE_URL]);
+
+  // Fetch recent chats on mount
+  useEffect(() => {
+    refreshRecentChats();
+  }, [refreshRecentChats]);
 
   // Handle responsive design
   useEffect(() => {
@@ -2446,10 +2752,83 @@ useEffect(() => {
         handleIncomingMessage(msg);
       });
 
-    } catch (err) {
-      console.error("Socket init error:", err);
-    }
-  };
+            // update recentChats/unread when not currently selected
+            const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
+            const hasAttachment = Boolean(formatted.attachments && formatted.attachments.length);
+            updateRecentChat(key, preview, hasAttachment, {
+              attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+              attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+            });
+            // increment unread count
+            setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
+
+            // keep contact sidebar in sync (attachment flag + filename/mime)
+            updateContactPreview(key, preview, hasAttachment, {
+              attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+              attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+            });
+
+            // keep contact sidebar in sync (attachment flag + filename/mime)
+            try {
+              updateContactPreview && updateContactPreview(key, preview, Boolean(formatted.attachments && formatted.attachments.length), {
+                attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+                attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+              });
+            } catch (e) {
+              // ignore if updateContactPreview not available
+            }
+          } catch (err) {
+            console.error('Error processing incoming socket message', err);
+          }
+        });
+
+        // Listen for pin/unpin events
+        socketRef.current.on('pin message', ({ chatId, pinnedMessages: updatedPinnedMessages }) => {
+          try {
+            const currentChatId = selectedContact?.id || selectedContact?._id;
+            if (String(chatId) === String(currentChatId)) {
+              setPinnedMessagesData(updatedPinnedMessages || []);
+              
+              // Update pinnedMessages state
+              const pinnedMap = {};
+              (updatedPinnedMessages || []).forEach(pinned => {
+                if (pinned.message) {
+                  const msgId = pinned.message._id || pinned.message.id || pinned.message;
+                  pinnedMap[msgId] = true;
+                }
+              });
+              setPinnedMessages(pinnedMap);
+            }
+          } catch (err) {
+            console.error('Error processing pin message event', err);
+          }
+        });
+
+        socketRef.current.on('unpin message', ({ chatId, pinnedMessages: updatedPinnedMessages }) => {
+          try {
+            const currentChatId = selectedContact?.id || selectedContact?._id;
+            if (String(chatId) === String(currentChatId)) {
+              setPinnedMessagesData(updatedPinnedMessages || []);
+              
+              // Update pinnedMessages state
+              const pinnedMap = {};
+              (updatedPinnedMessages || []).forEach(pinned => {
+                if (pinned.message) {
+                  const msgId = pinned.message._id || pinned.message.id || pinned.message;
+                  pinnedMap[msgId] = true;
+                }
+              });
+              setPinnedMessages(pinnedMap);
+            }
+          } catch (err) {
+            console.error('Error processing unpin message event', err);
+          }
+        });
+
+      } catch (err) {
+        console.error('Socket init error', err);
+      }
+    };
 
   initSocket();
   return () => socketRef.current?.disconnect();
@@ -2498,6 +2877,7 @@ const handleIncomingMessage = (newMessage) => {
   }
 };
 
+  }, [API_BASE_URL, selectedContact]);
 
   const handleBackToContacts = useCallback(() => {
     if (isMobileView) {
@@ -2535,11 +2915,174 @@ const handleIncomingMessage = (newMessage) => {
     setShowThreeDotsMenu(false);
   }, []);
 
-  const handlePinMessage = useCallback((messageId) => {
-    setPinnedMessages((prev) => ({
-      ...prev,
-      [messageId]: !prev[messageId],
-    }));
+  const handlePinMessage = useCallback(async (messageId) => {
+    const chatId = selectedContact?.id || selectedContact?._id;
+    if (!chatId) return;
+
+    const isPinned = pinnedMessages[messageId];
+    
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      if (!token) {
+        console.error('No token found');
+        return;
+      }
+
+      const endpoint = isPinned ? '/api/message/unpin' : '/api/message/pin';
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ messageId, chatId }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        
+        // Check if it's the max pins error
+        if (errorData.message?.includes('Maximum 3 messages')) {
+          setPendingPinMessageId(messageId);
+          setShowPinReplaceModal(true);
+          return;
+        }
+        
+        throw new Error(errorData.message || 'Failed to pin/unpin message');
+      }
+
+      const data = await res.json();
+      
+      // Update local state
+      setPinnedMessages((prev) => ({
+        ...prev,
+        [messageId]: !isPinned,
+      }));
+
+      // Update pinned messages data
+      setPinnedMessagesData(data.pinnedMessages || []);
+
+      // Emit socket event for real-time sync
+      if (socketRef.current?.emit) {
+        socketRef.current.emit(isPinned ? 'unpin message' : 'pin message', {
+          messageId,
+          chatId,
+          pinnedMessages: data.pinnedMessages
+        });
+      }
+
+    } catch (err) {
+      console.error('Pin/unpin message failed', err);
+      alert(err.message || 'Failed to pin/unpin message');
+    }
+  }, [selectedContact, pinnedMessages, API_BASE_URL]);
+
+  const handleUnpinFromBar = useCallback(async (messageId) => {
+    await handlePinMessage(messageId);
+  }, [handlePinMessage]);
+
+  const handleReplaceOldestPin = useCallback(async () => {
+    const chatId = selectedContact?.chatId || selectedContact?._id;
+    if (!chatId || !pendingPinMessageId) return;
+
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      if (!token) {
+        console.error('No token found');
+        return;
+      }
+
+      // Find the oldest pinned message
+      const oldestPinned = pinnedMessagesData.sort((a, b) => 
+        new Date(a.pinnedAt) - new Date(b.pinnedAt)
+      )[0];
+
+      if (!oldestPinned || !oldestPinned.message) {
+        throw new Error('Could not find oldest pinned message');
+      }
+
+      const oldestMessageId = oldestPinned.message._id || oldestPinned.message.id;
+
+      // First, unpin the oldest message
+      const unpinRes = await fetch(`${API_BASE_URL}/api/message/unpin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ messageId: oldestMessageId, chatId }),
+      });
+
+      if (!unpinRes.ok) {
+        throw new Error('Failed to unpin oldest message');
+      }
+
+      // Then, pin the new message
+      const pinRes = await fetch(`${API_BASE_URL}/api/message/pin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ messageId: pendingPinMessageId, chatId }),
+      });
+
+      if (!pinRes.ok) {
+        throw new Error('Failed to pin new message');
+      }
+
+      const data = await pinRes.json();
+
+      // Update local state
+      setPinnedMessages((prev) => ({
+        ...prev,
+        [oldestMessageId]: false,
+        [pendingPinMessageId]: true,
+      }));
+
+      // Update pinned messages data
+      setPinnedMessagesData(data.pinnedMessages || []);
+
+      // Emit socket events for real-time sync
+      if (socketRef.current?.emit) {
+        socketRef.current.emit('unpin message', {
+          messageId: oldestMessageId,
+          chatId,
+          pinnedMessages: data.pinnedMessages
+        });
+        socketRef.current.emit('pin message', {
+          messageId: pendingPinMessageId,
+          chatId,
+          pinnedMessages: data.pinnedMessages
+        });
+      }
+
+      // Close modal and reset state
+      setShowPinReplaceModal(false);
+      setPendingPinMessageId(null);
+
+    } catch (err) {
+      console.error('Replace pin failed', err);
+      alert(err.message || 'Failed to replace pinned message');
+      setShowPinReplaceModal(false);
+      setPendingPinMessageId(null);
+    }
+  }, [selectedContact, pendingPinMessageId, pinnedMessagesData, API_BASE_URL]);
+
+  const handleNavigateToPinnedMessage = useCallback((message) => {
+    // Scroll to the message in the chat
+    const messageId = message._id || message.id;
+    const messageElement = document.getElementById(`message-${messageId}`);
+    
+    if (messageElement) {
+      messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // Highlight the message briefly
+      messageElement.classList.add('highlight-message');
+      setTimeout(() => {
+        messageElement.classList.remove('highlight-message');
+      }, 2000);
+    }
   }, []);
 
   // Time-based cosmic overlay system
@@ -2719,7 +3262,7 @@ const handleCreateGroupComplete = React.useCallback((newGroup) => {
 
   // Ref for chat search container (click-outside functionality)
 
-  // Fetch contacts from APi
+  // Fetch contacts from Api
 
   const [documentChats, setDocumentChats] = useState([]);
   // Filter accepted chats to exclude users already present in recentChats
@@ -2727,6 +3270,7 @@ const handleCreateGroupComplete = React.useCallback((newGroup) => {
   if (!Array.isArray(acceptedChats) || acceptedChats.length === 0) return [];
   if (!Array.isArray(recentChats) || recentChats.length === 0) return acceptedChats;
 
+  // Create sets for both emails and IDs for comprehensive filtering
   const recentEmails = new Set(
     recentChats
       .map((r) => r.email || r.otherUser?.email)
@@ -2734,12 +3278,31 @@ const handleCreateGroupComplete = React.useCallback((newGroup) => {
       .map((email) => email.toLowerCase())
   );
 
+  const recentChatIds = new Set(
+    recentChats
+      .map((r) => r.id || r._id || r.chatId)
+      .filter(Boolean)
+      .map((id) => String(id))
+  );
+
+  const recentUserIds = new Set(
+    recentChats
+      .map((r) => r.userId || r.otherUser?._id)
+      .filter(Boolean)
+      .map((id) => String(id))
+  );
+
   return acceptedChats.filter((a) => {
     const email = (a.email || "").toLowerCase();
-    return !recentEmails.has(email);
+    const chatId = String(a.id || a._id || a.chatId || "");
+    const userId = String(a.userId || a._id || "");
+    
+    // Filter out if email, chatId, or userId matches any in recent chats
+    return !recentEmails.has(email) && 
+           !recentChatIds.has(chatId) && 
+           !recentUserIds.has(userId);
   });
 }, [acceptedChats, recentChats]);
-
 
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -2787,8 +3350,6 @@ const handleCreateGroupComplete = React.useCallback((newGroup) => {
 
   // 🔹 Message input state
   const [messageInput, setMessageInput] = useState("");
-
-  // 🔹 Theme object example (you can replace with your real theme)
 
   // 🔹 Function to send message (triggered by Enter key or Send button)
   const handleSendClick = useCallback(() => {
@@ -3032,6 +3593,109 @@ useEffect(() => {
       </style>
 
       {/* Blocked users modal */}
+      {/* Block confirmation modal */}
+      {showBlockConfirmModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => {
+            setShowBlockConfirmModal(false);
+            setUserToBlock(null);
+          }}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            onClick={(e) => e.stopPropagation()}
+            className={`${effectiveTheme.secondary} rounded-lg shadow-2xl w-[90%] max-w-md overflow-hidden`}
+          >
+            {/* Header */}
+            <div className="px-6 py-5">
+              <h2 className={`text-xl font-semibold ${effectiveTheme.text} flex items-center gap-2`}>
+                Block {userToBlock?.name || userToBlock?.chatName || 'User'}
+                ?
+              </h2>
+              <p className={`${effectiveTheme.textSecondary} mt-3 text-sm leading-relaxed`}>
+                This person won't be able to message or call you. They won't know you blocked them.
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3 px-6 py-4 bg-gray-50 dark:bg-gray-800/50">
+              <button
+                onClick={confirmBlockUser}
+                className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Block
+              </button>
+              <button
+                onClick={() => {
+                  setShowBlockConfirmModal(false);
+                  setUserToBlock(null);
+                }}
+                className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-medium rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* Pin Replace Modal */}
+      {showPinReplaceModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => {
+            setShowPinReplaceModal(false);
+            setPendingPinMessageId(null);
+          }}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            onClick={(e) => e.stopPropagation()}
+            className={`${effectiveTheme.secondary} rounded-lg shadow-2xl w-[90%] max-w-md overflow-hidden`}
+          >
+            {/* Header */}
+            <div className="px-6 py-5">
+              <h2 className={`text-xl font-semibold ${effectiveTheme.text}`}>
+                Replace oldest pin?
+              </h2>
+              <p className={`${effectiveTheme.textSecondary} mt-3 text-sm leading-relaxed`}>
+                Your new pin will replace the oldest one.
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3 px-6 py-4 bg-gray-50 dark:bg-gray-800/50">
+              <button
+                onClick={handleReplaceOldestPin}
+                className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Continue
+              </button>
+              <button
+                onClick={() => {
+                  setShowPinReplaceModal(false);
+                  setPendingPinMessageId(null);
+                }}
+                className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-medium rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
       {showBlockedModal && (
         <BlockedUsers
           onClose={() => setShowBlockedModal(false)}
@@ -3045,8 +3709,22 @@ useEffect(() => {
           onClose={() => setShowArchiveModal(false)}
           effectiveTheme={effectiveTheme}
           onOpenChat={handleOpenChatFromArchive}
+          onUnarchive={handleUnarchiveChat}
         />
       )}
+
+      {/* Forward message modal */}
+      <ForwardMessageModal
+        isOpen={showForwardModal}
+        onClose={() => {
+          setShowForwardModal(false);
+          setMessageToForward(null);
+        }}
+        onForward={handleForwardToChats}
+        contacts={recentChats}
+        effectiveTheme={effectiveTheme}
+        currentUserId={currentUserId}
+      />
 
       <div
         className={`fixed inset-0 w-full h-full flex overflow-hidden transition-all duration-1000 ${
@@ -4169,6 +4847,15 @@ useEffect(() => {
 
 
 
+              
+              {/* Pinned Messages Bar */}
+              <PinnedMessagesBar
+                pinnedMessages={pinnedMessagesData}
+                onUnpin={handleUnpinFromBar}
+                onNavigateToMessage={handleNavigateToPinnedMessage}
+                effectiveTheme={effectiveTheme}
+              />
+              
               <div className="flex-1 overflow-hidden relative">
                 {/* Hovered message date (overlay, does not affect layout) */}
                 <div className="absolute top-3 left-1/2 transform -translate-x-1/2 z-40 pointer-events-none">
@@ -4200,7 +4887,8 @@ useEffect(() => {
                   isTyping={isTyping}
                   selectedContactId={selectedContact.id}
                   currentUserId={currentUserId}
-                    onDeleteMessage={handleDeleteMessage}
+                  onDeleteMessage={handleDeleteMessage}
+                  onForwardMessage={handleForwardMessage}
                 />
               </div>
               <MessageInput
