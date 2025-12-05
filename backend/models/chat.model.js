@@ -21,6 +21,13 @@ const chatSchema = new Schema(
       maxMembers: { type: Number, default: 100 }
     },
     
+    // Pinned messages (up to 3 like WhatsApp)
+    pinnedMessages: [{
+      message: { type: Schema.Types.ObjectId, ref: "Message" },
+      pinnedBy: { type: Schema.Types.ObjectId, ref: "User" },
+      pinnedAt: { type: Date, default: Date.now }
+    }],
+    
     // Archive functionality (for group admins)
     isArchived: {
       type: Boolean,

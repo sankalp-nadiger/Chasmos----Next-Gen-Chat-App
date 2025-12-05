@@ -2,6 +2,8 @@ import asyncHandler from "express-async-handler";
 import Chat from "../models/chat.model.js";
 import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
+import Attachment from "../models/attachment.model.js";
+import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
 import path from "path";
 
 export const accessChat = asyncHandler(async (req, res) => {
@@ -10,14 +12,6 @@ export const accessChat = asyncHandler(async (req, res) => {
   if (!userId) {
     console.log("UserId param not sent with request");
     return res.sendStatus(400);
-  }
-
-  const currentUser = await User.findById(req.user._id);
-  const targetUser = await User.findById(userId);
-  
-  if (currentUser.blockedUsers.includes(userId) || targetUser.blockedUsers.includes(req.user._id)) {
-    res.status(403);
-    throw new Error("Cannot access chat with blocked user");
   }
 
   var isChat = await Chat.find({
@@ -444,6 +438,37 @@ export const deleteChat = asyncHandler(async (req, res) => {
       throw new Error("Only admins can delete group chats");
     }
     
+    // Get all messages with attachments
+    const messages = await Message.find({ chat: chatId }).populate('attachments');
+    
+    // Delete all attachments
+    for (const message of messages) {
+      if (message.attachments && message.attachments.length > 0) {
+        for (const attachment of message.attachments) {
+          try {
+            // Extract file path from URL for deletion
+            if (attachment.fileUrl) {
+              const urlParts = attachment.fileUrl.split('/');
+              const bucketIndex = urlParts.findIndex(part => part === 'storage');
+              if (bucketIndex !== -1 && urlParts[bucketIndex + 2]) {
+                const bucket = urlParts[bucketIndex + 2];
+                const filePath = urlParts.slice(bucketIndex + 3).join('/');
+                
+                // Delete file from Supabase storage
+                await deleteFileFromSupabase(filePath, bucket);
+              }
+            }
+            
+            // Delete attachment document from database
+            await Attachment.findByIdAndDelete(attachment._id);
+          } catch (err) {
+            console.error(`Failed to delete attachment ${attachment._id}:`, err.message);
+            // Continue with other attachments even if one fails
+          }
+        }
+      }
+    }
+    
     await Message.deleteMany({ chat: chatId });
     await Chat.findByIdAndDelete(chatId);
     
@@ -455,6 +480,37 @@ export const deleteChat = asyncHandler(async (req, res) => {
     if (!chat.users.includes(userId)) {
       res.status(403);
       throw new Error("Not authorized to delete this chat");
+    }
+
+    // Get all messages with attachments
+    const messages = await Message.find({ chat: chatId }).populate('attachments');
+    
+    // Delete all attachments
+    for (const message of messages) {
+      if (message.attachments && message.attachments.length > 0) {
+        for (const attachment of message.attachments) {
+          try {
+            // Extract file path from URL for deletion
+            if (attachment.fileUrl) {
+              const urlParts = attachment.fileUrl.split('/');
+              const bucketIndex = urlParts.findIndex(part => part === 'storage');
+              if (bucketIndex !== -1 && urlParts[bucketIndex + 2]) {
+                const bucket = urlParts[bucketIndex + 2];
+                const filePath = urlParts.slice(bucketIndex + 3).join('/');
+                
+                // Delete file from Supabase storage
+                await deleteFileFromSupabase(filePath, bucket);
+              }
+            }
+            
+            // Delete attachment document from database
+            await Attachment.findByIdAndDelete(attachment._id);
+          } catch (err) {
+            console.error(`Failed to delete attachment ${attachment._id}:`, err.message);
+            // Continue with other attachments even if one fails
+          }
+        }
+      }
     }
 
     await Message.deleteMany({ chat: chatId });

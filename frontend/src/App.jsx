@@ -93,7 +93,12 @@ const AppContent = () => {
     const hasLoaded = sessionStorage.getItem('app_has_loaded');
     return !hasLoaded;
   });
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    // Initialize from localStorage to prevent redirect on refresh
+    const token = localStorage.getItem('token');
+    const userInfo = localStorage.getItem('userInfo');
+    return !!(token && userInfo);
+  });
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -109,9 +114,9 @@ const AppContent = () => {
 
   // Check for existing authentication on app start
   useEffect(() => {
-    const checkAuthStatus = () => {
-      const authToken = localStorage.getItem('chasmos_auth_token');
-      const userData = localStorage.getItem('chasmos_user_data');
+    if (!isLoading) {
+      const authToken = localStorage.getItem('token');
+      const userData = localStorage.getItem('userInfo');
       
       if (authToken && userData) {
         setIsAuthenticated(true);
@@ -122,26 +127,18 @@ const AppContent = () => {
           navigate('/auth', { replace: true });
         }
       }
-    };
-
-    if (!isLoading) {
-      checkAuthStatus();
     }
-  }, [isLoading, location.pathname, navigate]);
+  }, [isLoading, navigate]);
 
   const handleAuthentication = (success, userData = null) => {
     if (success) {
-      // Store authentication data
-      localStorage.setItem('chasmos_auth_token', 'authenticated');
-      if (userData) {
-        localStorage.setItem('chasmos_user_data', JSON.stringify(userData));
-      }
+      // AuthPage already stores the token and userInfo, just update state
       setIsAuthenticated(true);
       navigate('/chats', { replace: true });
     } else {
       // Clear authentication data
-      localStorage.removeItem('chasmos_auth_token');
-      localStorage.removeItem('chasmos_user_data');
+      localStorage.removeItem('token');
+      localStorage.removeItem('userInfo');
       setIsAuthenticated(false);
       navigate('/auth', { replace: true });
     }

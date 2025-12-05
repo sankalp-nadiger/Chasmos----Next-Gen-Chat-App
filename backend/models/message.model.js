@@ -10,6 +10,7 @@ const messageSchema = new Schema(
     attachments: [{ type: Schema.Types.ObjectId, ref: "Attachment" }],
     deletedFor: [{ type: Schema.Types.ObjectId, ref: "User" }],
     isDeleted: { type: Boolean, default: false },
+    isForwarded: { type: Boolean, default: false },
     
     // New starring feature
     starredBy: [{ 

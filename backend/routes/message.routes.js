@@ -8,12 +8,25 @@ import {
   unstarMessage,
   getStarredMessages,
   addReaction,
-  removeReaction
+  removeReaction,
+  forwardMessage,
+  pinMessage,
+  unpinMessage,
+  getPinnedMessages
 } from "../controllers/message.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
+// Forward route (must be before /:chatId)
+router.route("/forward").post(protect, forwardMessage);
+
+// Pin routes (must be before /:chatId and /:messageId)
+router.route("/pin").post(protect, pinMessage);
+router.route("/unpin").post(protect, unpinMessage);
+router.route("/pinned/:chatId").get(protect, getPinnedMessages);
+
+// General routes
 router.route("/:chatId").get(protect, allMessages);
 router.route("/").post(protect, sendMessage);
 router.route("/:messageId").delete(protect, deleteMessage);
