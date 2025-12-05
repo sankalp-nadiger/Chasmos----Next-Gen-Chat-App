@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useMemo } from "react";
-import { motion } from "framer-motion";
+import {motion} from "framer-motion";
 import { Search, X, Users, ChevronLeft } from "lucide-react";
 import Logo from "./Logo";
 import SelectContact from "./SelectContact";
@@ -186,93 +185,141 @@ const copyInviteLink = async () => {
     if (step === 3) return setStep(2);
   };
 
-  const handleCreateGroup = () => {
+//   const handleCreateGroup = () => {
+//   if (!groupName.trim()) return;
+
+//   const currentUserId = localStorage.getItem("userId") || "me";
+//   const currentUserName = localStorage.getItem("username") || "You";
+
+//   const memberObjects = selectedContacts
+//     .map((id) =>
+//       contacts.find((c) => normalizeId(getContactId(c)) === normalizeId(id))
+//     )
+//     .filter(Boolean)
+//     .map((m) => ({
+//       id: getContactId(m),
+//       name: m.name,
+//       username: m.username || m.email || m.phone || null,
+//       avatar: m.avatar || null,
+//       isGoogleContact: !!m.isGoogleContact,
+//       isAdmin: false,
+//       isCreator: false,
+//     }));
+
+//   // Ensure creator is included and marked admin/creator
+//   const creatorAlreadyIncluded = memberObjects.some(
+//     (m) => normalizeId(m.id) === normalizeId(currentUserId)
+//   );
+
+//   if (!creatorAlreadyIncluded) {
+//     memberObjects.unshift({
+//       id: currentUserId,
+//       name: currentUserName,
+//       username: null,
+//       avatar: null,
+//       isAdmin: true,
+//       isCreator: true,
+//     });
+//   } else {
+//     memberObjects.forEach((m) => {
+//       if (normalizeId(m.id) === normalizeId(currentUserId)) {
+//         m.isCreator = true;
+//         m.isAdmin = true;
+//       }
+//     });
+//   }
+
+//   const newGroup = {
+//   id: `group-${Date.now()}`,
+//   name: groupName.trim(),
+//   description: groupDescription.trim(),
+//   type: groupType,
+//   isGroup: true,
+//   avatar: iconPreview || null,
+//   createdAt: new Date().toISOString(),
+//   members: memberObjects,
+
+//   // CASUAL GROUP SETTINGS
+//   settings: {
+//     allowMultipleAdmins: allowOthersAdmin,
+//     allowMembersAdd: allowMembersAdd,
+//     inviteEnabled: inviteEnabled,
+//     inviteLink: inviteEnabled ? inviteLink : null,
+//     featureMedia,
+//     featureGallery,
+//     featureDocs,
+//     featurePolls,
+//   },
+
+//   // BUSINESS GROUP SETTINGS
+//   businessSettings: groupType === "Business" ? {
+//     // CORE
+//     TaskManagement: coreTask,
+//     SprintManagement: coreSprint,
+//     MeetsCalendar: coreMeets,
+//     CollaborativeDocs: coreDocs,
+//     TaskBasedThreads: coreThreads,
+//     MentionNotifications: coreMentions,
+
+//     // OPTIONAL
+//     BusinessDirectory: optDirectory,
+//     OrganizationProfile: optOrgProfile,
+//     AIAssistance: optAI,
+//   } : null,
+// };
+
+
+//   // push to parent
+//   onCreateGroup?.(newGroup);
+//   onClose?.();
+// };
+const handleCreateGroup = async () => {
   if (!groupName.trim()) return;
 
-  const currentUserId = localStorage.getItem("userId") || "me";
-  const currentUserName = localStorage.getItem("username") || "You";
+  // build list of member IDs
+  const memberIds = selectedContacts.map(id => normalizeId(id));
+  const currentUserId = localStorage.getItem("userId"); // or from context/auth
 
-  const memberObjects = selectedContacts
-    .map((id) =>
-      contacts.find((c) => normalizeId(getContactId(c)) === normalizeId(id))
-    )
-    .filter(Boolean)
-    .map((m) => ({
-      id: getContactId(m),
-      name: m.name,
-      username: m.username || m.email || m.phone || null,
-      avatar: m.avatar || null,
-      isGoogleContact: !!m.isGoogleContact,
-      isAdmin: false,
-      isCreator: false,
-    }));
-
-  // Ensure creator is included and marked admin/creator
-  const creatorAlreadyIncluded = memberObjects.some(
-    (m) => normalizeId(m.id) === normalizeId(currentUserId)
-  );
-
-  if (!creatorAlreadyIncluded) {
-    memberObjects.unshift({
-      id: currentUserId,
-      name: currentUserName,
-      username: null,
-      avatar: null,
-      isAdmin: true,
-      isCreator: true,
-    });
-  } else {
-    memberObjects.forEach((m) => {
-      if (normalizeId(m.id) === normalizeId(currentUserId)) {
-        m.isCreator = true;
-        m.isAdmin = true;
-      }
-    });
+  // ensure current user is included
+  if (!memberIds.includes(currentUserId)) {
+    memberIds.push(currentUserId);
   }
 
-  const newGroup = {
-  id: `group-${Date.now()}`,
-  name: groupName.trim(),
-  description: groupDescription.trim(),
-  type: groupType,
-  isGroup: true,
-  avatar: iconPreview || null,
-  createdAt: new Date().toISOString(),
-  members: memberObjects,
+  // build payload for creating group
+  const payload = {
+    name: groupName.trim(),
+    users: memberIds,
+    admins: [currentUserId],
+    createdBy: currentUserId,
+    description: groupDescription.trim() || "",
+    isPublic: groupType === "Business" ? true : false, // or your logic
+    // you may also pass other group settings if needed
+  };
 
-  // CASUAL GROUP SETTINGS
-  settings: {
-    allowMultipleAdmins: allowOthersAdmin,
-    allowMembersAdd: allowMembersAdd,
-    inviteEnabled: inviteEnabled,
-    inviteLink: inviteEnabled ? inviteLink : null,
-    featureMedia,
-    featureGallery,
-    featureDocs,
-    featurePolls,
-  },
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/chat/group`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("token")}`
+      },
+      body: JSON.stringify(payload)
+    });
 
-  // BUSINESS GROUP SETTINGS
-  businessSettings: groupType === "Business" ? {
-    // CORE
-    TaskManagement: coreTask,
-    SprintManagement: coreSprint,
-    MeetsCalendar: coreMeets,
-    CollaborativeDocs: coreDocs,
-    TaskBasedThreads: coreThreads,
-    MentionNotifications: coreMentions,
+    const json = await res.json();
 
-    // OPTIONAL
-    BusinessDirectory: optDirectory,
-    OrganizationProfile: optOrgProfile,
-    AIAssistance: optAI,
-  } : null,
-};
-
-
-  // push to parent
-  onCreateGroup?.(newGroup);
-  onClose?.();
+    if (!res.ok) {
+      console.error("Failed to create group:", json);
+      alert("Group creation failed: " + json.message);
+    } else {
+      console.log("Group created", json);
+      onCreateGroup?.(json); // pass created group back to parent
+      onClose?.();           // close modal
+    }
+  } catch (e) {
+    console.error("Error creating group:", e);
+    alert("Error creating group");
+  }
 };
 
 // BUSINESS CORE FEATURES (ALL DEFAULT TRUE)
@@ -765,4 +812,4 @@ const FeatureToggle = ({ label, desc, value, setValue }) => (
   );
 };
 
-export default GroupCreation;
+export default GroupCreation; 

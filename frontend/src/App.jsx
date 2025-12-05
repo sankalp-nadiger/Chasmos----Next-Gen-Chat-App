@@ -9,6 +9,7 @@ import AuthPage from "./components/AuthPage.jsx";
 import Profile from "./components/Profile.jsx";
 import Settings from "./components/Settings.jsx";
 import Community from "./components/Community.jsx";
+import GroupCreation from "./components/GroupCreation.jsx";
 
 // OAuth Callback Handler Component
 const OAuthCallback = () => {
@@ -189,9 +190,13 @@ const AppContent = () => {
               <ChattingPage onLogout={handleLogout} activeSection="groups" />
             ) : (
               <Navigate to="/auth" replace />
+          
             )
         } 
+        
       />
+
+
 
       {/* Documents Route */}
       <Route 
@@ -255,6 +260,7 @@ const AppContent = () => {
         path="*" 
         element={<Navigate to="/auth" replace />} 
       />
+      
     </Routes>
   );
 };

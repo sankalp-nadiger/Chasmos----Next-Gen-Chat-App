@@ -162,20 +162,61 @@ export const fetchChats = asyncHandler(async (req, res) => {
   }
 });
 
+// export const createGroupChat = asyncHandler(async (req, res) => {
+//   const { name, users, description, avatar, isPublic } = req.body;
+
+//   if (!users || !name) {
+//     return res.status(400).send({ message: "Please fill all the fields" });
+//   }
+
+//   let parsedUsers = JSON.parse(users);
+
+//   if (parsedUsers.length < 2) {
+//     return res.status(400).send("More than 2 users are required to form a group chat");
+//   }
+
+//   parsedUsers.push(req.user._id);
+
+//   try {
+//     const groupChat = await Chat.create({
+//       chatName: name,
+//       users: parsedUsers,
+//       participants: parsedUsers,
+//       isGroupChat: true,
+//       groupAdmin: req.user._id,
+//       admins: [req.user._id],
+//       groupSettings: {
+//         description: description || "",
+//         avatar: avatar || "",
+//         isPublic: isPublic || false
+//       }
+//     });
+
+//     const fullGroupChat = await Chat.findOne({ _id: groupChat._id })
+//       .populate("users", "-password")
+//       .populate("groupAdmin", "-password")
+//       .populate("admins", "name email avatar");
+
+//     res.status(200).json(fullGroupChat);
+//   } catch (error) {
+//     res.status(400);
+//     throw new Error(error.message);
+//   }
+// });
 export const createGroupChat = asyncHandler(async (req, res) => {
   const { name, users, description, avatar, isPublic } = req.body;
 
-  if (!users || !name) {
-    return res.status(400).send({ message: "Please fill all the fields" });
+  if (!name || !users) {
+    return res.status(400).json({ message: "Please provide group name and users list" });
   }
 
-  let parsedUsers = JSON.parse(users);
+  // users is now an array, not a string
+  let parsedUsers = Array.isArray(users) ? users : [];
 
-  if (parsedUsers.length < 2) {
-    return res.status(400).send("More than 2 users are required to form a group chat");
+  // Ensure current user is added
+  if (!parsedUsers.includes(req.user._id.toString())) {
+    parsedUsers.push(req.user._id);
   }
-
-  parsedUsers.push(req.user._id);
 
   try {
     const groupChat = await Chat.create({
@@ -199,8 +240,7 @@ export const createGroupChat = asyncHandler(async (req, res) => {
 
     res.status(200).json(fullGroupChat);
   } catch (error) {
-    res.status(400);
-    throw new Error(error.message);
+    return res.status(500).json({ message: error.message });
   }
 });
 

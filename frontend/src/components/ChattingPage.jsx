@@ -1903,86 +1903,132 @@ useEffect(() => {
   );
 
   // Fetch recent chats
-  useEffect(() => {
-    const fetchRecentChats = async () => {
+useEffect(() => {
+  const fetchRecentChats = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) throw new Error("No token found.");
+
+      // Fetch archived chats
+      let archived = [];
       try {
-        const token = localStorage.getItem("token");
-        if (!token) throw new Error("No token found.");
-
-        // Fetch archived chats to exclude them from the recent list
-              let archived = [];
-              try {
-                archived = await archiveService.getArchivedChats();
-                setArchivedChatIds(new Set((archived || []).map(c => String(c._id || c.id || (c.chat && c.chat._id) || ''))));
-              } catch (e) {
-                archived = [];
-              }
-
-        const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!res.ok) throw new Error("Failed to fetch recent chats");
-
-        const data = await res.json();
-
-        const localUser = JSON.parse(
-          localStorage.getItem("chasmos_user_data") || "{}"
+        archived = await archiveService.getArchivedChats();
+        setArchivedChatIds(
+          new Set(
+            (archived || []).map(
+              (c) => String(c._id || c.id || (c.chat && c.chat._id) || "")
+            )
+          )
         );
-        const loggedInUserId = localUser._id || localUser.id || null;
-
-        const formatted = (Array.isArray(data) ? data : []).map((chat) => {
-          // Backend may already provide an `otherUser` helper; prefer that.
-          const otherUser =
-            chat.otherUser ||
-            (chat.participants &&
-              chat.participants.find(
-                (p) => String(p._id) !== String(loggedInUserId)
-              )) ||
-            (Array.isArray(chat.participants) ? chat.participants[0] : null);
-
-          const otherId = otherUser?._id || otherUser?.id || null;
-          const displayName =
-            otherUser?.name || otherUser?.username || otherUser?.email || "Unknown";
-
-          // Backend may send a preview string that includes a paperclip emoji when attachments exist
-          const rawLast = chat.lastMessage || "";
-          const hasAttachmentFromMarker = typeof rawLast === 'string' && /📎/.test(rawLast);
-          const looksLikeAttachmentOnly = rawLast === 'Attachment' || rawLast === 'Attachment' || /\.(png|jpe?g|gif|webp|bmp|mp4|pdf)$/i.test(rawLast);
-          const hasAttachment = Boolean(chat.hasAttachment || hasAttachmentFromMarker || looksLikeAttachmentOnly || (chat.lastMessage && chat.lastMessage.attachments && chat.lastMessage.attachments.length));
-          // If backend returned filename (e.g., "doc.pdf"), use it as attachmentFileName
-          const attachmentFileName = hasAttachment && typeof rawLast === 'string' ? (rawLast.replace(/📎/g, '').trim() || '') : '';
-
-          return {
-            id: otherId,
-            chatId: chat.chatId || chat._id,
-            name: displayName,
-            avatar: otherUser?.avatar || otherUser?.pic || null,
-            lastMessage: rawLast || "",
-            timestamp: chat.timestamp || chat.updatedAt,
-            isOnline: otherUser?.isOnline || false,
-            unreadCount:
-              typeof chat.unreadCount === "number"
-                ? chat.unreadCount
-                : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
-            hasAttachment,
-            attachmentFileName,
-          };
-        });
-
-        // Filter out archived chats
-        const archivedSet = new Set((archived || []).map(c => String(c._id || c.id || (c.chat && c.chat._id) || '')));
-        const filtered = formatted.filter(c => !archivedSet.has(String(c.chatId || c.id || '')));
-        setRecentChats(filtered);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+      } catch (e) {
+        archived = [];
       }
-    };
 
-    fetchRecentChats();
-  }, []);
+      const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed to fetch recent chats");
+
+      const data = await res.json();
+      const localUser = JSON.parse(
+        localStorage.getItem("chasmos_user_data") || "{}"
+      );
+      const loggedInUserId = localUser._id || localUser.id || null;
+
+      const formatted = (Array.isArray(data) ? data : []).map((chat) => {
+  const isGroup = chat.isGroupChat;
+
+  let displayName, avatar, groupInfo;
+
+  if (isGroup) {
+  const otherUser =
+    chat.participants?.find(p => String(p._id) !== String(loggedInUserId)) || null;
+
+  // Prefer chatName, fallback to first participant's name
+  displayName =
+    chat.name?.trim() ||
+    otherUser?.name ||
+    otherUser?.username ||
+    "unamed Group";
+
+  avatar =
+    chat.groupSettings?.avatar ||
+    otherUser?.avatar ||
+    null;
+
+  groupInfo = {
+    id: chat._id,
+   name: chat.chatName?.trim() || "Unnamed Group",
+    description: chat.groupSettings?.description || "",
+    members: chat.participants || [],
+    admins: chat.admins || [],
+    avatar,
+    inviteLink: chat.groupSettings?.inviteLink || "",
+  };
+} else {
+  const otherUser =
+    chat.otherUser ||
+    chat.participants?.find(p => String(p._id) !== String(loggedInUserId));
+
+  displayName =
+    otherUser?.name || otherUser?.username || "Unknown";
+
+  avatar = otherUser?.avatar || null;
+}
+
+
+  const rawLast = chat.lastMessage || "";
+  const hasAttachment =
+    (typeof rawLast === "string" && /📎/.test(rawLast)) ||
+    (rawLast?.attachments && rawLast.attachments.length > 0) ||
+    /\.(png|jpe?g|gif|webp|bmp|mp4|pdf)$/i.test(rawLast);
+
+  const attachmentFileName =
+    hasAttachment && typeof rawLast === "string"
+      ? rawLast.replace(/📎/g, "").trim() || ""
+      : "";
+
+  return {
+    id: isGroup ? chat._id : chat.otherUser?._id || chat.participants?.[0]?._id,
+    chatId: chat._id,
+    name: displayName,
+    avatar,
+    lastMessage: rawLast || "",
+    timestamp: chat.updatedAt || chat.createdAt,
+    isOnline: isGroup ? null : chat.otherUser?.isOnline || false,
+    unreadCount:
+      typeof chat.unreadCount === "number"
+        ? chat.unreadCount
+        : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
+    hasAttachment,
+    attachmentFileName,
+    isGroup,
+    groupInfo,
+  };
+});
+
+
+      // Filter out archived chats
+      const archivedSet = new Set(
+        (archived || []).map(
+          (c) => String(c._id || c.id || (c.chat && c.chat._id) || "")
+        )
+      );
+      const filtered = formatted.filter(
+        (c) => !archivedSet.has(String(c.chatId || c.id || ""))
+      );
+
+      setRecentChats(filtered);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchRecentChats();
+}, []);
+
 
   // Handle responsive design
   useEffect(() => {
