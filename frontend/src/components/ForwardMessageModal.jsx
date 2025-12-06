@@ -78,7 +78,7 @@ const ForwardMessageModal = ({
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
             onClick={(e) => e.stopPropagation()}
-            className={`${effectiveTheme.primary} rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden`}
+            className={`${effectiveTheme.primary} rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[80vh]`}
           >
             {/* Header */}
             <div className={`${effectiveTheme.secondary} p-4 flex items-center justify-between border-b ${effectiveTheme.border}`}>
@@ -109,7 +109,7 @@ const ForwardMessageModal = ({
             </div>
 
             {/* Chat List */}
-            <div className="max-h-96 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto min-h-0">
               {filteredContacts.length === 0 ? (
                 <div className={`p-8 text-center ${effectiveTheme.textSecondary}`}>
                   {searchTerm ? 'No chats found' : 'No recent chats'}
@@ -238,7 +238,7 @@ const ForwardMessageModal = ({
             </div>
 
             {/* Footer */}
-            <div className={`p-4 border-t ${effectiveTheme.border} flex items-center justify-between`}>
+            <div className={`${effectiveTheme.primary} p-4 border-t ${effectiveTheme.border} flex items-center justify-between flex-shrink-0`}>
               <span className={`text-sm ${effectiveTheme.textSecondary}`}>
                 {selectedChats.length > 0 
                   ? `${selectedChats.length} chat${selectedChats.length > 1 ? 's' : ''} selected`
@@ -250,7 +250,7 @@ const ForwardMessageModal = ({
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-all ${
                   selectedChats.length > 0
                     ? 'bg-blue-500 text-white hover:bg-blue-600 shadow-lg shadow-blue-500/30'
-                    : 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : `${effectiveTheme.secondary} ${effectiveTheme.textSecondary} cursor-not-allowed opacity-50`
                 }`}
               >
                 <Send className="w-4 h-4" />

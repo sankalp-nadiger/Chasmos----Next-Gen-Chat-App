@@ -409,99 +409,12 @@ const MessageBubble = React.memo(
           }
         }}
         onMouseLeave={() => { /* keep auto-hide timer; do not clear immediately */ }}
-        className={`flex mb-4 items-center gap-2 ${
-          isOwnMessage ? "justify-end flex-row-reverse" : "justify-start"
+        className={`flex mb-4 ${
+          isOwnMessage ? "justify-end" : "justify-start"
         } group relative`}
       >
-        {/* Action buttons for own messages */}
-        {isOwnMessage && !isEditing && (
-          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            {/* Forward button - leftmost */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              className="p-1 rounded-full bg-white shadow-lg text-blue-600"
-              onClick={handleForwardClick}
-              title="Forward message"
-            >
-              <Share2 className="w-3 h-3" />
-            </motion.button>
-
-            {/* Pin button */}
-            <motion.button
-              whileHover={{
-                scale: 1.1,
-                rotate: [0, -10, 10, 0],
-                transition: { duration: 0.4 },
-              }}
-              className="p-1 rounded-full bg-white shadow-lg"
-              onClick={handlePinClick}
-              title={isPinned ? "Unpin message" : "Pin message"}
-            >
-              <Pin
-                className={`w-3 h-3 ${
-                  isPinned ? "text-yellow-400 fill-current" : "text-gray-500"
-                } hover:text-yellow-400 transition-colors`}
-              />
-            </motion.button>
-
-            {/* Delete button */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              className="p-1 rounded-full bg-white shadow-lg text-red-600"
-              onClick={() => onDeleteMessage && onDeleteMessage(message)}
-              title="Delete message"
-            >
-              <Trash2 className="w-3 h-3" />
-            </motion.button>
-
-            {/* Edit button - nearest to message */}
-            {!hasAttachments && message.content && (
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                className="p-1 rounded-full bg-white shadow-lg text-green-600"
-                onClick={handleEditClick}
-                title="Edit message"
-              >
-                <Edit className="w-3 h-3" />
-              </motion.button>
-            )}
-          </div>
-        )}
-
-        {/* Action buttons for received messages */}
-        {!isOwnMessage && (
-          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            {/* Forward button */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              className="p-1 rounded-full bg-white shadow-lg text-blue-600"
-              onClick={handleForwardClick}
-              title="Forward message"
-            >
-              <Share2 className="w-3 h-3" />
-            </motion.button>
-
-            {/* Pin button - rightmost */}
-            <motion.button
-              whileHover={{
-                scale: 1.1,
-                rotate: [0, -10, 10, 0],
-                transition: { duration: 0.4 },
-              }}
-              className="p-1 rounded-full bg-white shadow-lg"
-              onClick={handlePinClick}
-              title={isPinned ? "Unpin message" : "Pin message"}
-            >
-              <Pin
-                className={`w-3 h-3 ${
-                  isPinned ? "text-yellow-400 fill-current" : "text-gray-500"
-                } hover:text-yellow-400 transition-colors`}
-              />
-            </motion.button>
-          </div>
-        )}
-
-        <motion.div
+        <div className={`flex items-center gap-2 ${isOwnMessage ? "flex-row-reverse" : ""}`}>
+          <motion.div
           className={`${
             isShortMessage ? 'inline-flex flex-col' : 'max-w-xs lg:max-w-md'
           } px-4 ${
@@ -686,6 +599,64 @@ const MessageBubble = React.memo(
             </motion.div>
           )}
         </motion.div>
+
+        {/* Action buttons - show after message bubble */}
+        {!isEditing && (
+          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            {/* Forward button */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              className="p-1 rounded-full bg-white shadow-lg text-blue-600"
+              onClick={handleForwardClick}
+              title="Forward message"
+            >
+              <Share2 className="w-3 h-3" />
+            </motion.button>
+
+            {/* Pin button */}
+            <motion.button
+              whileHover={{
+                scale: 1.1,
+                rotate: [0, -10, 10, 0],
+                transition: { duration: 0.4 },
+              }}
+              className="p-1 rounded-full bg-white shadow-lg"
+              onClick={handlePinClick}
+              title={isPinned ? "Unpin message" : "Pin message"}
+            >
+              <Pin
+                className={`w-3 h-3 ${
+                  isPinned ? "text-yellow-400 fill-current" : "text-gray-500"
+                } hover:text-yellow-400 transition-colors`}
+              />
+            </motion.button>
+
+            {/* Delete button - only for own messages */}
+            {isOwnMessage && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                className="p-1 rounded-full bg-white shadow-lg text-red-600"
+                onClick={() => onDeleteMessage && onDeleteMessage(message)}
+                title="Delete message"
+              >
+                <Trash2 className="w-3 h-3" />
+              </motion.button>
+            )}
+
+            {/* Edit button - only for own text messages */}
+            {isOwnMessage && !hasAttachments && message.content && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                className="p-1 rounded-full bg-white shadow-lg text-green-600"
+                onClick={handleEditClick}
+                title="Edit message"
+              >
+                <Edit className="w-3 h-3" />
+              </motion.button>
+            )}
+          </div>
+        )}
+        </div>
       </motion.div>
     );
   }
