@@ -11,6 +11,8 @@ const messageSchema = new Schema(
     deletedFor: [{ type: Schema.Types.ObjectId, ref: "User" }],
     isDeleted: { type: Boolean, default: false },
     isForwarded: { type: Boolean, default: false },
+    isEdited: { type: Boolean, default: false },
+    editedAt: { type: Date },
     
     // New starring feature
     starredBy: [{ 

@@ -34,6 +34,29 @@ export const blockUser = asyncHandler(async (req, res) => {
 
   console.log(`✅ User ${userId} successfully blocked by ${currentUserId}`);
 
+  // Find the chat between these users to add system message
+  const chat = await Chat.findOne({
+    isGroupChat: false,
+    users: { $all: [currentUserId, userId] }
+  });
+
+  if (chat) {
+    // Create system message
+    const systemMessage = await Message.create({
+      sender: currentUserId,
+      content: 'You blocked this contact',
+      type: 'system',
+      chat: chat._id,
+    });
+
+    // Update chat's latest message
+    await Chat.findByIdAndUpdate(chat._id, {
+      latestMessage: systemMessage._id
+    });
+
+    console.log(`📝 System message created for block action`);
+  }
+
   res.status(200).json({
     message: `You have blocked ${userToBlock.name}`,
     blockedUserId: userId
@@ -61,6 +84,29 @@ export const unblockUser = asyncHandler(async (req, res) => {
     console.log(`⚠️ Unblock completed but user ${userId} no longer exists`);
   } else {
     console.log(`✅ User ${userId} (${unblockedUser.name}) unblocked successfully`);
+  }
+
+  // Find the chat between these users to add system message
+  const chat = await Chat.findOne({
+    isGroupChat: false,
+    users: { $all: [currentUserId, userId] }
+  });
+
+  if (chat) {
+    // Create system message
+    const systemMessage = await Message.create({
+      sender: currentUserId,
+      content: 'You unblocked this contact',
+      type: 'system',
+      chat: chat._id,
+    });
+
+    // Update chat's latest message
+    await Chat.findByIdAndUpdate(chat._id, {
+      latestMessage: systemMessage._id
+    });
+
+    console.log(`📝 System message created for unblock action`);
   }
 
   res.status(200).json({

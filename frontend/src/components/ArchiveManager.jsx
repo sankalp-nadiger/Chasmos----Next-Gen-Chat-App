@@ -81,11 +81,14 @@ const ArchiveManager = ({ onClose, effectiveTheme, onOpenChat, onUnarchive }) =>
   return (
     <div className={`fixed inset-0 z-50 p-6 ${effectiveTheme.primary} overflow-auto`}> 
       <div className={`max-w-3xl mx-auto ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-lg`}> 
-        <div className={`p-4 flex items-center justify-between border-b ${effectiveTheme.border}`}>
+        <div className={`p-4 relative flex items-center border-b ${effectiveTheme.border}`}>
           <div className="flex items-center gap-3">
             <Logo size="sm" showText={true} textClassName={`${effectiveTheme.text}`} containerClassName="" />
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="absolute left-1/2 transform -translate-x-1/2">
+            <h2 className={`text-xl font-semibold ${effectiveTheme.text} whitespace-nowrap`}>Archived Chats</h2>
+          </div>
+          <div className="ml-auto flex items-center space-x-2">
             <button className={`p-2 rounded hover:${effectiveTheme.hover}`} onClick={onClose}><X className={effectiveTheme.text}/> </button>
           </div>
         </div>
