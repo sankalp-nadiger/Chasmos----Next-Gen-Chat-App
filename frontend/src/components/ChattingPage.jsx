@@ -76,6 +76,7 @@ import GroupCreation from "./GroupCreation";
 import DateTag from "./DateTag";
 import ForwardMessageModal from "./ForwardMessageModal";
 import PinnedMessagesBar from "./PinnedMessagesBar";
+import DeleteMessageModal from "./DeleteMessageModal";
 
 // Memoized Chat Header Component
 const ChatHeader = React.memo(
@@ -1222,6 +1223,10 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [messageToForward, setMessageToForward] = useState(null);
 
+  // Delete message state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [messageToDelete, setMessageToDelete] = useState(null);
+
   // Hovered message date label (single place below header)
   const [hoverDateLabel, setHoverDateLabel] = useState("");
   const hoverClearTimeoutRef = useRef(null);
@@ -1468,11 +1473,17 @@ const togglePin = async (docId, isPinnedNow) => {
   };
 
   // Delete message handler (lifted here so it has access to state setters)
-  const handleDeleteMessage = async (message) => {
+  const handleDeleteMessage = (message) => {
+    if (!message) return;
+    setMessageToDelete(message);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteMessage = async (deleteForEveryone) => {
+    const message = messageToDelete;
     if (!message) return;
     const chatId = selectedContact?.id || selectedContact?._id;
     if (!chatId) return;
-    const deleteForEveryone = window.confirm('Delete for everyone? Press OK to delete for everyone, Cancel to delete only for you.');
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
       const messageId = message._id || message.id;
@@ -1545,6 +1556,9 @@ const togglePin = async (docId, isPinnedNow) => {
       }
     } catch (err) {
       console.error('Delete message failed', err);
+    } finally {
+      setShowDeleteModal(false);
+      setMessageToDelete(null);
     }
   };
 
@@ -3990,6 +4004,17 @@ useEffect(() => {
         contacts={recentChats}
         effectiveTheme={effectiveTheme}
         currentUserId={currentUserId}
+      />
+
+      {/* Delete message modal */}
+      <DeleteMessageModal
+        isOpen={showDeleteModal}
+        onClose={() => {
+          setShowDeleteModal(false);
+          setMessageToDelete(null);
+        }}
+        onConfirmDelete={confirmDeleteMessage}
+        effectiveTheme={effectiveTheme}
       />
 
       <div
