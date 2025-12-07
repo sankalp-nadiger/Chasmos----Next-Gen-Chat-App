@@ -4613,14 +4613,14 @@ useEffect(() => {
       className="flex items-center justify-between cursor-pointer"
       onClick={() => setIsExpanded(!isExpanded)}
     >
-      <h4 className="text-gray-300 dark:text-gray-100 font-semibold">
+      <h4 className="text-gray-900 dark:text-gray-100 font-semibold">
         Document History
       </h4>
 
       {isExpanded ? (
-        <ChevronUp className="w-5 h-5 text-gray-500" />
+        <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
       ) : (
-        <ChevronDown className="w-5 h-5 text-gray-500" />
+        <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
       )}
     </div>
 
@@ -4635,13 +4635,15 @@ useEffect(() => {
           className="space-y-3 overflow-hidden"
         >
           {loading ? (
-            <div className="text-gray-500 text-center py-4">Loading...</div>
+            <div className="text-gray-600 dark:text-gray-400 text-center py-4">
+              Loading...
+            </div>
           ) : (
             <>
               {/* 📌 PINNED DOCUMENTS */}
               {pinnedDocs.length > 0 && (
                 <div className="space-y-3">
-                  <h4 className="text-gray-200 text-sm font-semibold">
+                  <h4 className="text-gray-800 dark:text-gray-200 text-sm font-semibold">
                     📌 Pinned
                   </h4>
 
@@ -4662,10 +4664,10 @@ useEffect(() => {
                     >
                       {/* Text */}
                       <div className="flex flex-col">
-                        <p className="font-medium truncate text-gray-300 dark:text-gray-200">
+                        <p className="font-medium truncate text-gray-900 dark:text-gray-200">
                           {doc.fileName || "Untitled Document"}
                         </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate mt-0.5">
                           {doc.updatedAt
                             ? new Date(doc.updatedAt).toLocaleString()
                             : "No date"}
@@ -4676,11 +4678,11 @@ useEffect(() => {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          togglePin(doc._id, true); // <-- unpin
+                          togglePin(doc._id, true);
                         }}
                         className="p-2"
                       >
-                        <PinOff className="w-5 h-5 text-yellow-400" />
+                        <PinOff className="w-5 h-5 text-yellow-500" />
                       </button>
                     </motion.div>
                   ))}
@@ -4688,54 +4690,52 @@ useEffect(() => {
               )}
 
               {/* 🗂️ NORMAL UNPINNED DOCUMENTS */}
-              {/* 🗂️ NORMAL UNPINNED DOCUMENTS */}
-<div className="space-y-2 mt-4">
-  <h4 className="text-gray-200 text-sm font-semibold">
-    📄 All Documents
-  </h4>
+              <div className="space-y-2 mt-4">
+                <h4 className="text-gray-800 dark:text-gray-200 text-sm font-semibold">
+                  📄 All Documents
+                </h4>
 
-  {documentChats
-    .filter(d => !d.isPinned)   // ⭐ prevents duplicates
-    .map((doc) => (
-      <motion.div
-        key={doc._id}
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.97 }}
-        onClick={() => {
-          if (!selectedDocument || selectedDocument._id !== doc._id) {
-            setSelectedDocument(doc);
-            setIsNewDocumentChat(false);
-          }
-        }}
-        className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
-          ${effectiveTheme.secondary} border ${effectiveTheme.border} hover:${effectiveTheme.hover}
-          flex justify-between items-center`}
-      >
-        <div className="flex flex-col">
-          <p className="font-medium truncate text-gray-300 dark:text-gray-200">
-            {doc.fileName || "Untitled Document"}
-          </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
-            {doc.updatedAt
-              ? new Date(doc.updatedAt).toLocaleString()
-              : "No date available"}
-          </p>
-        </div>
+                {documentChats
+                  .filter((d) => !d.isPinned)
+                  .map((doc) => (
+                    <motion.div
+                      key={doc._id}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => {
+                        if (!selectedDocument || selectedDocument._id !== doc._id) {
+                          setSelectedDocument(doc);
+                          setIsNewDocumentChat(false);
+                        }
+                      }}
+                      className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
+                        ${effectiveTheme.secondary} border ${effectiveTheme.border} hover:${effectiveTheme.hover}
+                        flex justify-between items-center`}
+                    >
+                      <div className="flex flex-col">
+                        <p className="font-medium truncate text-gray-900 dark:text-gray-200">
+                          {doc.fileName || "Untitled Document"}
+                        </p>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate mt-0.5">
+                          {doc.updatedAt
+                            ? new Date(doc.updatedAt).toLocaleString()
+                            : "No date available"}
+                        </p>
+                      </div>
 
-        {/* PIN button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            togglePin(doc._id, false); // <-- pin
-          }}
-          className="p-2"
-        >
-          <Pin className="w-5 h-5 text-gray-400" />
-        </button>
-      </motion.div>
-    ))}
-</div>
-
+                      {/* PIN button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePin(doc._id, false); // pin
+                        }}
+                        className="p-2"
+                      >
+                        <Pin className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                      </button>
+                    </motion.div>
+                  ))}
+              </div>
             </>
           )}
         </motion.div>
@@ -4759,7 +4759,8 @@ useEffect(() => {
         <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
           <MessageSquare className="w-5 h-5 text-white" />
         </div>
-        <span className={`${effectiveTheme.text} font-semibold`}>
+
+        <span className="text-gray-900 dark:text-gray-100 font-semibold">
           New Chat
         </span>
       </motion.button>
