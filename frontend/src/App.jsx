@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import { useState, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import LoadingBar from "./components/loadingbar.jsx";
@@ -6,6 +8,10 @@ import { ThemeProvider } from "./context/ThemeContext.jsx";
 import ChattingPage from "./components/ChattingPage.jsx";
 import NewChat from "./components/NewChat.jsx";
 import AuthPage from "./components/AuthPage.jsx";
+import { Toaster } from "react-hot-toast";
+
+
+
 import Profile from "./components/Profile.jsx";
 import Settings from "./components/Settings.jsx";
 import Community from "./components/Community.jsx";
@@ -261,6 +267,7 @@ function App() {
     <div className="App">
       <Router>
         <ThemeProvider>
+            <Toaster position="top-center" />
           <AppContent />
         </ThemeProvider>
       </Router>
