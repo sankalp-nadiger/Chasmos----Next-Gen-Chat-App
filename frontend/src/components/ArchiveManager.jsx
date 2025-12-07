@@ -79,21 +79,40 @@ const ArchiveManager = ({ onClose, effectiveTheme, onOpenChat, onUnarchive }) =>
   };
 
   return (
-    <div className={`fixed inset-0 z-50 p-6 ${effectiveTheme.primary} overflow-auto`}> 
-      <div className={`max-w-3xl mx-auto ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-lg`}> 
-        <div className={`p-4 relative flex items-center border-b ${effectiveTheme.border}`}>
-          <div className="flex items-center gap-3">
-            <Logo size="sm" showText={true} textClassName={`${effectiveTheme.text}`} containerClassName="" />
-          </div>
-          <div className="absolute left-1/2 transform -translate-x-1/2">
-            <h2 className={`text-xl font-semibold ${effectiveTheme.text} whitespace-nowrap`}>Archived Chats</h2>
-          </div>
-          <div className="ml-auto flex items-center space-x-2">
-            <button className={`p-2 rounded hover:${effectiveTheme.hover}`} onClick={onClose}><X className={effectiveTheme.text}/> </button>
+    <div className={`fixed inset-0 ${effectiveTheme.primary} flex flex-col h-screen w-screen z-50`}>
+      {/* Header */}
+      <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-6`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={onClose}
+              className={`p-2 rounded-full hover:${effectiveTheme.hover} transition-colors`}
+            >
+              <X className={`w-6 h-6 ${effectiveTheme.text}`} />
+            </button>
+            
+            {/* Chasmos Logo and Name */}
+            <div className="flex items-center space-x-2">
+              <Logo size="md" showText={true} textClassName={effectiveTheme.text} />
+            </div>
+            
+            <div className={`hidden sm:block border-l ${effectiveTheme.border} h-10 mx-3`}></div>
+            
+            <div>
+              <h2 className={`text-xl font-semibold ${effectiveTheme.text}`}>
+                Archived Chats
+              </h2>
+              <p className={`text-sm ${effectiveTheme.textSecondary}`}>
+                Manage your archived conversations
+              </p>
+            </div>
           </div>
         </div>
+      </div>
 
-        <div className="p-4">
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto scrollbar-hide">
+        <div className="p-6">
           {loading && <div className={effectiveTheme.textSecondary}>Loading…</div>}
           {error && <div className="text-sm text-red-500">{error}</div>}
           {!loading && archived.length === 0 && <div className={effectiveTheme.textSecondary}>No archived chats</div>}
