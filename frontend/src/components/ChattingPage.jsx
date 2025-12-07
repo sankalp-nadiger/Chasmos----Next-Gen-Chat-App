@@ -4678,14 +4678,14 @@ useEffect(() => {
       className="flex items-center justify-between cursor-pointer"
       onClick={() => setIsExpanded(!isExpanded)}
     >
-      <h4 className="text-gray-900 dark:text-gray-100 font-semibold">
+      <h4 className={`font-semibold ${effectiveTheme.text}`}>
         Document History
       </h4>
 
       {isExpanded ? (
-        <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+        <ChevronUp className={`w-5 h-5 ${effectiveTheme.textSecondary}`} />
       ) : (
-        <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+        <ChevronDown className={`w-5 h-5 ${effectiveTheme.textSecondary}`} />
       )}
     </div>
 
@@ -4700,7 +4700,7 @@ useEffect(() => {
           className="space-y-3 overflow-hidden"
         >
           {loading ? (
-            <div className="text-gray-600 dark:text-gray-400 text-center py-4">
+            <div className={`text-center py-4 ${effectiveTheme.textSecondary}`}>
               Loading...
             </div>
           ) : (
@@ -4708,7 +4708,7 @@ useEffect(() => {
               {/* 📌 PINNED DOCUMENTS */}
               {pinnedDocs.length > 0 && (
                 <div className="space-y-3">
-                  <h4 className="text-gray-800 dark:text-gray-200 text-sm font-semibold">
+                  <h4 className={`text-sm font-semibold ${effectiveTheme.text}`}>
                     📌 Pinned
                   </h4>
 
@@ -4729,10 +4729,10 @@ useEffect(() => {
                     >
                       {/* Text */}
                       <div className="flex flex-col">
-                        <p className="font-medium truncate text-gray-900 dark:text-gray-200">
+                        <p className={`font-medium truncate ${effectiveTheme.text}`}>
                           {doc.fileName || "Untitled Document"}
                         </p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate mt-0.5">
+                        <p className={`text-xs truncate mt-0.5 ${effectiveTheme.textSecondary}`}>
                           {doc.updatedAt
                             ? new Date(doc.updatedAt).toLocaleString()
                             : "No date"}
@@ -4768,7 +4768,7 @@ useEffect(() => {
 
               {/* 🗂️ NORMAL UNPINNED DOCUMENTS */}
               <div className="space-y-2 mt-4">
-                <h4 className="text-gray-800 dark:text-gray-200 text-sm font-semibold">
+                <h4 className={`text-sm font-semibold ${effectiveTheme.text}`}>
                   📄 All Documents
                 </h4>
 
@@ -4790,10 +4790,10 @@ useEffect(() => {
                         flex justify-between items-center`}
                     >
                       <div className="flex flex-col">
-                        <p className="font-medium truncate text-gray-900 dark:text-gray-200">
+                        <p className={`font-medium truncate ${effectiveTheme.text}`}>
                           {doc.fileName || "Untitled Document"}
                         </p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate mt-0.5">
+                        <p className={`text-xs truncate mt-0.5 ${effectiveTheme.textSecondary}`}>
                           {doc.updatedAt
                             ? new Date(doc.updatedAt).toLocaleString()
                             : "No date available"}
@@ -4809,7 +4809,7 @@ useEffect(() => {
                           }}
                           className="p-2"
                         >
-                          <Pin className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                          <Pin className={`w-5 h-5 ${effectiveTheme.textSecondary}`} />
                         </button>
 <button
   onClick={(e) => {
@@ -4849,7 +4849,7 @@ useEffect(() => {
           <MessageSquare className="w-5 h-5 text-white" />
         </div>
 
-        <span className="text-gray-900 dark:text-gray-100 font-semibold">
+        <span className={`font-semibold ${effectiveTheme.text}`}>
           New Chat
         </span>
       </motion.button>
