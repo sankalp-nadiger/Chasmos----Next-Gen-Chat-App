@@ -95,7 +95,7 @@ const PinnedMessagesBar = ({ pinnedMessages, onUnpin, onNavigateToMessage, effec
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: -20, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="flex items-center px-4 py-2 gap-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="flex items-center px-4 py-2 gap-3 cursor-pointer hover:bg-blue-50 dark:hover:bg-gray-800 transition-colors"
             onClick={() => onNavigateToMessage && onNavigateToMessage(message)}
           >
             {/* Pin icon */}

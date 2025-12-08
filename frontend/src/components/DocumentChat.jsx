@@ -291,7 +291,6 @@ const DocumentChat = ({ selectedDocument, setSelectedDocument, effectiveTheme })
           <div className="text-center text-gray-500 py-20">
             <FileText className="mx-auto mb-3" size={40} />
             <div>No messages yet.</div>
-            <div className="text-sm mt-2">Upload a document to begin asking questions.</div>
           </div>
         ) : (
           messages.map((msg) => (
