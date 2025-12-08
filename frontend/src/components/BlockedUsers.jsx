@@ -79,12 +79,25 @@ const BlockedUsers = ({ onClose, effectiveTheme, onUnblock, selectedContact }) =
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto scrollbar-hide">
-        <div className="p-6">
-          {loading && <div className={effectiveTheme.textSecondary}>Loading…</div>}
-          {error && <div className="text-sm text-red-500">{error}</div>}
-          {!loading && blocked.length === 0 && <div className={effectiveTheme.textSecondary}>No blocked users</div>}
-
-          <ul className="mt-3 space-y-3">
+        {loading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              <p className={effectiveTheme.textSecondary}>Loading blocked users...</p>
+            </div>
+          </div>
+        ) : blocked.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="flex flex-col items-center gap-3">
+              <Trash2 className={`w-16 h-16 ${effectiveTheme.textSecondary} opacity-50`} />
+              <p className={`text-lg ${effectiveTheme.textSecondary}`}>No blocked users</p>
+              <p className={`text-sm ${effectiveTheme.textSecondary} opacity-75`}>Blocked contacts will appear here</p>
+            </div>
+          </div>
+        ) : (
+          <div className="p-6">
+            {error && <div className="text-sm text-red-500 mb-3">{error}</div>}
+            <ul className="space-y-3">
             {blocked.map(user => (
               <li key={user._id || user.id} className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -101,8 +114,9 @@ const BlockedUsers = ({ onClose, effectiveTheme, onUnblock, selectedContact }) =
                 </div>
               </li>
             ))}
-          </ul>
-        </div>
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );

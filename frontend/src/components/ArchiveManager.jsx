@@ -112,12 +112,25 @@ const ArchiveManager = ({ onClose, effectiveTheme, onOpenChat, onUnarchive }) =>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto scrollbar-hide">
-        <div className="p-6">
-          {loading && <div className={effectiveTheme.textSecondary}>Loading…</div>}
-          {error && <div className="text-sm text-red-500">{error}</div>}
-          {!loading && archived.length === 0 && <div className={effectiveTheme.textSecondary}>No archived chats</div>}
-
-          <ul className="mt-3 space-y-3">
+        {loading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              <p className={effectiveTheme.textSecondary}>Loading archived chats...</p>
+            </div>
+          </div>
+        ) : archived.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="flex flex-col items-center gap-3">
+              <Archive className={`w-16 h-16 ${effectiveTheme.textSecondary} opacity-50`} />
+              <p className={`text-lg ${effectiveTheme.textSecondary}`}>No archived chats</p>
+              <p className={`text-sm ${effectiveTheme.textSecondary} opacity-75`}>Your archived conversations will appear here</p>
+            </div>
+          </div>
+        ) : (
+          <div className="p-6">
+            {error && <div className="text-sm text-red-500 mb-3">{error}</div>}
+            <ul className="space-y-3">
             {archived.map(chat => (
               <li key={chat._id || chat.id} className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -143,8 +156,9 @@ const ArchiveManager = ({ onClose, effectiveTheme, onOpenChat, onUnarchive }) =>
                 </div>
               </li>
             ))}
-          </ul>
-        </div>
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );

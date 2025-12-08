@@ -95,7 +95,16 @@ const PinnedMessagesBar = ({ pinnedMessages, onUnpin, onNavigateToMessage, effec
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: -20, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="flex items-center px-4 py-2 gap-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="flex items-center px-4 py-2 gap-3 cursor-pointer transition-colors"
+            style={{
+              backgroundColor: 'transparent'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? 'rgba(31, 41, 55, 0.5)' : 'rgba(219, 234, 254, 1)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
             onClick={() => onNavigateToMessage && onNavigateToMessage(message)}
           >
             {/* Pin icon */}
@@ -121,7 +130,14 @@ const PinnedMessagesBar = ({ pinnedMessages, onUnpin, onNavigateToMessage, effec
                     e.stopPropagation();
                     handlePrevious();
                   }}
-                  className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 ${effectiveTheme.text}`}
+                  className={`p-1 rounded transition-colors ${effectiveTheme.text}`}
+                  style={{ backgroundColor: 'transparent' }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(134, 239, 172, 0.6)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
                   aria-label="Previous pinned message"
                 >
                   <ChevronRight className="w-4 h-4 rotate-180" />
@@ -136,7 +152,14 @@ const PinnedMessagesBar = ({ pinnedMessages, onUnpin, onNavigateToMessage, effec
                     e.stopPropagation();
                     handleNext();
                   }}
-                  className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 ${effectiveTheme.text}`}
+                  className={`p-1 rounded transition-colors ${effectiveTheme.text}`}
+                  style={{ backgroundColor: 'transparent' }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(134, 239, 172, 0.6)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
                   aria-label="Next pinned message"
                 >
                   <ChevronRight className="w-4 h-4" />
@@ -150,7 +173,14 @@ const PinnedMessagesBar = ({ pinnedMessages, onUnpin, onNavigateToMessage, effec
                 e.stopPropagation();
                 onUnpin && onUnpin(message._id || message.id);
               }}
-              className={`flex-shrink-0 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 ${effectiveTheme.textSecondary} hover:${effectiveTheme.text} transition-colors`}
+              className={`flex-shrink-0 p-1 rounded-full transition-colors ${effectiveTheme.textSecondary}`}
+              style={{ backgroundColor: 'transparent' }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(134, 239, 172, 0.6)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
               aria-label="Unpin message"
               title="Unpin message"
             >
