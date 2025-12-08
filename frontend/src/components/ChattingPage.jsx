@@ -16,6 +16,7 @@ import Swal from "sweetalert2";
 import { motion, AnimatePresence } from "framer-motion";
 import chatReqIcon from "../assets/Chat-reuest.png";
 import chatAcceptIcon from "../assets/chat-accepted.png";
+import doubleCheckIcon from "../assets/double-check.svg";
 import {
   Search,
   MoreVertical,
@@ -72,7 +73,6 @@ import {
 import DocumentChat from "./DocumentChat";
 import NewDocumentUploader from "./NewDocumentUploader";
 import DocumentChatWrapper from "./DocumentChat";
-import Community from "./Community";
 import GroupCreation from "./GroupCreation";
 import DateTag from "./DateTag";
 import ForwardMessageModal from "./ForwardMessageModal";
@@ -424,7 +424,7 @@ const MessageBubble = React.memo(
             isShortMessage 
               ? 'py-2' 
               : isOwnMessage 
-                ? 'pt-2 pb-8 pr-4' 
+                ? 'pt-2 pb-10 pr-6' 
                 : 'py-2'
           } rounded-lg relative ${
           isOwnMessage
@@ -549,9 +549,9 @@ const MessageBubble = React.memo(
                   {formatMessageTime(message.timestamp)}
                   {message.isEdited && <span className="text-[10px] italic opacity-60">edited</span>}
                   {message.isRead ? (
-                    <CheckCheck className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                    <img src={doubleCheckIcon} alt="read" className="w-3 h-3 flex-shrink-0" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
                   ) : (
-                    <Check className="w-4 h-4 opacity-75 flex-shrink-0" />
+                    <Check className="w-3 h-3 opacity-75 flex-shrink-0" />
                   )}
                 </span>
               )}
@@ -570,7 +570,7 @@ const MessageBubble = React.memo(
           {!isShortMessage && (
             <motion.div
               className={`flex items-center justify-end space-x-1 mt-1 ${
-                isOwnMessage ? 'absolute bottom-2 right-3' : 'mt-2'
+                isOwnMessage ? 'absolute bottom-2 right-2' : 'mt-2'
               }`}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -589,12 +589,12 @@ const MessageBubble = React.memo(
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
                   transition={{ delay: 0.4, type: "spring", stiffness: 400 }}
-                  className="flex-shrink-0"
+                  className="flex-shrink-0 ml-1"
                 >
                   {message.isRead ? (
-                    <CheckCheck className="w-4 h-4 text-blue-400" />
+                    <img src={doubleCheckIcon} alt="read" className="w-3 h-3" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
                   ) : (
-                    <Check className="w-4 h-4 opacity-75 text-white" />
+                    <Check className="w-3 h-3 opacity-75 text-white" />
                   )}
                 </motion.div>
               )}
@@ -903,6 +903,7 @@ const MessagesArea = ({
   const messagesContainerRef = useRef(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const shouldAutoScrollRef = useRef(true); // ✅ Track if we should auto-scroll
+  const scrollTimeoutRef = useRef(null); // Debounce scroll button visibility
 
   // Helper: format day label like WhatsApp (Today / Yesterday / date)
   const formatDayLabel = useCallback((ts) => {
@@ -941,15 +942,30 @@ const MessagesArea = ({
       e.stopPropagation();
       e.preventDefault();
     }
+    
+    // Hide the button immediately when clicked
+    setShowScrollButton(false);
+    
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      // Set auto-scroll flag to true
+      shouldAutoScrollRef.current = true;
     }
   };
 
   const handleScroll = (e) => {
     const element = e.target;
     const isNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 200;
-    setShowScrollButton(!isNearBottom);
+    
+    // Clear any existing timeout
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    
+    // Debounce the button visibility update
+    scrollTimeoutRef.current = setTimeout(() => {
+      setShowScrollButton(!isNearBottom);
+    }, 150);
     
     // ✅ Only auto-scroll if user is near bottom
     shouldAutoScrollRef.current = isNearBottom;
@@ -1120,7 +1136,7 @@ const MessagesArea = ({
             onClick={scrollToBottom}
             onPointerDown={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-50 w-12 h-12 rounded-full flex items-center justify-center shadow-2xl cursor-pointer"
+            className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-50 w-11 h-11 rounded-full flex items-center justify-center shadow-2xl cursor-pointer"
             style={{
               background: effectiveTheme.mode === 'dark'
                 ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
@@ -1155,8 +1171,8 @@ const MessagesArea = ({
               }}
             >
               <svg
-                width="28"
-                height="28"
+                width="24"
+                height="24"
                 viewBox="0 0 24 24"
                 fill="none"
                 xmlns="http://www.w3.org/2000/svg"
@@ -1212,7 +1228,6 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
 
   const [isNewDocumentChat, setIsNewDocumentChat] = useState(false);
   const [showFloatingMenu, setShowFloatingMenu] = useState(false);
-  const [lastClickTime, setLastClickTime] = useState(0);
   const [showGroupCreation, setShowGroupCreation] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -1473,6 +1488,7 @@ const togglePin = async (docId, isPinnedNow) => {
   const chatSearchRef = useRef(null);
   const threeDotsMenuRef = useRef(null);
   const floatingMenuRef = useRef(null);
+  const floatingButtonRef = useRef(null);
   const userMenuRef = useRef(null);
   // API Base URL from environment variable
   const API_BASE_URL =
@@ -2733,6 +2749,8 @@ useEffect(() => {
       if (
         floatingMenuRef.current &&
         !floatingMenuRef.current.contains(event.target) &&
+        floatingButtonRef.current &&
+        !floatingButtonRef.current.contains(event.target) &&
         showFloatingMenu
       ) {
         setShowFloatingMenu(false);
@@ -2759,7 +2777,18 @@ useEffect(() => {
   }, [showChatSearch, showThreeDotsMenu, showFloatingMenu, showUserMenu]);
 
   const filteredContacts = useMemo(() => {
-    let filtered = searchContacts(contacts, searchTerm);
+    // Start with recentChats as the base
+    let filtered = [...recentChats];
+
+    // Apply search term filter
+    if (searchTerm.trim()) {
+      const lowerSearch = searchTerm.toLowerCase();
+      filtered = filtered.filter(contact => {
+        const name = (contact.name || '').toLowerCase();
+        const lastMsg = (contact.lastMessage || '').toLowerCase();
+        return name.includes(lowerSearch) || lastMsg.includes(lowerSearch);
+      });
+    }
 
     // Filter by navigation item type
     switch (activeNavItem) {
@@ -2775,16 +2804,13 @@ useEffect(() => {
       case "documents":
         filtered = filtered.filter((contact) => contact.isDocument);
         break;
-      case "community":
-        filtered = filtered.filter((contact) => contact.isCommunity);
-        break;
       default:
         // Show all for default case
         break;
     }
 
     return filtered;
-  }, [contacts, searchTerm, activeNavItem]);
+  }, [recentChats, searchTerm, activeNavItem]);
 
   // Remove useMemo and calculate messages directly in render
   const getMessagesForContact = (contactId, searchTerm = "") => {
@@ -3474,19 +3500,8 @@ const handleSendMessageFromInput = useCallback(
 
   // Floating menu functions
   const toggleFloatingMenu = useCallback(() => {
-    const currentTime = Date.now();
-    const timeDiff = currentTime - lastClickTime;
-
-    // Handle double click (less than 300ms between clicks)
-    if (timeDiff < 300 && showFloatingMenu) {
-      setShowFloatingMenu(false);
-      setLastClickTime(0);
-      return;
-    }
-
-    setShowFloatingMenu(!showFloatingMenu);
-    setLastClickTime(currentTime);
-  }, [showFloatingMenu, lastClickTime]);
+    setShowFloatingMenu(prev => !prev);
+  }, []);
 
   const closeFloatingMenu = useCallback(() => {
     setShowFloatingMenu(false);
@@ -3791,6 +3806,8 @@ const handleSendMessageFromInput = useCallback(
       if (
         floatingMenuRef.current &&
         !floatingMenuRef.current.contains(event.target) &&
+        floatingButtonRef.current &&
+        !floatingButtonRef.current.contains(event.target) &&
         showFloatingMenu
       ) {
         setShowFloatingMenu(false);
@@ -4232,21 +4249,6 @@ useEffect(() => {
             >
               <Folder className="w-5 h-5" />
             </motion.button>
-
-            {/* Community */}
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => navigate('/community')}
-              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
-                activeNavItem === "community"
-                  ? `${effectiveTheme.accent} text-white shadow-lg`
-                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
-              }`}
-              title="Community"
-            >
-              <Globe className="w-5 h-5" />
-            </motion.button>
           </div>
 
           {/* Bottom Navigation Items */}
@@ -4298,7 +4300,7 @@ useEffect(() => {
         <AnimatePresence mode="wait">
           {showSidebar &&
             !(isMobileView && (showGroupCreation || showNewChat)) &&
-            !['community', 'profile', 'settings'].includes(activeSection) && (
+            !['profile', 'settings'].includes(activeSection) && (
               <motion.div
   initial={{ x: isMobileView ? -300 : -100, opacity: 0 }}
   animate={{
@@ -5022,42 +5024,68 @@ useEffect(() => {
   ) : (
     /* Regular Chats and Contacts */
     <>
-      {/* Recent Chats */}
-      {recentChats.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-            Recent Chats
-          </h4>
-          {recentChats.map((chat) => (
-            <ContactItem
-              key={chat.id}
-              contact={chat}
-              effectiveTheme={effectiveTheme}
-              onSelect={(c) => handleOpenChat(c)}
-            />
-          ))}
-        </div>
-      )}
+      {/* Show filtered results when searching, otherwise show recent chats and contacts */}
+      {searchTerm.trim() ? (
+        <>
+          {filteredContacts.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              {filteredContacts.map((contact) => (
+                <ContactItem
+                  key={contact.id}
+                  contact={contact}
+                  effectiveTheme={effectiveTheme}
+                  onSelect={(c) => handleOpenChat(c)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center space-y-4 mt-10">
+              <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+                No chats found matching "{searchTerm}"
+              </p>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Recent Chats */}
+          {recentChats.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                Recent Chats
+              </h4>
+              {recentChats.map((chat) => (
+                <ContactItem
+                  key={chat.id}
+                  contact={chat}
+                  effectiveTheme={effectiveTheme}
+                  onSelect={(c) => handleOpenChat(c)}
+                />
+              ))}
+            </div>
+          )}
 
-      {/* All Contacts */}
-      {contacts.length > 0 && (
-        <div className="flex flex-col gap-2 mt-4">
-          <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-            Contacts
-          </h4>
-          {contacts.map((contact) => (
-            <ContactItem
-              key={contact.id}
-              contact={contact}
-              effectiveTheme={effectiveTheme}
-              onSelect={(c) => handleOpenChat(c)}
-            />
-          ))}
-        </div>
+          {/* All Contacts */}
+          {contacts.length > 0 && (
+            <div className="flex flex-col gap-2 mt-4">
+              <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                Contacts
+              </h4>
+              {contacts.map((contact) => (
+                <ContactItem
+                  key={contact.id}
+                  contact={contact}
+                  effectiveTheme={effectiveTheme}
+                  onSelect={(c) => handleOpenChat(c)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Empty State */}
-      {recentChats.length === 0 && contacts.length === 0 && (
+      {!searchTerm.trim() && recentChats.length === 0 && contacts.length === 0 && (
         <div className="text-center space-y-4 mt-10">
           <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
             Start chatting with Chasmos!
@@ -5085,7 +5113,7 @@ useEffect(() => {
                       initial={{ opacity: 0, scale: 0.8, y: 20 }}
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.8, y: 20 }}
-                      transition={{ duration: 0.2 }}
+                      transition={{ duration: 0.4 }}
                       className={`absolute ${isMobileView ? "bottom-20 right-6 fixed" : "bottom-20 right-6"} flex flex-col space-y-3 z-30`}
                     >
                       {/* Create Group */}
@@ -5108,7 +5136,7 @@ useEffect(() => {
                        <motion.button
                                               initial={{ opacity: 0, x: 20 }}
                                               animate={{ opacity: 1, x: 0 }}
-                                              transition={{ delay: 0.1 }}
+                                              transition={{ delay: 0.15 }}
                                               onClick={handleCreateGroup}
                                               className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
                                             >
@@ -5126,7 +5154,7 @@ useEffect(() => {
                       <motion.button
                         initial={{ opacity: 0, x: 20 }}
                         animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.15 }}
+                        transition={{ delay: 0.25 }}
                         onClick={handleNewChat}
                         className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
                       >
@@ -5144,7 +5172,7 @@ useEffect(() => {
                       <motion.button
                         initial={{ opacity: 0, x: 20 }}
                         animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.2 }}
+                        transition={{ delay: 0.35 }}
                         onClick={handleInviteUser}
                         className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
                       >
@@ -5162,6 +5190,7 @@ useEffect(() => {
 
                   {/* Main Floating Button */}
                   <motion.button
+                    ref={floatingButtonRef}
                     whileHover={{
                       scale: 1.1,
                       rotate: [0, -10, 10, -10, 0],
@@ -5179,7 +5208,7 @@ useEffect(() => {
                         ease: "easeInOut",
                       },
                     }}
-                    className={`absolute ${isMobileView ? "bottom-6 right-6 fixed" : "bottom-6 right-6"} w-16 h-16 rounded-full flex items-center justify-center text-white transition-all duration-300 z-20 group`}
+                    className={`absolute ${isMobileView ? "bottom-6 right-6 fixed" : "bottom-6 right-6"} w-14 h-14 rounded-full flex items-center justify-center text-white transition-all duration-300 z-20 group`}
                     style={{
                       background: showFloatingMenu
                         ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
@@ -5189,7 +5218,9 @@ useEffect(() => {
                         : "0 8px 25px rgba(59, 130, 246, 0.3)",
                       border: "none",
                     }}
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
                       toggleFloatingMenu();
                     }}
                   >
@@ -5205,9 +5236,9 @@ useEffect(() => {
                       className="relative"
                     >
                       {showFloatingMenu ? (
-                        <X className="w-7 h-7 text-white" />
+                        <X className="w-6 h-6 text-white" />
                       ) : (
-                        <MessageSquare className="w-7 h-7 text-white" />
+                        <MessageSquare className="w-6 h-6 text-white" />
                       )}
                     </motion.div>
 
@@ -5235,12 +5266,7 @@ useEffect(() => {
           key={selectedContact?.id || selectedDocument?._id || "no-contact"}
           className="flex-1 flex flex-col relative h-full overflow-hidden"
         >
-          {activeSection === "community" ? (
-            <Community 
-              effectiveTheme={effectiveTheme}
-              onClose={() => navigate('/chats')}
-            />
-          ) : activeSection === "profile" ? (
+          {activeSection === "profile" ? (
             <Profile
               effectiveTheme={effectiveTheme}
               onClose={() => navigate('/chats')}

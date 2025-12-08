@@ -14,7 +14,6 @@ import { Toaster } from "react-hot-toast";
 
 import Profile from "./components/Profile.jsx";
 import Settings from "./components/Settings.jsx";
-import Community from "./components/Community.jsx";
 
 // OAuth Callback Handler Component
 const OAuthCallback = () => {
