@@ -649,20 +649,38 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
     >
       {/* HEADER */}
       <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-4`}>
-        <div className="flex items-center justify-between">
-          <button onClick={goBack} className="p-2 rounded-full hover:bg-gray-200 transition-colors">
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={goBack}
+            className={`p-2 rounded-full hover:${effectiveTheme.hover} transition-colors`}
+          >
             {step === 1 ? (
               <X className={`w-5 h-5 ${effectiveTheme.text}`} />
             ) : (
               <ChevronLeft className={`w-5 h-5 ${effectiveTheme.text}`} />
             )}
           </button>
-
-          <h2 className={`text-lg font-semibold ${effectiveTheme.text}`}>
-            {step === 1 ? "Select Group Type" : step === 2 ? "Add Members" : "Group Details"}
-          </h2>
-
-          <Logo size="sm" textClassName={effectiveTheme.text} />
+          
+          {/* Chasmos Logo and Name */}
+          <div className="flex items-center space-x-2">
+            <Logo size="md" showText={true} textClassName={effectiveTheme.text} />
+          </div>
+          
+          <div className={`hidden sm:block border-l ${effectiveTheme.border} h-8 mx-2`}></div>
+          
+          <div>
+            <h2 className={`text-lg font-semibold ${effectiveTheme.text}`}>
+              {step === 1 ? "Select Group Type" : step === 2 ? "Add Members" : "Group Details"}
+            </h2>
+            <p className={`text-sm ${effectiveTheme.textSecondary}`}>
+              {step === 1 
+                ? "Choose between Casual or Business"
+                : step === 2 
+                ? `${selectedContacts.length} member${selectedContacts.length !== 1 ? 's' : ''} selected`
+                : "Customize your group"
+              }
+            </p>
+          </div>
         </div>
       </div>
 
