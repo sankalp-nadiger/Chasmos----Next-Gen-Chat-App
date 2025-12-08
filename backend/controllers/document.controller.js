@@ -288,3 +288,29 @@ export const getDocumentChatById = asyncHandler(async (req, res) => {
     updatedAt: doc.updatedAt,
   });
 });
+
+const deleteFromSupabase = async (fileUrl) => {
+  try {
+    // Extract the part after the bucket name
+    const urlParts = fileUrl.split("/documents/");
+    if (urlParts.length < 2) {
+      console.error("❌ Invalid file URL for deletion:", fileUrl);
+      return;
+    }
+
+    const filePath = urlParts[1]; // everything after /documents/
+
+    const { error } = await supabase.storage
+      .from("documents")
+      .remove([filePath]);
+
+    if (error) {
+      console.error("🔥 Supabase delete error:", error.message);
+    } else {
+      console.log("🗑️ Deleted file from Supabase:", filePath);
+    }
+  } catch (err) {
+    console.error("❌ Error parsing Supabase file path:", err);
+  }
+};
+

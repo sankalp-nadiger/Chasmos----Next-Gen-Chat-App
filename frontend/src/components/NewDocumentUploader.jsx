@@ -2,9 +2,8 @@
 import React, { useState, useRef } from "react";
 import { motion } from "framer-motion";
 import { FileText, Upload, X, Loader2 } from "lucide-react";
-const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
 const NewDocumentUploader = React.memo(({ onUploadComplete, onCancel, effectiveTheme }) => {
   const [file, setFile] = useState(null);
@@ -20,15 +19,14 @@ const NewDocumentUploader = React.memo(({ onUploadComplete, onCancel, effectiveT
     setUploading(true);
 
     try {
-      const token = localStorage.getItem("token"); // ✅ Fetch the saved JWT
-
+      const token = localStorage.getItem("token");
       const formData = new FormData();
       formData.append("file", file);
 
       const res = await fetch(`${API_BASE_URL}/api/document/new`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`, // ✅ Attach token for protected route
+          Authorization: `Bearer ${token}`, // JWT
         },
         body: formData,
       });
@@ -38,7 +36,15 @@ const NewDocumentUploader = React.memo(({ onUploadComplete, onCancel, effectiveT
       const data = await res.json();
       console.log("✅ Upload success:", data);
 
-      onUploadComplete?.(data);
+      // Pass BOTH local file and backend URL to parent
+      const uploadedDoc = {
+        ...data.document, // returned by backend
+        localFile: file,  // for preview
+        fileLink: data.document?.fileUrl || null,
+      };
+
+      onUploadComplete?.(uploadedDoc);
+
       setFile(null);
     } catch (err) {
       console.error("❌ Upload error:", err);
@@ -50,7 +56,7 @@ const NewDocumentUploader = React.memo(({ onUploadComplete, onCancel, effectiveT
 
   return (
     <div className={`flex flex-col h-full items-center justify-center ${effectiveTheme.primary}`}>
-      {/* 🧾 HEADER */}
+      {/* HEADER */}
       <div
         className={`absolute top-0 left-0 w-full flex items-center justify-between px-4 py-3 border-b ${effectiveTheme.border} ${effectiveTheme.secondary}`}
       >
@@ -65,7 +71,7 @@ const NewDocumentUploader = React.memo(({ onUploadComplete, onCancel, effectiveT
         </motion.button>
       </div>
 
-      {/* 📄 Upload Area */}
+      {/* UPLOAD AREA */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -77,11 +83,7 @@ const NewDocumentUploader = React.memo(({ onUploadComplete, onCancel, effectiveT
         >
           <FileText className="w-16 h-16 text-green-500 mb-3" />
           <p className={`text-sm ${effectiveTheme.text}`}>
-            {file ? (
-              <span className="font-medium">{file.name}</span>
-            ) : (
-              <>Click or drag a document here to upload</>
-            )}
+            {file ? <span className="font-medium">{file.name}</span> : <>Click or drag a document here to upload</>}
           </p>
           <input
             type="file"
@@ -92,7 +94,7 @@ const NewDocumentUploader = React.memo(({ onUploadComplete, onCancel, effectiveT
           />
         </div>
 
-        {/* 🚀 Upload Button */}
+        {/* UPLOAD BUTTON */}
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
@@ -117,9 +119,7 @@ const NewDocumentUploader = React.memo(({ onUploadComplete, onCancel, effectiveT
           )}
         </motion.button>
 
-        <p className="text-xs text-gray-500">
-          Supported formats: PDF, DOCX, TXT, XLSX
-        </p>
+        <p className="text-xs text-gray-500">Supported formats: PDF, DOCX, TXT, XLSX</p>
       </motion.div>
     </div>
   );

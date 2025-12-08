@@ -8,10 +8,11 @@ import React, {
   useCallback,
   useRef,
 } from "react";
+import { toast } from "react-hot-toast";
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from "socket.io-client";
-
+import Swal from "sweetalert2";
 import { motion, AnimatePresence } from "framer-motion";
 import chatReqIcon from "../assets/Chat-reuest.png";
 import chatAcceptIcon from "../assets/chat-accepted.png";
@@ -1286,6 +1287,30 @@ const [pinnedDocs, setPinnedDocs] = useState([]);
 
 // You already have theme from props
 // const { effectiveTheme } = props;
+const askDelete = async (documentId) => {
+  const { isConfirmed } = await Swal.fire({
+    title: "Delete Document?",
+    text: "This action cannot be undone.",
+    icon: "warning",
+    showCancelButton: true,
+    confirmButtonColor: "#d33",
+    cancelButtonColor: "#555",
+    confirmButtonText: "Delete",
+    background: effectiveTheme.secondary,
+    color: effectiveTheme.toastText,
+    width: 350,            // smaller width
+    padding: "1.5rem",     // smaller padding
+    customClass: {
+      popup: "rounded-lg",
+      title: "text-md font-semibold",
+      confirmButton: "px-4 py-1 rounded-md",
+      cancelButton: "px-4 py-1 rounded-md",
+    },
+  });
+
+  if (isConfirmed) deleteDocument(documentId);
+};
+
 
 
 // ------------------------------
@@ -1325,6 +1350,44 @@ useEffect(() => {
 
   fetchDocuments();
 }, []);
+
+const deleteDocument = async (documentId) => {
+  try {
+    const res = await fetch(`/api/document/${documentId}`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("token")}`,
+      },
+    });
+
+    if (!res.ok) throw new Error("Failed to delete document");
+
+    setDocumentChats((prev) => prev.filter((d) => d._id !== documentId));
+    setPinnedDocs((prev) => prev.filter((d) => d._id !== documentId));
+
+    if (selectedDocument && selectedDocument._id === documentId) {
+      setSelectedDocument(null);
+      setIsNewDocumentChat(true);
+    }
+
+    toast.success("Document deleted", {
+      style: {
+        background: effectiveTheme.toastBg,
+        color: effectiveTheme.toastText,
+        border: effectiveTheme.toastBorder,
+      },
+    });
+  } catch (err) {
+    toast.error("Delete failed", {
+      style: {
+        background: effectiveTheme.toastBg,
+        color: effectiveTheme.toastText,
+        border: effectiveTheme.toastBorder,
+      },
+    });
+  }
+};
 
 
 const togglePin = async (docId, isPinnedNow) => {
@@ -4607,7 +4670,7 @@ useEffect(() => {
 >
   {activeSection === 'documents' ? (
     /* Documents List */
- <>
+    <>
   <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
     {/* Header with dropdown toggle */}
@@ -4615,14 +4678,14 @@ useEffect(() => {
       className="flex items-center justify-between cursor-pointer"
       onClick={() => setIsExpanded(!isExpanded)}
     >
-      <h4 className={`${effectiveTheme.text} font-semibold`}>
+      <h4 className="text-gray-900 dark:text-gray-100 font-semibold">
         Document History
       </h4>
 
       {isExpanded ? (
-        <ChevronUp className="w-5 h-5 text-gray-500" />
+        <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
       ) : (
-        <ChevronDown className="w-5 h-5 text-gray-500" />
+        <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
       )}
     </div>
 
@@ -4637,13 +4700,15 @@ useEffect(() => {
           className="space-y-3 overflow-hidden"
         >
           {loading ? (
-            <div className="text-gray-500 text-center py-4">Loading...</div>
+            <div className="text-gray-600 dark:text-gray-400 text-center py-4">
+              Loading...
+            </div>
           ) : (
             <>
               {/* 📌 PINNED DOCUMENTS */}
               {pinnedDocs.length > 0 && (
                 <div className="space-y-3">
-                  <h4 className={`${effectiveTheme.text} text-sm font-semibold`}>
+                  <h4 className="text-gray-800 dark:text-gray-200 text-sm font-semibold">
                     📌 Pinned
                   </h4>
 
@@ -4664,80 +4729,102 @@ useEffect(() => {
                     >
                       {/* Text */}
                       <div className="flex flex-col">
-                        <p className={`font-medium truncate ${effectiveTheme.text}`}>
+                        <p className="font-medium truncate text-gray-900 dark:text-gray-200">
                           {doc.fileName || "Untitled Document"}
                         </p>
-                        <p className={`text-xs ${effectiveTheme.textSecondary} truncate mt-0.5`}>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate mt-0.5">
                           {doc.updatedAt
                             ? new Date(doc.updatedAt).toLocaleString()
                             : "No date"}
                         </p>
                       </div>
 
-                      {/* UNPIN button */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePin(doc._id, true); // <-- unpin
-                        }}
-                        className="p-2"
-                      >
-                        <PinOff className="w-5 h-5 text-yellow-400" />
-                      </button>
+                      {/* PIN + DELETE icons */}
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePin(doc._id, true);
+                          }}
+                          className="p-2"
+                        >
+                          <PinOff className="w-5 h-5 text-yellow-500" />
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteDocument(doc._id);
+                          }}
+                          className="p-2"
+                        >
+                          <Trash2 className="w-5 h-5 text-red-500" />
+                        </button>
+                      </div>
                     </motion.div>
                   ))}
                 </div>
               )}
 
               {/* 🗂️ NORMAL UNPINNED DOCUMENTS */}
-              {/* 🗂️ NORMAL UNPINNED DOCUMENTS */}
-<div className="space-y-2 mt-4">
-  <h4 className={`${effectiveTheme.text} text-sm font-semibold`}>
-    📄 All Documents
-  </h4>
+              <div className="space-y-2 mt-4">
+                <h4 className="text-gray-800 dark:text-gray-200 text-sm font-semibold">
+                  📄 All Documents
+                </h4>
 
-  {documentChats
-    .filter(d => !d.isPinned)   // ⭐ prevents duplicates
-    .map((doc) => (
-      <motion.div
-        key={doc._id}
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.97 }}
-        onClick={() => {
-          if (!selectedDocument || selectedDocument._id !== doc._id) {
-            setSelectedDocument(doc);
-            setIsNewDocumentChat(false);
-          }
-        }}
-        className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
-          ${effectiveTheme.secondary} border ${effectiveTheme.border} hover:${effectiveTheme.hover}
-          flex justify-between items-center`}
-      >
-        <div className="flex flex-col">
-          <p className={`font-medium truncate ${effectiveTheme.text}`}>
-            {doc.fileName || "Untitled Document"}
-          </p>
-          <p className={`text-xs ${effectiveTheme.textSecondary} truncate mt-0.5`}>
-            {doc.updatedAt
-              ? new Date(doc.updatedAt).toLocaleString()
-              : "No date available"}
-          </p>
-        </div>
+                {documentChats
+                  .filter((d) => !d.isPinned)
+                  .map((doc) => (
+                    <motion.div
+                      key={doc._id}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => {
+                        if (!selectedDocument || selectedDocument._id !== doc._id) {
+                          setSelectedDocument(doc);
+                          setIsNewDocumentChat(false);
+                        }
+                      }}
+                      className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
+                        ${effectiveTheme.secondary} border ${effectiveTheme.border} hover:${effectiveTheme.hover}
+                        flex justify-between items-center`}
+                    >
+                      <div className="flex flex-col">
+                        <p className="font-medium truncate text-gray-900 dark:text-gray-200">
+                          {doc.fileName || "Untitled Document"}
+                        </p>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate mt-0.5">
+                          {doc.updatedAt
+                            ? new Date(doc.updatedAt).toLocaleString()
+                            : "No date available"}
+                        </p>
+                      </div>
 
-        {/* PIN button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            togglePin(doc._id, false); // <-- pin
-          }}
-          className="p-2"
-        >
-          <Pin className="w-5 h-5 text-gray-400" />
-        </button>
-      </motion.div>
-    ))}
-</div>
+                      {/* PIN + DELETE icons */}
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePin(doc._id, false);
+                          }}
+                          className="p-2"
+                        >
+                          <Pin className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                        </button>
+<button
+  onClick={(e) => {
+    e.stopPropagation();
+    askDelete(doc._id); // instead of window.confirm
+  }}
+  className="p-2"
+>
+  <Trash2 className="w-5 h-5 text-red-500" />
+</button>
 
+                      </div>
+                    </motion.div>
+                  ))}
+              </div>
             </>
           )}
         </motion.div>
@@ -4761,13 +4848,177 @@ useEffect(() => {
         <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
           <MessageSquare className="w-5 h-5 text-white" />
         </div>
-        <span className={`${effectiveTheme.text} font-semibold`}>
+
+        <span className="text-gray-900 dark:text-gray-100 font-semibold">
           New Chat
         </span>
       </motion.button>
     </div>
   </div>
 </>
+
+//  <>
+//   <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+//     {/* Header with dropdown toggle */}
+//     <div
+//       className="flex items-center justify-between cursor-pointer"
+//       onClick={() => setIsExpanded(!isExpanded)}
+//     >
+//       <h4 className="text-gray-900 dark:text-gray-100 font-semibold">
+//         Document History
+//       </h4>
+
+//       {isExpanded ? (
+//         <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+//       ) : (
+//         <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+//       )}
+//     </div>
+
+//     {/* Animated Dropdown */}
+//     <AnimatePresence initial={false}>
+//       {isExpanded && (
+//         <motion.div
+//           initial={{ opacity: 0, height: 0 }}
+//           animate={{ opacity: 1, height: "auto" }}
+//           exit={{ opacity: 0, height: 0 }}
+//           transition={{ duration: 0.3 }}
+//           className="space-y-3 overflow-hidden"
+//         >
+//           {loading ? (
+//             <div className="text-gray-600 dark:text-gray-400 text-center py-4">
+//               Loading...
+//             </div>
+//           ) : (
+//             <>
+//               {/* 📌 PINNED DOCUMENTS */}
+//               {pinnedDocs.length > 0 && (
+//                 <div className="space-y-3">
+//                   <h4 className="text-gray-800 dark:text-gray-200 text-sm font-semibold">
+//                     📌 Pinned
+//                   </h4>
+
+//                   {pinnedDocs.map((doc) => (
+//                     <motion.div
+//                       key={doc._id}
+//                       whileHover={{ scale: 1.02 }}
+//                       whileTap={{ scale: 0.97 }}
+//                       onClick={() => {
+//                         if (!selectedDocument || selectedDocument._id !== doc._id) {
+//                           setSelectedDocument(doc);
+//                           setIsNewDocumentChat(false);
+//                         }
+//                       }}
+//                       className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
+//                         ${effectiveTheme.secondary} border ${effectiveTheme.border} hover:${effectiveTheme.hover}
+//                         flex justify-between items-center`}
+//                     >
+//                       {/* Text */}
+//                       <div className="flex flex-col">
+//                         <p className="font-medium truncate text-gray-900 dark:text-gray-200">
+//                           {doc.fileName || "Untitled Document"}
+//                         </p>
+//                         <p className="text-xs text-gray-600 dark:text-gray-400 truncate mt-0.5">
+//                           {doc.updatedAt
+//                             ? new Date(doc.updatedAt).toLocaleString()
+//                             : "No date"}
+//                         </p>
+//                       </div>
+
+//                       {/* UNPIN button */}
+//                       <button
+//                         onClick={(e) => {
+//                           e.stopPropagation();
+//                           togglePin(doc._id, true);
+//                         }}
+//                         className="p-2"
+//                       >
+//                         <PinOff className="w-5 h-5 text-yellow-500" />
+//                       </button>
+//                     </motion.div>
+//                   ))}
+//                 </div>
+//               )}
+
+//               {/* 🗂️ NORMAL UNPINNED DOCUMENTS */}
+//               <div className="space-y-2 mt-4">
+//                 <h4 className="text-gray-800 dark:text-gray-200 text-sm font-semibold">
+//                   📄 All Documents
+//                 </h4>
+
+//                 {documentChats
+//                   .filter((d) => !d.isPinned)
+//                   .map((doc) => (
+//                     <motion.div
+//                       key={doc._id}
+//                       whileHover={{ scale: 1.02 }}
+//                       whileTap={{ scale: 0.97 }}
+//                       onClick={() => {
+//                         if (!selectedDocument || selectedDocument._id !== doc._id) {
+//                           setSelectedDocument(doc);
+//                           setIsNewDocumentChat(false);
+//                         }
+//                       }}
+//                       className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
+//                         ${effectiveTheme.secondary} border ${effectiveTheme.border} hover:${effectiveTheme.hover}
+//                         flex justify-between items-center`}
+//                     >
+//                       <div className="flex flex-col">
+//                         <p className="font-medium truncate text-gray-900 dark:text-gray-200">
+//                           {doc.fileName || "Untitled Document"}
+//                         </p>
+//                         <p className="text-xs text-gray-600 dark:text-gray-400 truncate mt-0.5">
+//                           {doc.updatedAt
+//                             ? new Date(doc.updatedAt).toLocaleString()
+//                             : "No date available"}
+//                         </p>
+//                       </div>
+
+//                       {/* PIN button */}
+//                       <button
+//                         onClick={(e) => {
+//                           e.stopPropagation();
+//                           togglePin(doc._id, false); // pin
+//                         }}
+//                         className="p-2"
+//                       >
+//                         <Pin className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+//                       </button>
+//                     </motion.div>
+//                   ))}
+//               </div>
+//             </>
+//           )}
+//         </motion.div>
+//       )}
+//     </AnimatePresence>
+
+//     {/* 🆕 Floating New Chat Button */}
+//     <div className="flex justify-center mt-8">
+//       <motion.button
+//         initial={{ opacity: 0, y: 10 }}
+//         animate={{ opacity: 1, y: 0 }}
+//         whileHover={{ scale: 1.05 }}
+//         whileTap={{ scale: 0.95 }}
+//         transition={{ type: "spring", stiffness: 220 }}
+//         onClick={() => {
+//           setSelectedDocument(null);
+//           setIsNewDocumentChat(true);
+//         }}
+//         className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-5 py-3 rounded-xl shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-all duration-200 group`}
+//       >
+//         <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
+//           <MessageSquare className="w-5 h-5 text-white" />
+//         </div>
+
+//         <span className="text-gray-900 dark:text-gray-100 font-semibold">
+//           New Chat
+//         </span>
+//       </motion.button>
+//     </div>
+//   </div>
+// </>
 
 
   ) : (
