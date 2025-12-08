@@ -548,9 +548,9 @@ const MessageBubble = React.memo(
                   {formatMessageTime(message.timestamp)}
                   {message.isEdited && <span className="text-[10px] italic opacity-60">edited</span>}
                   {message.isRead ? (
-                    <img src={doubleCheckIcon} alt="read" className="w-3 h-3 flex-shrink-0" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
+                    <img src={doubleCheckIcon} alt="read" className="w-4 h-4 flex-shrink-0" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
                   ) : (
-                    <Check className="w-3 h-3 opacity-75 flex-shrink-0" />
+                    <Check className="w-4 h-4 opacity-75 flex-shrink-0" />
                   )}
                 </span>
               )}
@@ -591,9 +591,9 @@ const MessageBubble = React.memo(
                   className="flex-shrink-0 ml-1"
                 >
                   {message.isRead ? (
-                    <img src={doubleCheckIcon} alt="read" className="w-3 h-3" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
+                    <img src={doubleCheckIcon} alt="read" className="w-4 h-4" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
                   ) : (
-                    <Check className="w-3 h-3 opacity-75 text-white" />
+                    <Check className="w-4 h-4 opacity-75 text-white" />
                   )}
                 </motion.div>
               )}
