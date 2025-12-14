@@ -3585,7 +3585,9 @@ const handleSendMessageFromInput = useCallback(
         isNightMode: false,
         starColor: "rgba(251, 146, 60, 0.8)",
         period: "morning",
-        themeOverride: null,
+        themeOverride: {
+          mode: "light",
+        },
       };
     } else if (hour >= 12 && hour < 17) {
       // Day (12 PM - 5 PM): Bright theme
@@ -3593,15 +3595,31 @@ const handleSendMessageFromInput = useCallback(
         isNightMode: false,
         starColor: "rgba(59, 130, 246, 0.6)",
         period: "day",
-        themeOverride: null,
+        themeOverride: {
+          mode: "light",
+        },
       };
     } else if (hour >= 17 && hour < 21) {
-      // Evening (5 PM - 9 PM): Sunset theme
+      // Evening (5 PM - 9 PM): Sunset theme with dark mode
       return {
-        isNightMode: false,
+        isNightMode: true,
         starColor: "rgba(168, 85, 247, 0.8)",
         period: "evening",
-        themeOverride: null,
+        themeOverride: {
+          primary: "bg-gray-900 text-white",
+          sidebar: "bg-gray-900/95 border-r border-gray-700",
+          secondary: "bg-gray-800",
+          accent: "bg-blue-600",
+          text: "text-white",
+          textSecondary: "text-gray-300",
+          border: "border-gray-600",
+          hover: "hover:bg-gray-700",
+          searchBg: "bg-gray-700/50",
+          inputBg: "bg-gray-700",
+          cardBg: "bg-gray-800",
+          messageBg: "bg-gray-700",
+          mode: "dark",
+        },
       };
     } else {
       // Night (9 PM - 5 AM): Full night mode with overlays
@@ -4454,7 +4472,7 @@ useEffect(() => {
   className={`${
     isMobileView ? "absolute z-20 w-full h-full" : "w-1/3 min-w-80 h-full"
   } ${
-    effectiveTheme.mode === 'dark'
+    effectiveTheme.mode === 'dark' || theme === 'dark'
       ? 'backdrop-blur-xl bg-gray-900/30 border-r border-white/10'
       : 'bg-white/95 backdrop-blur-xl border-r border-gray-200 shadow-lg'
   } flex flex-col overflow-hidden`}
