@@ -80,6 +80,7 @@ import DateTag from "./DateTag";
 import ForwardMessageModal from "./ForwardMessageModal";
 import PinnedMessagesBar from "./PinnedMessagesBar";
 import DeleteMessageModal from "./DeleteMessageModal";
+import UserProfileModal from "./UserProfileModal";
 
 // Memoized Chat Header Component
 const ChatHeader = React.memo(
@@ -103,6 +104,7 @@ const ChatHeader = React.memo(
     onDeleteChat,
     isBlocked,
     isArchived,
+    onOpenUserProfile,
   }) => {
     const [menuOpen, setMenuOpen] = React.useState(false);
     const menuRef = React.useRef(null);
@@ -123,10 +125,16 @@ const ChatHeader = React.memo(
     return (
       <div className={`${effectiveTheme.secondary} relative`}>
         <div className="p-4 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+          <div 
+            className="flex items-center space-x-3 flex-1 cursor-pointer hover:bg-white/5 transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1"
+            onClick={() => !selectedContact.isDocument && onOpenUserProfile()}
+          >
             {isMobileView && (
               <button
-                onClick={onBackToContacts}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onBackToContacts();
+                }}
                 className={`${effectiveTheme.text} hover:${effectiveTheme.accent} p-1 rounded`}
               >
                 ←
@@ -1373,6 +1381,10 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [messageToDelete, setMessageToDelete] = useState(null);
 
+  // User profile modal state
+  const [showUserProfileModal, setShowUserProfileModal] = useState(false);
+  const [profileUserId, setProfileUserId] = useState(null);
+
   // Hovered message date label (single place below header)
   const [hoverDateLabel, setHoverDateLabel] = useState("");
   const hoverClearTimeoutRef = useRef(null);
@@ -1407,6 +1419,25 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [isArchivedState, setIsArchivedState] = useState(false);
   const [archivedChatIds, setArchivedChatIds] = useState(new Set());
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  
+  // Chat requests visibility settings
+  const [showChatRequestsReceived, setShowChatRequestsReceived] = useState(() => {
+    const saved = localStorage.getItem('showChatRequestsReceived');
+    return saved !== null ? JSON.parse(saved) : false;
+  });
+  const [showChatInvitesAccepted, setShowChatInvitesAccepted] = useState(() => {
+    const saved = localStorage.getItem('showChatInvitesAccepted');
+    return saved !== null ? JSON.parse(saved) : false;
+  });
+  
+  // Save to localStorage when changed
+  useEffect(() => {
+    localStorage.setItem('showChatRequestsReceived', JSON.stringify(showChatRequestsReceived));
+  }, [showChatRequestsReceived]);
+  
+  useEffect(() => {
+    localStorage.setItem('showChatInvitesAccepted', JSON.stringify(showChatInvitesAccepted));
+  }, [showChatInvitesAccepted]);
   const [showMediaViewer, setShowMediaViewer] = useState(false);
   const moreMenuRef = useRef(null);
 // ------------------------------
@@ -2450,7 +2481,9 @@ const togglePin = async (docId, isPinnedNow) => {
 
   //After chatting with accepted chats
   const handleOpenChat = (chat) => {
-    // When opening a chat with a contact, ensure a chat exists on backend
+    // When opening a chat with a contact from accepted requests,
+    // DO NOT create a chat automatically - just show the UI
+    // Chat will be created when they send first message
     (async () => {
       try {
         const token = localStorage.getItem("token") || localStorage.getItem("chasmos_auth_token");
@@ -2460,10 +2493,87 @@ const togglePin = async (docId, isPinnedNow) => {
           return;
         }
 
-        // Determine user id to open chat with
-        const userId = chat._id || chat.id || chat.userId || chat.email;
+        // If this chat already has a chatId (from recentChats), open it directly
+        if (chat.chatId) {
+          console.log("Opening existing chat with chatId:", chat.chatId);
+          
+          const normalizedChatId = String(chat.chatId);
+          
+          // Set up the contact UI
+          const contactForUI = {
+            id: normalizedChatId,
+            chatId: normalizedChatId,
+            userId: chat.userId,
+            name: chat.name,
+            avatar: chat.avatar,
+            participants: chat.participants || [],
+            isGroup: chat.isGroup || false,
+          };
 
-        // Access or create chat on backend
+          setSelectedContact(contactForUI);
+
+          // Join socket room
+          if (socketRef.current && socketRef.current.emit) {
+            socketRef.current.emit('join chat', normalizedChatId);
+          }
+
+          // Fetch messages for this chat
+          const msgsUrl = `${API_BASE_URL}/api/message/${normalizedChatId}`;
+          const msgsRes = await fetch(msgsUrl, { 
+            headers: { Authorization: `Bearer ${token}` } 
+          });
+          
+          if (msgsRes.ok) {
+            const msgs = await msgsRes.json();
+            const formatted = msgs.map((m) => ({
+              id: m._id,
+              type: m.type || 'text',
+              content: m.content || m.text || '',
+              sender: m.sender?._id || m.sender || 'unknown',
+              timestamp: new Date(m.createdAt || Date.now()).getTime(),
+              isRead: m.isRead || false,
+              attachments: m.attachments || [],
+            }));
+            
+            setMessages((prev) => {
+              const filtered = filterDuplicateSystemMessages(formatted);
+              return { ...prev, [normalizedChatId]: filtered };
+            });
+          }
+          
+          return;
+        }
+
+        // Determine user id to open chat with (for new chats or accepted requests)
+        const userId = chat.userId || chat._id || chat.id || chat.email;
+
+        // Check if this is an accepted request (not an existing chat)
+        const isAcceptedRequest = acceptedChats?.some(
+          (accepted) => accepted.email === chat.email || accepted._id === userId
+        );
+
+        if (isAcceptedRequest) {
+          // For accepted requests, just set up the UI WITHOUT creating a chat
+          console.log("Opening accepted request - chat will be created on first message");
+          
+          const contactForUI = {
+            id: userId,
+            chatId: null, // No chat ID yet
+            userId: userId,
+            email: chat.email,
+            name: chat.name || chat.email?.split("@")[0] || "Unknown",
+            avatar: chat.avatar || "/default-avatar.png",
+            participants: [],
+            isGroup: false,
+            isAcceptedRequest: true, // Flag to indicate this needs chat creation
+          };
+
+          setSelectedContact(contactForUI);
+          setMessages((prev) => ({ ...prev, [userId]: [] })); // Empty messages
+          return;
+        }
+
+        // For existing chats, access or create chat on backend
         const res = await fetch(`${API_BASE_URL}/api/chat`, {
           method: "POST",
           headers: {
@@ -2780,48 +2890,71 @@ useEffect(() => {
         );
         const loggedInUserId = localUser._id || localUser.id || null;
 
-        const formatted = (Array.isArray(data) ? data : []).map((chat) => {
-          // Backend may already provide an `otherUser` helper; prefer that.
-          const otherUser =
-            chat.otherUser ||
-            (chat.participants &&
-              chat.participants.find(
-                (p) => String(p._id) !== String(loggedInUserId)
-              )) ||
-            (Array.isArray(chat.participants) ? chat.participants[0] : null);
+        const formatted = (Array.isArray(data) ? data : [])
+          .map((chat) => {
+            // Backend may already provide an `otherUser` helper; prefer that.
+            const otherUser =
+              chat.otherUser ||
+              (chat.participants &&
+                chat.participants.find(
+                  (p) => String(p._id) !== String(loggedInUserId)
+                )) ||
+              (Array.isArray(chat.participants) ? chat.participants[0] : null);
 
-          const otherId = otherUser?._id || otherUser?.id || null;
-          const displayName =
-            otherUser?.name || otherUser?.username || otherUser?.email || "Unknown";
+            const otherId = otherUser?._id || otherUser?.id || null;
+            
+            // Skip if no other user found or if chatting with yourself
+            if (!otherId || String(otherId) === String(loggedInUserId)) {
+              return null;
+            }
+            
+            const displayName =
+              otherUser?.name || otherUser?.username || otherUser?.email || "Unknown";
 
-          // Backend may send a preview string that includes a paperclip emoji when attachments exist
-          const rawLast = chat.lastMessage || "";
-          const hasAttachmentFromMarker = typeof rawLast === 'string' && /📎/.test(rawLast);
-          const looksLikeAttachmentOnly = rawLast === 'Attachment' || rawLast === 'Attachment' || /\.(png|jpe?g|gif|webp|bmp|mp4|pdf)$/i.test(rawLast);
-          const hasAttachment = Boolean(chat.hasAttachment || hasAttachmentFromMarker || looksLikeAttachmentOnly || (chat.lastMessage && chat.lastMessage.attachments && chat.lastMessage.attachments.length));
-          // If backend returned filename (e.g., "doc.pdf"), use it as attachmentFileName
-          const attachmentFileName = hasAttachment && typeof rawLast === 'string' ? (rawLast.replace(/📎/g, '').trim() || '') : '';
+            // Backend may send a preview string that includes a paperclip emoji when attachments exist
+            const rawLast = chat.lastMessage || "";
+            const hasAttachmentFromMarker = typeof rawLast === 'string' && /📎/.test(rawLast);
+            const looksLikeAttachmentOnly = rawLast === 'Attachment' || rawLast === 'Attachment' || /\.(png|jpe?g|gif|webp|bmp|mp4|pdf)$/i.test(rawLast);
+            const hasAttachment = Boolean(chat.hasAttachment || hasAttachmentFromMarker || looksLikeAttachmentOnly || (chat.lastMessage && chat.lastMessage.attachments && chat.lastMessage.attachments.length));
+            // If backend returned filename (e.g., "doc.pdf"), use it as attachmentFileName
+            const attachmentFileName = hasAttachment && typeof rawLast === 'string' ? (rawLast.replace(/📎/g, '').trim() || '') : '';
 
-          return {
-            id: otherId,
-            chatId: chat.chatId || chat._id,
-            name: displayName,
-            avatar: otherUser?.avatar || otherUser?.pic || null,
-            lastMessage: rawLast || "",
-            timestamp: chat.timestamp || chat.updatedAt,
-            isOnline: otherUser?.isOnline || false,
-            unreadCount:
-              typeof chat.unreadCount === "number"
-                ? chat.unreadCount
-                : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
-            hasAttachment,
-            attachmentFileName,
-          };
-        });
+            const chatIdValue = chat.chatId || chat._id;
+            
+            return {
+              id: chatIdValue, // Use chatId as the primary ID
+              chatId: chatIdValue,
+              userId: otherId, // Store the other user's ID separately
+              name: displayName,
+              avatar: otherUser?.avatar || otherUser?.pic || null,
+              lastMessage: rawLast || "",
+              timestamp: chat.timestamp || chat.updatedAt,
+              isOnline: otherUser?.isOnline || false,
+              unreadCount:
+                typeof chat.unreadCount === "number"
+                  ? chat.unreadCount
+                  : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
+              hasAttachment,
+              attachmentFileName,
+            };
+          })
+          .filter(Boolean); // Remove null entries
+
+      // Deduplicate by chatId (keep the most recent one)
+      const seen = new Map();
+      formatted.forEach(chat => {
+        const chatIdKey = String(chat.chatId);
+        if (!seen.has(chatIdKey) || 
+            new Date(chat.timestamp) > new Date(seen.get(chatIdKey).timestamp)) {
+          seen.set(chatIdKey, chat);
+        }
+      });
+      
+      const deduplicated = Array.from(seen.values());
 
       // Filter out archived chats using the chatId
-      const filtered = formatted.filter(c => {
-        const chatIdToCheck = String(c.chatId || c._id || '');
+      const filtered = deduplicated.filter(c => {
+        const chatIdToCheck = String(c.chatId || '');
         return !archivedChatIdsSet.has(chatIdToCheck);
       });
       setRecentChats(filtered);
@@ -3101,7 +3234,7 @@ const handleSendMessageFromInput = useCallback(
     if (typeof payload === 'object' && payload.attachments) {
       (async () => {
         const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-        const chatId = getChatId(payload);
+        let chatId = getChatId(payload);
 
         const localMessage = {
           id: Date.now(),
@@ -3113,7 +3246,53 @@ const handleSendMessageFromInput = useCallback(
         };
 
         // Local fallback
-        if (!chatId || !token) {
+        if (!token) {
+          appendMessage(chatId, localMessage);
+          updateRecentChat(chatId, localMessage.content || 'Attachment', Boolean(localMessage.attachments && localMessage.attachments.length), {
+            attachmentFileName: localMessage.attachments && localMessage.attachments[0]?.fileName,
+            attachmentMime: localMessage.attachments && localMessage.attachments[0]?.mimeType,
+          });
+          return;
+        }
+
+        // If this is an accepted request without a chat, create the chat first
+        if (selectedContact?.isAcceptedRequest && !chatId) {
+          try {
+            const userId = selectedContact.userId || selectedContact._id || selectedContact.email;
+            const createChatRes = await fetch(`${API_BASE_URL}/api/chat`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ userId }),
+            });
+
+            if (createChatRes.ok) {
+              const chatObj = await createChatRes.json();
+              chatId = String(chatObj._id || chatObj.id);
+              
+              // Update the selected contact with the new chat ID
+              setSelectedContact(prev => ({
+                ...prev,
+                chatId: chatId,
+                id: chatId,
+                isAcceptedRequest: false,
+                participants: chatObj.users || chatObj.participants || [],
+              }));
+
+              console.log("Chat created for accepted request:", chatId);
+            } else {
+              console.error("Failed to create chat for accepted request");
+              return;
+            }
+          } catch (err) {
+            console.error("Error creating chat:", err);
+            return;
+          }
+        }
+
+        if (!chatId) {
           appendMessage(chatId, localMessage);
           updateRecentChat(chatId, localMessage.content || 'Attachment', Boolean(localMessage.attachments && localMessage.attachments.length), {
             attachmentFileName: localMessage.attachments && localMessage.attachments[0]?.fileName,
@@ -3179,7 +3358,7 @@ const handleSendMessageFromInput = useCallback(
 
       (async () => {
         const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-        const chatId = getChatId(payload);
+        let chatId = getChatId(payload);
 
         const localMessage = {
           id: Date.now(),
@@ -3190,7 +3369,49 @@ const handleSendMessageFromInput = useCallback(
           isRead: true,
         };
 
-        if (!chatId || !token) {
+        if (!token) {
+          appendMessage(chatId, localMessage);
+          return;
+        }
+
+        // If this is an accepted request without a chat, create the chat first
+        if (selectedContact?.isAcceptedRequest && !chatId) {
+          try {
+            const userId = selectedContact.userId || selectedContact._id || selectedContact.email;
+            const createChatRes = await fetch(`${API_BASE_URL}/api/chat`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ userId }),
+            });
+
+            if (createChatRes.ok) {
+              const chatObj = await createChatRes.json();
+              chatId = String(chatObj._id || chatObj.id);
+              
+              // Update the selected contact with the new chat ID
+              setSelectedContact(prev => ({
+                ...prev,
+                chatId: chatId,
+                id: chatId,
+                isAcceptedRequest: false,
+                participants: chatObj.users || chatObj.participants || [],
+              }));
+
+              console.log("Chat created for accepted request:", chatId);
+            } else {
+              console.error("Failed to create chat for accepted request");
+              return;
+            }
+          } catch (err) {
+            console.error("Error creating chat:", err);
+            return;
+          }
+        }
+
+        if (!chatId) {
           appendMessage(chatId, localMessage);
           return;
         }
@@ -3559,9 +3780,18 @@ const handleSendMessageFromInput = useCallback(
     }
   }, [selectedContact, pendingPinMessageId, pinnedMessagesData, API_BASE_URL]);
 
-  const handleNavigateToPinnedMessage = useCallback((message) => {
+  const handleNavigateToPinnedMessage = useCallback((messageOrId) => {
     // Scroll to the message in the chat
-    const messageId = message._id || message.id;
+    // Handle both message object and messageId string
+    const messageId = typeof messageOrId === 'string' 
+      ? messageOrId 
+      : (messageOrId?._id || messageOrId?.id);
+    
+    if (!messageId) {
+      console.error('No message ID provided to handleNavigateToPinnedMessage');
+      return;
+    }
+    
     const messageElement = document.getElementById(`message-${messageId}`);
     
     if (messageElement) {
@@ -3572,6 +3802,8 @@ const handleSendMessageFromInput = useCallback(
       setTimeout(() => {
         messageElement.classList.remove('highlight-message');
       }, 2000);
+    } else {
+      console.warn(`Message element not found for ID: ${messageId}`);
     }
   }, []);
 
@@ -3833,73 +4065,95 @@ const handleSendMessageFromInput = useCallback(
         );
         const loggedInUserId = localUser._id || localUser.id || null;
 
-        const formatted = (Array.isArray(data) ? data : []).map((chat) => {
-          const otherUser =
-            chat.otherUser ||
-            (chat.participants &&
-              chat.participants.find(
-                (p) => String(p._id) !== String(loggedInUserId)
-              )) ||
-            (Array.isArray(chat.participants) ? chat.participants[0] : null);
+        const formatted = (Array.isArray(data) ? data : [])
+          .map((chat) => {
+            const otherUser =
+              chat.otherUser ||
+              (chat.participants &&
+                chat.participants.find(
+                  (p) => String(p._id) !== String(loggedInUserId)
+                )) ||
+              (Array.isArray(chat.participants) ? chat.participants[0] : null);
 
-          const otherId = otherUser?._id || otherUser?.id || null;
-          const displayName =
-  otherUser?.name ||
-  otherUser?.username ||
-  (otherUser?.email ? otherUser.email.split("@")[0] : null) ||
-  "Unknown";
+            const otherId = otherUser?._id || otherUser?.id || null;
+            
+            // Skip if no other user found or if chatting with yourself
+            if (!otherId || String(otherId) === String(loggedInUserId)) {
+              return null;
+            }
+            
+            const displayName =
+              otherUser?.name ||
+              otherUser?.username ||
+              (otherUser?.email ? otherUser.email.split("@")[0] : null) ||
+              "Unknown";
 
+            // Determine if lastMessage indicates attachments and extract preview text
+            let preview = "";
+            let hasAttachment = false;
+            let attachmentMime = null;
 
-          // Determine if lastMessage indicates attachments and extract preview text
-          let preview = "";
-          let hasAttachment = false;
-          let attachmentMime = null;
-
-          if (chat.lastMessage) {
-            if (typeof chat.lastMessage === "string") {
-              // backend may append a paperclip emoji for attachments
-              hasAttachment = chat.lastMessage.includes("📎");
-              preview = chat.lastMessage.replace(/📎/g, "").trim();
-            } else if (typeof chat.lastMessage === "object") {
-              const lm = chat.lastMessage;
-              const text = (lm.content || lm.text || "").toString().trim();
-              const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
-              hasAttachment = atts.length > 0;
-              if (text) {
-                preview = text.split(/\s+/).slice(0, 8).join(" ") + (hasAttachment ? " 📎" : "");
-              } else if (hasAttachment) {
-                const first = atts[0] || {};
-                preview = first.fileName || first.file_name || first.filename || (first.fileUrl ? first.fileUrl.split('/').pop() : "Attachment");
-                // strip paperclip or timestamp if present
-                preview = preview.replace(/^[\d\-:.]+_/, "");
-                attachmentMime = first.mimeType || first.type || null;
+            if (chat.lastMessage) {
+              if (typeof chat.lastMessage === "string") {
+                // backend may append a paperclip emoji for attachments
+                hasAttachment = chat.lastMessage.includes("📎");
+                preview = chat.lastMessage.replace(/📎/g, "").trim();
+              } else if (typeof chat.lastMessage === "object") {
+                const lm = chat.lastMessage;
+                const text = (lm.content || lm.text || "").toString().trim();
+                const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
+                hasAttachment = atts.length > 0;
+                if (text) {
+                  preview = text.split(/\s+/).slice(0, 8).join(" ") + (hasAttachment ? " 📎" : "");
+                } else if (hasAttachment) {
+                  const first = atts[0] || {};
+                  preview = first.fileName || first.file_name || first.filename || (first.fileUrl ? first.fileUrl.split('/').pop() : "Attachment");
+                  // strip paperclip or timestamp if present
+                  preview = preview.replace(/^[\d\-:.]+_/, "");
+                  attachmentMime = first.mimeType || first.type || null;
+                }
               }
             }
-          }
 
-          return {
-            id: otherId,
-            chatId: chat.chatId || chat._id,
-            name: displayName,
-            avatar: otherUser?.avatar || otherUser?.pic || null,
-            lastMessage: preview || "",
-            hasAttachment,
-            attachmentMime,
-            timestamp: chat.timestamp || chat.updatedAt,
-            isOnline: otherUser?.isOnline || false,
-            unreadCount:
-              typeof chat.unreadCount === "number"
-                ? chat.unreadCount
-                : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
-          };
+            const chatIdValue = chat.chatId || chat._id;
+            
+            return {
+              id: chatIdValue, // Use chatId as the primary ID
+              chatId: chatIdValue,
+              userId: otherId, // Store the other user's ID separately
+              name: displayName,
+              avatar: otherUser?.avatar || otherUser?.pic || null,
+              lastMessage: preview || "",
+              hasAttachment,
+              attachmentMime,
+              timestamp: chat.timestamp || chat.updatedAt,
+              isOnline: otherUser?.isOnline || false,
+              unreadCount:
+                typeof chat.unreadCount === "number"
+                  ? chat.unreadCount
+                  : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
+            };
+          })
+          .filter(Boolean); // Remove null entries
+
+        // Deduplicate by chatId (keep the most recent one)
+        const seen = new Map();
+        formatted.forEach(chat => {
+          const chatIdKey = String(chat.chatId);
+          if (!seen.has(chatIdKey) || 
+              new Date(chat.timestamp) > new Date(seen.get(chatIdKey).timestamp)) {
+            seen.set(chatIdKey, chat);
+          }
         });
+        
+        const deduplicated = Array.from(seen.values());
 
         // Filter using archivedChatIds state in case it's already loaded
         if (archivedChatIds && archivedChatIds.size > 0) {
-          const filtered = formatted.filter(c => !archivedChatIds.has(String(c.chatId || c.id || '')));
+          const filtered = deduplicated.filter(c => !archivedChatIds.has(String(c.chatId || '')));
           setRecentChats(filtered);
         } else {
-          setRecentChats(formatted);
+          setRecentChats(deduplicated);
         }
       } catch (err) {
         setError(err.message);
@@ -4560,6 +4814,51 @@ useEffect(() => {
                                 <FileText className="w-5 h-5" />
                                 <span>Media, Links & Docs</span>
                               </button>
+                              
+                              {/* Divider */}
+                              <div className={`border-t ${effectiveTheme.border} my-1`}></div>
+                              
+                              {/* Checkbox for Chat Requests Received */}
+                              <button
+                                onClick={() => setShowChatRequestsReceived(!showChatRequestsReceived)}
+                                className={`w-full flex items-center gap-3 px-4 py-3 ${effectiveTheme.hover} ${effectiveTheme.text} transition-colors`}
+                              >
+                                <div className="flex items-center gap-3 flex-1">
+                                  <div className={`w-5 h-5 border-2 rounded flex items-center justify-center ${
+                                    showChatRequestsReceived 
+                                      ? 'bg-blue-500 border-blue-500' 
+                                      : `border-gray-400 ${effectiveTheme.mode === 'dark' ? 'border-gray-500' : 'border-gray-300'}`
+                                  }`}>
+                                    {showChatRequestsReceived && (
+                                      <svg className="w-3 h-3 text-white" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path d="M5 13l4 4L19 7"></path>
+                                      </svg>
+                                    )}
+                                  </div>
+                                  <span>Show Chat Requests Received</span>
+                                </div>
+                              </button>
+                              
+                              {/* Checkbox for Chat Invites Accepted */}
+                              <button
+                                onClick={() => setShowChatInvitesAccepted(!showChatInvitesAccepted)}
+                                className={`w-full flex items-center gap-3 px-4 py-3 ${effectiveTheme.hover} ${effectiveTheme.text} transition-colors`}
+                              >
+                                <div className="flex items-center gap-3 flex-1">
+                                  <div className={`w-5 h-5 border-2 rounded flex items-center justify-center ${
+                                    showChatInvitesAccepted 
+                                      ? 'bg-blue-500 border-blue-500' 
+                                      : `border-gray-400 ${effectiveTheme.mode === 'dark' ? 'border-gray-500' : 'border-gray-300'}`
+                                  }`}>
+                                    {showChatInvitesAccepted && (
+                                      <svg className="w-3 h-3 text-white" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path d="M5 13l4 4L19 7"></path>
+                                      </svg>
+                                    )}
+                                  </div>
+                                  <span>Show Chat Invites Accepted</span>
+                                </div>
+                              </button>
                             </motion.div>
                           )}
                         </AnimatePresence>
@@ -4593,7 +4892,7 @@ useEffect(() => {
                  <div className="flex-1 flex flex-col overflow-hidden">
                   
   {/* Alerts Section: Chat Requests & Accepted - Hide for documents section */}
-  {activeSection !== 'documents' && (
+  {activeSection !== 'documents' && showChatRequestsReceived && (
   <div className="flex-shrink-0">
     {/* Chat Requests Dropdown */}
     <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
@@ -4695,6 +4994,7 @@ useEffect(() => {
                     </div>
 
                     {/* 🔹 Accepted Chats Dropdown */}
+                    {showChatInvitesAccepted && (
                     <div className="rounded-md justify-between items-center px-2 py-1">
   <button
     onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
@@ -4802,6 +5102,7 @@ useEffect(() => {
     )}
   </AnimatePresence>
 </div>
+                    )}
 
                   </div>
   )}
@@ -5574,6 +5875,41 @@ useEffect(() => {
                 onDeleteChat={handleDeleteChat}
                 isBlocked={isBlockedState}
                 isArchived={isArchivedState}
+                onOpenUserProfile={() => {
+                  // For group chats or documents, we can't show a single user profile
+                  if (selectedContact.isGroup || selectedContact.isDocument) {
+                    console.log('Cannot show user profile for group chats or documents');
+                    return;
+                  }
+                  
+                  // Get current user from localStorage
+                  const currentUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+                  const currentUserId = currentUser._id || currentUser.id;
+                  
+                  // Try to get userId from selectedContact first (most direct)
+                  let userIdToShow = selectedContact.userId;
+                  
+                  // If not found, try to find from participants array
+                  if (!userIdToShow && selectedContact.participants?.length > 0) {
+                    const otherUser = selectedContact.participants.find(
+                      p => String(p._id || p.id) !== String(currentUserId)
+                    );
+                    userIdToShow = otherUser?._id || otherUser?.id;
+                  }
+                  
+                  console.log('Opening user profile:', {
+                    currentUserId,
+                    otherUserId: userIdToShow,
+                    selectedContact
+                  });
+                  
+                  if (userIdToShow) {
+                    setProfileUserId(userIdToShow);
+                    setShowUserProfileModal(true);
+                  } else {
+                    console.error('Could not determine user ID to show profile');
+                  }
+                }}
               />
               
               {/* Pinned Messages Bar */}
@@ -5585,6 +5921,15 @@ useEffect(() => {
               />
               
               <div className="flex-1 overflow-hidden relative">
+                {/* User Profile Modal - Positioned here to overlay messages */}
+                <UserProfileModal
+                  isOpen={showUserProfileModal}
+                  onClose={() => setShowUserProfileModal(false)}
+                  userId={profileUserId}
+                  effectiveTheme={effectiveTheme}
+                  onNavigateToMessage={handleNavigateToPinnedMessage}
+                />
+                
                 {/* Hovered message date (overlay, does not affect layout) */}
                 <div className="absolute top-3 left-1/2 transform -translate-x-1/2 z-40 pointer-events-none">
                   <AnimatePresence>

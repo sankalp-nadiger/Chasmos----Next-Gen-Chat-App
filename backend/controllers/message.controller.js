@@ -662,7 +662,8 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
               fileSize: attachment.fileSize,
               createdAt: message.createdAt,
               senderName: message.sender?.name || message.sender?.email,
-              chatId: message.chat
+              chatId: message.chat,
+              messageId: message._id  // Add message ID for navigation
             });
           }
         });
@@ -731,7 +732,8 @@ export const getLinkAttachments = asyncHandler(async (req, res) => {
             content: message.content,
             createdAt: message.createdAt,
             senderName: message.sender?.name || message.sender?.email,
-            chatId: message.chat
+            chatId: message.chat,
+            messageId: message._id  // Add message ID for navigation
           });
         });
       }
@@ -809,7 +811,8 @@ export const getDocumentAttachments = asyncHandler(async (req, res) => {
               fileSize: attachment.fileSize,
               createdAt: message.createdAt,
               senderName: message.sender?.name || message.sender?.email,
-              chatId: message.chat
+              chatId: message.chat,
+              messageId: message._id  // Add message ID for navigation
             });
           }
         });

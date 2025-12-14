@@ -16,7 +16,8 @@ import contactRoutes from "./routes/contact.routes.js";
 import syncRoutes from "./routes/sync.routes.js";
 import documentRoutes from "./routes/document.route.js";
 import archiveRoutes from "./routes/archive.routes.js"; 
-import blockRoutes from "./routes/block.routes.js"; 
+import blockRoutes from "./routes/block.routes.js";
+import userProfileRoutes from "./routes/userProfile.routes.js"; 
 import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
 import cors from 'cors';
 
@@ -52,7 +53,8 @@ app.use("/api/sync", syncRoutes);
 app.use("/api/document", documentRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/archive", archiveRoutes); 
-app.use("/api/block", blockRoutes); 
+app.use("/api/block", blockRoutes);
+app.use("/api/users", userProfileRoutes); 
 
 app.use(notFound);
 app.use(errorHandler);
