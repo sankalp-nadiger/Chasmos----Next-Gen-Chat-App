@@ -392,64 +392,62 @@ const NewChat = ({
     useState(null);
   const [activeSection, setActiveSection] = useState("contacts"); // 'contacts', 'users', 'business'
 
- useEffect(() => {
-  const fetchUsers = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const res = await fetch(`${API_BASE_URL}/api/user`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Failed to fetch users");
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`${API_BASE_URL}/api/user`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error("Failed to fetch users");
 
-      const data = await res.json();
+        const data = await res.json();
 
-      // Assign random online status only once here
-      const formattedUsers = data.map((u) => ({
-        id: u._id,
-        name: u.name || "unknown",
-        email: u.email,
-        avatar: u.avatar || null,
-        isOnline: Math.random() < 0.5, // ✅ assigned once
-        timestamp: u.createdAt,
-        type: "user",
-      }));
+        // Assign random online status only once here
+        const formattedUsers = data.map((u) => ({
+          id: u._id,
+          name: u.name || "unknown",
+          email: u.email,
+          avatar: u.avatar || null,
+          isOnline: Math.random() < 0.5, // ✅ assigned once
+          timestamp: u.createdAt,
+          type: "user",
+        }));
 
-      // Separate existing contacts from new registered users
-      const knownContacts = formattedUsers.filter((user) =>
-        existingContacts.some((contact) => contact.id === user.id)
-      );
-      const newUsers = formattedUsers.filter(
-        (user) => !existingContacts.some((contact) => contact.id === user.id)
-      );
+        // Separate existing contacts from new registered users
+        const knownContacts = formattedUsers.filter((user) =>
+          existingContacts.some((contact) => contact.id === user.id)
+        );
+        const newUsers = formattedUsers.filter(
+          (user) => !existingContacts.some((contact) => contact.id === user.id)
+        );
 
-      // Also include existingContacts that are NOT registered users (e.g., Google contacts)
-      const existingNotRegistered = (existingContacts || []).filter(
-        (c) => !formattedUsers.some((u) => String(u.id) === String(c.id))
-      );
+        // Also include existingContacts that are NOT registered users (e.g., Google contacts)
+        const existingNotRegistered = (existingContacts || []).filter(
+          (c) => !formattedUsers.some((u) => String(u.id) === String(c.id))
+        );
 
-      const existingNotRegisteredMapped = existingNotRegistered.map((c) => ({
-        id: c.id || c._id || c.googleId || c.email || c.phone || `${c.name}`,
-        name: c.name || c.email || c.phone || "Unknown",
-        email: c.email || undefined,
-        avatar: c.avatar || null,
-        isOnline: c.isOnline || false,
-        type: c.isGoogleContact ? "google-contact" : "contact",
-      }));
+        const existingNotRegisteredMapped = existingNotRegistered.map((c) => ({
+          id: c.id || c._id || c.googleId || c.email || c.phone || `${c.name}`,
+          name: c.name || c.email || c.phone || "Unknown",
+          email: c.email || undefined,
+          avatar: c.avatar || null,
+          isOnline: c.isOnline || false,
+          type: c.isGoogleContact ? "google-contact" : "contact",
+        }));
 
-      // Merge: put non-registered existing contacts first, then known registered contacts
-      setAllContacts([...existingNotRegisteredMapped, ...knownContacts]);
-      setRegisteredUsers(newUsers);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-  fetchUsers();
-  // ensure it runs only once on mount
-  
-}, []);
-
+        // Merge: put non-registered existing contacts first, then known registered contacts
+        setAllContacts([...existingNotRegisteredMapped, ...knownContacts]);
+        setRegisteredUsers(newUsers);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchUsers();
+    // ensure it runs only once on mount
+  }, []);
 
   const filteredAllContacts = useMemo(
     () =>
@@ -515,14 +513,20 @@ const NewChat = ({
               className={`w-5 h-5 ${effectiveTheme.text || "text-gray-900"}`}
             />
           </button>
-          
+
           {/* Chasmos Logo and Name */}
           <div className="flex items-center space-x-2">
-            <Logo size="md" showText={true} textClassName={effectiveTheme.text || "text-gray-900"} />
+            <Logo
+              size="md"
+              showText={true}
+              textClassName={effectiveTheme.text || "text-gray-900"}
+            />
           </div>
-          
-          <div className={`hidden sm:block border-l ${effectiveTheme.border || "border-gray-300"} h-8 mx-2`}></div>
-          
+
+          <div
+            className={`hidden sm:block border-l ${effectiveTheme.border || "border-gray-300"} h-8 mx-2`}
+          ></div>
+
           <div className="hidden sm:block">
             <h2
               className={`text-lg font-semibold ${effectiveTheme.text || "text-gray-900"}`}
@@ -736,7 +740,9 @@ const NewChat = ({
                     onClick={handleBackToBusinessCategories}
                     className={`p-1 rounded hover:${effectiveTheme.hover || "bg-gray-200"} transition-colors`}
                   >
-                    <ChevronLeft className={`w-5 h-5 ${effectiveTheme.text || "text-gray-900"}`} />
+                    <ChevronLeft
+                      className={`w-5 h-5 ${effectiveTheme.text || "text-gray-900"}`}
+                    />
                   </button>
                   <selectedBusinessCategory.icon
                     className={`w-5 h-5 ${effectiveTheme.textSecondary || "text-gray-500"}`}
@@ -784,8 +790,6 @@ const NewChat = ({
 
 //Contacts appearing in new chat page
 
-
-
 const ContactItem = ({
   contact,
   effectiveTheme,
@@ -796,10 +800,10 @@ const ContactItem = ({
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteMessage, setInviteMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const [feedback, setFeedback] = useState({ type: "", message: "" });
+  const [inviteStatus, setInviteStatus] = useState("idle"); // idle | sent
   const [isAccepted, setIsAccepted] = useState(false);
 
-  // Check if this contact is already accepted
+  // ---- Check Accepted ----
   useEffect(() => {
     const fetchAcceptedChats = async () => {
       try {
@@ -809,23 +813,23 @@ const ContactItem = ({
         const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
           headers: { Authorization: `Bearer ${userToken}` },
         });
-        const data = await res.json();
 
+        const data = await res.json();
         if (Array.isArray(data) && data.includes(contact.email)) {
           setIsAccepted(true);
         }
       } catch (err) {
-        console.error("Error fetching accepted chats:", err);
+        console.error(err);
       }
     };
+
     fetchAcceptedChats();
   }, [contact.email]);
 
-  // ---- Send Invite Handler ----
+  // ---- Send Invite ----
   const handleSendInvite = async () => {
-    setFeedback({ type: "", message: "" });
     try {
-      if (!token) throw new Error("You must be logged in to send an invite.");
+      if (!token) throw new Error("Unauthorized");
 
       setSending(true);
       const res = await fetch(`${API_BASE_URL}/api/user/request/send`, {
@@ -840,21 +844,12 @@ const ContactItem = ({
         }),
       });
 
-      const data = await res.json();
+      if (!res.ok) throw new Error("Invite already sent");
 
-      if (!res.ok) {
-        if (res.status === 401) {
-          throw new Error(
-            "Session expired or unauthorized. Please log in again."
-          );
-        }
-        throw new Error(data.message || "Failed to send invite");
-      }
-
-      setFeedback({ type: "success", message: "Invite sent successfully!" });
+      setInviteStatus("sent");
       setInviteMessage("");
-    } catch (err) {
-      setFeedback({ type: "error", message: err.message });
+    } catch {
+      setInviteStatus("sent"); // treat already sent as sent state
     } finally {
       setSending(false);
     }
@@ -864,7 +859,7 @@ const ContactItem = ({
   const handleWithdrawInvite = async () => {
     try {
       const userToken = localStorage.getItem("token");
-      const res = await fetch(`${API_BASE_URL}/api/user/request/withdraw`, {
+      await fetch(`${API_BASE_URL}/api/user/request/withdraw`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -873,12 +868,10 @@ const ContactItem = ({
         body: JSON.stringify({ recipientEmail: contact.email }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to withdraw invite");
-
-      setFeedback({ type: "info", message: "Invite withdrawn successfully." });
+      setInviteStatus("idle");
+      setShowInviteModal(false);
     } catch (err) {
-      setFeedback({ type: "error", message: err.message });
+      console.error(err);
     }
   };
 
@@ -887,97 +880,50 @@ const ContactItem = ({
       {/* Contact Row */}
       <motion.div
         whileHover={{ x: 4 }}
-        className={`flex items-center justify-between p-4 cursor-pointer border-b ${
-          effectiveTheme.border || "border-gray-300"
-        } hover:${effectiveTheme.hover || "bg-gray-100"} transition-all duration-200`}
+        className={`flex items-center justify-between p-4 cursor-pointer border-b
+          ${effectiveTheme.border || "border-gray-300"}
+          hover:${effectiveTheme.hover || "bg-gray-100"}`}
       >
-       
-        {/* Left Side */}
-<div
-  className="flex items-center space-x-3 min-w-0"
-  onClick={() => onClick(contact)}
->
-  <div className="relative">
-    {contact.avatar ? (
-      <img
-        src={contact.avatar}
-        alt={contact.name}
-        className="w-12 h-12 rounded-full object-cover"
-      />
-    ) : (
-      <div className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-400 to-blue-500 flex items-center justify-center text-white font-bold text-lg">
-        {contact.name.charAt(0)}
-      </div>
-    )}
-    {contact.isOnline && (
-      <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
-    )}
-  </div>
+        {/* Left */}
+        <div
+          className="flex items-center gap-3"
+          onClick={() => onClick(contact)}
+        >
+          <img
+            src={
+              contact.avatar ||
+              "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+            }
+            className="w-12 h-12 rounded-full object-cover"
+          />
+          <div>
+            <h3 className="font-semibold truncate">{contact.name}</h3>
+            {showLastSeen && (
+              <span className="text-xs text-gray-500">
+                {contact.isOnline ? "Online" : "Offline"}
+              </span>
+            )}
+          </div>
+        </div>
 
-  <div className="flex-1 min-w-0">
-    {/* Name */}
-    <h3
-      className={`font-semibold ${effectiveTheme.text || "text-gray-900"} truncate`}
-    >
-      {contact.name}
-    </h3>
-
-    {/* Online/Offline */}
-    {showLastSeen && (
-      <span
-        className={`text-xs ${
-          contact.isOnline
-            ? "text-green-500"
-            : effectiveTheme.textSecondary || "text-gray-500"
-        }`}
-      >
-        {contact.isOnline ? "Online" : "Offline"}
-      </span>
-    )}
-
-    {/* Timestamp / Last Seen */}
-    {!contact.isOnline && contact.timestamp && (
-      <p
-        className={`text-xs ${
-          effectiveTheme.textSecondary || "text-gray-400"
-        } mt-0.5`}
-      >
-        Last seen{" "}
-        {new Date(contact.timestamp).toLocaleString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        })}
-      </p>
-    )}
-  </div>
-</div>
-
-
-        {/* Right: Dynamic Button */}
+        {/* Right */}
         {isAccepted ? (
-          // Chat Icon when accepted
           <button
             onClick={(e) => {
               e.stopPropagation();
               onClick(contact);
             }}
-            className="ml-3 p-2 rounded-full hover:bg-green-500/20 transition"
-            title="Start Chat"
+            className="p-2 rounded-full hover:bg-green-500/20"
           >
             <MessageCircle className="w-5 h-5 text-green-500" />
           </button>
         ) : (
-          // Default: Send Invite
           <button
             onClick={(e) => {
               e.stopPropagation();
               setShowInviteModal(true);
             }}
-            className="ml-3 p-2 rounded-full hover:bg-blue-500/20 transition"
-            title="Send Chat Invite"
+            className="p-2 rounded-full hover:bg-blue-500/20"
           >
             <Send className="w-5 h-5 text-blue-500" />
           </button>
@@ -986,106 +932,96 @@ const ContactItem = ({
 
       {/* Invite Modal */}
       {showInviteModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className={`w-full max-w-md rounded-2xl p-6 ${
-              effectiveTheme.secondary || "bg-white dark:bg-gray-800"
-            } shadow-2xl`}
+            className={`w-full max-w-md rounded-2xl p-6 shadow-xl
+              ${effectiveTheme.secondary || "bg-white dark:bg-gray-800"}`}
           >
             {/* Header */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <img
-                  src={
-                    contact.avatar ||
-                    "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-                  }
-                  alt={contact.name}
-                  className="w-14 h-14 rounded-full object-cover"
-                />
-                <div>
-                  <h2
-                    className={`font-semibold text-lg ${effectiveTheme.text || "text-gray-900"}`}
-                  >
-                    {contact.name}
-                  </h2>
-                  <p
-                    className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"}`}
-                  >
-                    {contact.bio || "No bio available"}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowInviteModal(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <XCircle className="w-5 h-5" />
+            <div className="flex justify-between mb-4">
+              <h2 className="font-semibold text-lg">{contact.name}</h2>
+              <button onClick={() => setShowInviteModal(false)}>
+                <XCircle className="w-5 h-5 text-gray-400" />
               </button>
             </div>
 
-            {/* Message Input */}
-            <textarea
-              rows="3"
-              value={inviteMessage}
-              onChange={(e) => setInviteMessage(e.target.value)}
-              placeholder="Add an optional message..."
-              className={`w-full p-3 border rounded-lg text-sm
-                ${effectiveTheme.bg || "bg-white"} 
-                ${effectiveTheme.border || "border-gray-300"} 
-                focus:ring-2 focus:ring-blue-500 outline-none resize-none
-                placeholder-gray-400
-                text-gray-900 dark:text-gray-100
-                dark:bg-gray-800 dark:placeholder-gray-500`}
-            />
-
-            {/* Feedback */}
-            {feedback.message && (
+            {/* Invite Sent Box */}
+            {inviteStatus === "sent" && (
               <div
-                className={`mt-3 text-sm ${
-                  feedback.type === "error"
-                    ? "text-red-500"
-                    : feedback.type === "info"
-                    ? "text-yellow-500"
-                    : "text-green-500"
-                }`}
+                className={`flex items-center gap-3 p-4 rounded-xl border
+                  ${effectiveTheme.border || "border-gray-200 dark:border-gray-600"}
+                  ${effectiveTheme.secondary || "bg-gray-100 dark:bg-gray-700"}`}
               >
-                {feedback.message}
+                <div className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500/10">
+                  <Send className="w-4 h-4 text-blue-500" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Invite sent</p>
+                  <p className="text-xs text-gray-500">
+                    Waiting for {contact.name} to accept
+                  </p>
+                </div>
               </div>
             )}
 
-            {/* Buttons */}
-            <div className="flex justify-end mt-5 space-x-2">
-              {feedback.type === "success" ||
-              feedback.message.includes("already sent") ? (
+            {/* Message Input */}
+            {inviteStatus !== "sent" && (
+              <textarea
+                rows="3"
+                value={inviteMessage}
+                onChange={(e) => setInviteMessage(e.target.value)}
+                placeholder="Add an optional message..."
+                className={`w-full mt-4 p-3 rounded-xl border resize-none text-sm
+    ${effectiveTheme.bg || "bg-white dark:bg-gray-800"}
+    ${effectiveTheme.border || "border-gray-300 dark:border-gray-600"}
+    text-gray-900 dark:text-gray-100
+    placeholder-gray-400 dark:placeholder-gray-500
+    focus:ring-2 focus:ring-blue-500 focus:outline-none`}
+              />
+            )}
+
+            {/* Footer */}
+            <div className="flex justify-end mt-6 gap-2">
+              {inviteStatus === "sent" ? (
                 <button
                   onClick={handleWithdrawInvite}
-                  className="flex items-center gap-2 px-4 py-2 rounded-md bg-red-400 dark:bg-gray-700 text-gray-800 dark:text-gray-100 text-sm hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg
+                    ${effectiveTheme.secondary || "bg-gray-100 dark:bg-gray-700"}
+                    hover:bg-red-500/10 hover:text-red-500 transition`}
                 >
-                  <X className="w-4 h-4 text-red-500" />
+                  <X className="w-4 h-4" />
                   Withdraw Invite
                 </button>
               ) : (
                 <>
                   <button
                     onClick={() => setShowInviteModal(false)}
-                    className="px-4 py-2 rounded-md bg-gray-600 dark:bg-gray-300 hover:opacity-80 text-sm"
+                    className={`
+    px-4 py-2 rounded-xl text-sm font-medium
+    border
+    ${effectiveTheme.border || "border-gray-300 dark:border-gray-600"}
+    ${effectiveTheme.text || "text-gray-700 dark:text-gray-200"}
+    bg-transparent
+    hover:bg-blue-600 dark:hover:bg-blue-600
+    active:scale-[0.98]
+    transition-all duration-200
+  `}
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleSendInvite}
                     disabled={sending}
-                    className="flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-50"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white"
                   >
                     {sending ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <Send className="w-4 h-4" />
                     )}
-                    {sending ? "Sending..." : "Send Invite"}
+                    Send Invite
                   </button>
                 </>
               )}
@@ -1096,9 +1032,6 @@ const ContactItem = ({
     </>
   );
 };
-
-
-
 
 // Business Contact Item Component - for business professionals/contacts
 const BusinessContactItem = ({ business, effectiveTheme, onClick }) => {
