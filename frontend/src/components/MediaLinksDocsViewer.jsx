@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Download, ExternalLink, FileText, Image, Video, File, Link, Filter, Check } from 'lucide-react';
+import { X, Download, ExternalLink, FileText, Image, Video, File, Link, Filter, Check, Camera } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedContact }) => {
-  const [activeTab, setActiveTab] = useState('media'); // media, links, docs
+  const [activeTab, setActiveTab] = useState('media'); // media, links, docs, screenshots
   const [mediaItems, setMediaItems] = useState([]);
   const [linkItems, setLinkItems] = useState([]);
   const [docItems, setDocItems] = useState([]);
+  const [screenshotItems, setScreenshotItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showFilter, setShowFilter] = useState(false);
@@ -111,6 +112,9 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
         case 'docs':
           endpoint = `/api/message/documents?chatIds=${chatIds}`;
           break;
+        case 'screenshots':
+          endpoint = `/api/screenshot?chatIds=${chatIds}`;
+          break;
         default:
           endpoint = `/api/message/media?chatIds=${chatIds}`;
       }
@@ -144,6 +148,9 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
           break;
         case 'docs':
           setDocItems(data || []);
+          break;
+        case 'screenshots':
+          setScreenshotItems(data || []);
           break;
       }
     } catch (err) {
@@ -373,6 +380,65 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
     );
   };
 
+  const renderScreenshotsGrid = () => {
+    if (loading) {
+      return <div className={`text-center py-8 ${effectiveTheme.textSecondary}`}>Loading screenshots...</div>;
+    }
+
+    if (screenshotItems.length === 0) {
+      return <div className={`text-center py-8 ${effectiveTheme.textSecondary}`}>No screenshots found</div>;
+    }
+
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
+        {screenshotItems.map((item, index) => (
+          <motion.div
+            key={item._id || index}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className={`relative group rounded-lg overflow-hidden ${effectiveTheme.secondary} border ${effectiveTheme.border} hover:shadow-lg transition-shadow`}
+          >
+            <div className="aspect-square">
+              <img
+                src={item.url}
+                alt={item.fileName}
+                className="w-full h-full object-cover"
+              />
+            </div>
+            
+            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+              <button
+                onClick={() => handleDownload(item.url, item.fileName)}
+                className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors mr-2"
+                title="Download"
+              >
+                <Download className="w-5 h-5 text-gray-800" />
+              </button>
+              <a
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors"
+                title="Open"
+              >
+                <ExternalLink className="w-5 h-5 text-gray-800" />
+              </a>
+            </div>
+            
+            <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent">
+              <div className="flex items-center gap-1 mb-1">
+                <Camera className="w-3 h-3 text-yellow-400" />
+                <p className="text-xs text-yellow-400 font-medium">Screenshot</p>
+              </div>
+              <p className="text-xs text-white truncate">By: {item.capturedByName || 'Unknown'}</p>
+              <p className="text-xs text-gray-300">{new Date(item.createdAt).toLocaleDateString()}</p>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
       <motion.div
@@ -491,6 +557,17 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
             <FileText className="w-5 h-5 inline mr-2" />
             Documents
           </button>
+          <button
+            onClick={() => setActiveTab('screenshots')}
+            className={`flex-1 px-4 py-3 font-medium transition-colors ${
+              activeTab === 'screenshots'
+                ? `${effectiveTheme.mode === 'dark' ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-100 text-blue-600'} border-b-2 border-blue-500`
+                : `${effectiveTheme.textSecondary} hover:${effectiveTheme.hover}`
+            }`}
+          >
+            <Camera className="w-5 h-5 inline mr-2" />
+            Screenshots
+          </button>
         </div>
 
         {/* Content */}
@@ -509,6 +586,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
               {activeTab === 'media' && renderMediaGrid()}
               {activeTab === 'links' && renderLinksList()}
               {activeTab === 'docs' && renderDocsList()}
+              {activeTab === 'screenshots' && renderScreenshotsGrid()}
             </>
           )}
         </div>

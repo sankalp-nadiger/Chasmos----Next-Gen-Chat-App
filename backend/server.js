@@ -18,8 +18,10 @@ import documentRoutes from "./routes/document.route.js";
 import archiveRoutes from "./routes/archive.routes.js"; 
 import blockRoutes from "./routes/block.routes.js";
 import userProfileRoutes from "./routes/userProfile.routes.js"; 
+import screenshotRoutes from "./routes/screenshot.routes.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
 import cors from 'cors';
+import { initScheduledMessageCron } from "./services/scheduledMessageCron.js";
 
 connectDB();
 const app = express();
@@ -55,6 +57,7 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/archive", archiveRoutes); 
 app.use("/api/block", blockRoutes);
 app.use("/api/users", userProfileRoutes); 
+app.use("/api/screenshot", screenshotRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
@@ -65,6 +68,9 @@ const server = app.listen(
   PORT,
   console.log(`Server running on PORT ${PORT}...`.yellow.bold)
 );
+
+// Initialize scheduled message cron job
+initScheduledMessageCron();
 
 const io = new Server(server, {
   pingTimeout: 60000,

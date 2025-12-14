@@ -205,10 +205,10 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
     if (onNavigateToMessage && messageId) {
       // Close modal first so the message is visible
       onClose();
-      // Small delay to ensure modal is closed and DOM is ready
+      // Longer delay to ensure modal is fully closed and DOM is ready
       setTimeout(() => {
         onNavigateToMessage(messageId);
-      }, 100);
+      }, 300);
     } else {
       console.warn('Cannot navigate - messageId:', messageId, 'onNavigateToMessage:', !!onNavigateToMessage);
     }

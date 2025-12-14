@@ -41,17 +41,12 @@ export const blockUser = asyncHandler(async (req, res) => {
   });
 
   if (chat) {
-    // Create system message
-    const systemMessage = await Message.create({
+    // Create system message (but don't update lastMessage)
+    await Message.create({
       sender: currentUserId,
       content: 'You blocked this contact',
       type: 'system',
       chat: chat._id,
-    });
-
-    // Update chat's latest message
-    await Chat.findByIdAndUpdate(chat._id, {
-      latestMessage: systemMessage._id
     });
 
     console.log(`📝 System message created for block action`);
@@ -93,17 +88,12 @@ export const unblockUser = asyncHandler(async (req, res) => {
   });
 
   if (chat) {
-    // Create system message
-    const systemMessage = await Message.create({
+    // Create system message (but don't update lastMessage)
+    await Message.create({
       sender: currentUserId,
       content: 'You unblocked this contact',
       type: 'system',
       chat: chat._id,
-    });
-
-    // Update chat's latest message
-    await Chat.findByIdAndUpdate(chat._id, {
-      latestMessage: systemMessage._id
     });
 
     console.log(`📝 System message created for unblock action`);
