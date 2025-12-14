@@ -349,29 +349,6 @@ const ChatHeader = React.memo(
 // MessageBubble component definition
 const MessageBubble = React.memo(
   ({ message, isPinned, onPinToggle, onDeleteMessage, onForwardMessage, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange }) => {
-    // Check if this is a system message and render it centered
-    if (message.isSystemMessage) {
-      return (
-        <motion.div
-          key={message.id}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -10 }}
-          className="w-full flex justify-center my-2"
-        >
-          <div
-            className={`px-4 py-2 rounded-lg text-sm text-center ${
-              effectiveTheme.mode === 'dark'
-                ? 'bg-gray-700/50 text-gray-300'
-                : 'bg-gray-200/70 text-gray-700'
-            }`}
-          >
-            {message.content}
-          </div>
-        </motion.div>
-      );
-    }
-
     const sender = message.sender;
     const isOwnMessage = (() => {
       if (!sender) return false;
@@ -1212,7 +1189,7 @@ const MessagesArea = ({
                     <DateTag label={formatDayLabel(item.timestamp)} />
                   </div>
                 );
-              } else if (item && item.isSystemMessage) {
+              } else if (item && (item.isSystemMessage || item.type === 'system')) {
                 // System notification (block/unblock)
                 return (
                   <motion.div
@@ -1223,7 +1200,7 @@ const MessagesArea = ({
                     className="w-full flex justify-center my-2"
                   >
                     <div
-                      className={`px-4 py-2 rounded-lg text-sm ${
+                      className={`px-4 py-2 rounded-lg text-sm text-center ${
                         effectiveTheme.mode === 'dark'
                           ? 'bg-gray-700/50 text-gray-300'
                           : 'bg-gray-200/70 text-gray-700'
@@ -1233,7 +1210,8 @@ const MessagesArea = ({
                     </div>
                   </motion.div>
                 );
-              } else {
+              } else if (item && !item.isSystemMessage && item.type !== 'system') {
+                // Regular user messages
                 return (
                   <MessageBubble
                     key={item.id}
@@ -1249,6 +1227,7 @@ const MessagesArea = ({
                   />
                 );
               }
+              return null;
             })}
           </AnimatePresence>
 
@@ -1962,20 +1941,29 @@ const togglePin = async (docId, isPinnedNow) => {
     if (!Array.isArray(messages) || messages.length === 0) return messages;
     
     const filtered = [];
-    let lastSystemMessage = null;
+    const systemMessageLastIndex = new Map(); // Track the last occurrence index of each system message type
     
-    for (const msg of messages) {
-      if (msg.isSystemMessage) {
-        // Check if this system message is the same as the last one
-        if (lastSystemMessage && 
-            lastSystemMessage.content === msg.content && 
-            Math.abs(msg.timestamp - lastSystemMessage.timestamp) < 2000) { // Within 2 seconds
-          // Skip duplicate
-          continue;
-        }
-        lastSystemMessage = msg;
+    // First pass: find the last occurrence of each system message type
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg.isSystemMessage || msg.type === 'system') {
+        // Use content as the key (e.g., "You blocked this contact", "You unblocked this contact")
+        systemMessageLastIndex.set(msg.content, i);
       }
-      filtered.push(msg);
+    }
+    
+    // Second pass: only include the latest occurrence of each system message type
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg.isSystemMessage || msg.type === 'system') {
+        // Only include this system message if it's the last occurrence of its type
+        if (systemMessageLastIndex.get(msg.content) === i) {
+          filtered.push(msg);
+        }
+      } else {
+        // Include all non-system messages
+        filtered.push(msg);
+      }
     }
     
     return filtered;
@@ -4394,7 +4382,7 @@ useEffect(() => {
                 ?
               </h2>
               <p className={`${effectiveTheme.textSecondary} mt-3 text-sm leading-relaxed`}>
-                This person won't be able to message or call you. They won't know you blocked them.
+                This person won't be able to message. They won't know you blocked them.
               </p>
             </div>
 
@@ -5017,10 +5005,13 @@ useEffect(() => {
                       )}
 </AnimatePresence>
                     </div>
+  </div>
+  )}
 
-                    {/* 🔹 Accepted Chats Dropdown */}
-                    {showChatInvitesAccepted && (
-                    <div className="rounded-md justify-between items-center px-2 py-1">
+  {/* 🔹 Accepted Chats Dropdown */}
+  {activeSection !== 'documents' && showChatInvitesAccepted && (
+  <div className="flex-shrink-0">
+                    <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
   <button
     onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
     className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
@@ -5127,9 +5118,7 @@ useEffect(() => {
     )}
   </AnimatePresence>
 </div>
-                    )}
-
-                  </div>
+                    </div>
   )}
 
                   {/* 🧭 Contacts/Documents List */}
