@@ -1,6 +1,7 @@
 import asyncHandler from "express-async-handler";
 import User from "../models/user.model.js";
 import generateToken from "../config/generatetoken.js";
+
 // export const allUsers = asyncHandler(async (req, res) => {
 //   const keyword = req.query.search
 //     ? {
@@ -373,53 +374,55 @@ export const acceptChatRequest = asyncHandler(async (req, res) => {
 
   if (!senderEmail) {
     res.status(400);
-    throw new Error("Please provide senderEmail");
+    throw new Error("senderEmail required");
   }
 
   const receiver = await User.findById(req.user._id);
-  const sender = await User.findOne({ email: senderEmail.toLowerCase().trim() });
+  const sender = await User.findOne({
+    email: senderEmail.toLowerCase().trim(),
+  });
 
-  if (!sender || !receiver) {
+  if (!receiver || !sender) {
     res.status(404);
     throw new Error("Sender or receiver not found");
   }
 
-  // ------------ SAFELY FILTER RECEIVED CHAT REQUESTS ------------
-  receiver.receivedChatRequests = receiver.receivedChatRequests.filter((r) => {
-    if (!r || !r.email) return false; // remove invalid entries
-    return r.email.toLowerCase() !== senderEmail.toLowerCase();
-  });
-  await receiver.save();
+  // ---------------- REMOVE PENDING REQUESTS ----------------
+  receiver.receivedChatRequests = receiver.receivedChatRequests.filter(
+    (r) => r?.email?.toLowerCase() !== sender.email.toLowerCase()
+  );
 
-  // ------------ SAFELY FILTER SENT CHAT REQUESTS ------------
-  sender.sentChatRequests = sender.sentChatRequests.filter((r) => {
-    if (!r || !r.email) return false; // remove invalid entries
-    return r.email.toLowerCase() !== receiver.email.toLowerCase();
-  });
+  sender.sentChatRequests = sender.sentChatRequests.filter(
+    (r) => r?.email?.toLowerCase() !== receiver.email.toLowerCase()
+  );
 
-  // ------------ ADD TO ACCEPTED LIST ------------
+  // ---------------- ADD ACCEPTED FOR BOTH USERS ----------------
+  if (!receiver.acceptedChatRequests.includes(sender.email)) {
+    receiver.acceptedChatRequests.push(sender.email);
+  }
+
   if (!sender.acceptedChatRequests.includes(receiver.email)) {
     sender.acceptedChatRequests.push(receiver.email);
   }
 
+  await receiver.save();
   await sender.save();
 
-  // ------------ SEND ACCEPTED CHAT BACK TO FRONTEND ------------
+  // ---------------- RESPONSE ----------------
   res.status(200).json({
     message: "Chat request accepted",
     acceptedChat: {
-      email: receiver.email,
-      name: receiver.name,
-      avatar: receiver.avatar,
-      message: "", // you can include any extra fields here
+      email: sender.email,
+      name: sender.name,
+      avatar: sender.avatar,
     },
   });
 });
 
+
 // GET /api/user/request/status/:email
 export const getChatRequestStatus = asyncHandler(async (req, res) => {
   const otherEmail = req.params.email.toLowerCase().trim();
-
   const me = await User.findById(req.user._id);
 
   if (!me) {
@@ -427,26 +430,15 @@ export const getChatRequestStatus = asyncHandler(async (req, res) => {
     throw new Error("User not found");
   }
 
-  // Accepted
   if (me.acceptedChatRequests?.includes(otherEmail)) {
     return res.json({ status: "accepted" });
   }
 
-  // I sent request
-  if (
-    me.sentChatRequests?.some(
-      (r) => r.email.toLowerCase() === otherEmail
-    )
-  ) {
+  if (me.sentChatRequests?.some(r => r.email.toLowerCase() === otherEmail)) {
     return res.json({ status: "outgoing" });
   }
 
-  // I received request
-  if (
-    me.receivedChatRequests?.some(
-      (r) => r.email.toLowerCase() === otherEmail
-    )
-  ) {
+  if (me.receivedChatRequests?.some(r => r.email.toLowerCase() === otherEmail)) {
     return res.json({ status: "incoming" });
   }
 
@@ -454,20 +446,25 @@ export const getChatRequestStatus = asyncHandler(async (req, res) => {
 });
 
 
-// Fetch accepted chat requests that other users accepted which were sent by the current user
-export const getAcceptedChatRequestsSentByUser = asyncHandler(
-  async (req, res) => {
-    const user = await User.findById(req.user._id).select(
-      "acceptedChatRequests"
-    );
-    if (!user) {
-      res.status(404);
-      throw new Error("User not found");
-    }
 
-    res.status(200).json(user.acceptedChatRequests || []);
+// Fetch accepted chat requests that other users accepted which were sent by the current user
+export const getAcceptedChatRequests = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id);
+
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
   }
-);
+
+  const acceptedEmails = user.acceptedChatRequests || [];
+
+  const users = await User.find({
+    email: { $in: acceptedEmails },
+  }).select("_id name email avatar");
+
+  res.json(users);
+});
+
 
 // Get list of received chat requests for current user
 // export const getReceivedChatRequests = asyncHandler(async (req, res) => {

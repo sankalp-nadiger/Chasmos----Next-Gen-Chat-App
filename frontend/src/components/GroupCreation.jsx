@@ -169,50 +169,50 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
   };
 
   const handleCreateGroup = async () => {
-    if (!groupName.trim()) return;
+  if (!groupName.trim()) return;
 
-    const memberIds = selectedContacts.map((id) => normalizeId(id));
-    const currentUserId = localStorage.getItem("userId");
+  const memberIds = selectedContacts.map((id) => normalizeId(id));
+  const currentUserId = localStorage.getItem("userId");
 
-    if (!memberIds.includes(currentUserId)) {
-      memberIds.push(currentUserId);
-    }
-
-    const payload = {
-      name: groupName.trim(),
-      users: memberIds,
-      admins: [currentUserId],
-      createdBy: currentUserId,
-      description: groupDescription.trim() || "",
-      isPublic: true,
-    };
-
-    try {
-  const res = await fetch(`${API_BASE_URL}/api/group/create`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${localStorage.getItem("token")}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const json = await res.json();
-
-  if (!res.ok) {
-    console.error("Failed to create group:", json);
-    alert("Group creation failed: " + (json.message || "Unknown error"));
-  } else {
-    console.log("Group created", json);
-    onCreateGroup?.(json.group); // send group object only
-    onClose?.();
+  if (!memberIds.includes(currentUserId)) {
+    memberIds.push(currentUserId);
   }
-} catch (e) {
-  console.error("Error creating group:", e);
-  alert("Error creating group");
-}
 
+  const payload = {
+    name: groupName.trim(),
+    users: memberIds,
+    admins: [currentUserId],
+    createdBy: currentUserId,
+    description: groupDescription.trim() || "",
+    isPublic: true,
   };
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/chat/group`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("token")}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      console.error("Failed to create group:", json);
+      alert("Group creation failed: " + (json.message || "Unknown error"));
+    } else {
+      console.log("Group created", json);
+      onCreateGroup?.(json); // send group object directly
+      onClose?.();
+    }
+  } catch (e) {
+    console.error("Error creating group:", e);
+    alert("Error creating group");
+  }
+};
+
 
   // BUSINESS CORE FEATURES (default true)
   const [coreTask, setCoreTask] = useState(true);

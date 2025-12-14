@@ -10,7 +10,7 @@ import React, {
 } from "react";
 import { toast } from "react-hot-toast";
 import { createPortal } from 'react-dom';
-import { createGroup } from "../api/group";
+
 
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from "socket.io-client";
@@ -84,6 +84,9 @@ import PinnedMessagesBar from "./PinnedMessagesBar";
 import DeleteMessageModal from "./DeleteMessageModal";
 import UserProfileModal from "./UserProfileModal";
 
+const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+
 // Memoized Chat Header Component
 const ChatHeader = React.memo(
   ({
@@ -127,7 +130,16 @@ const ChatHeader = React.memo(
 
     const [activeGroup, setActiveGroup] = useState(null);
 const [showGroupInfoModal, setShowGroupInfoModal] = useState(false);
+const [currentGroup, setCurrentGroup] = useState(null);
 const [chats, setChats] = useState([]); // your chat/group list
+
+const handleShowGroupInfo = (group) => {
+  // Make sure group exists
+  if (!group) return;
+
+  setCurrentGroup(group);          // Set the group to view
+  setShowGroupInfoModal(true);     // Open modal
+};
 
 
     return (
@@ -135,7 +147,14 @@ const [chats, setChats] = useState([]); // your chat/group list
         <div className="p-4 flex items-center justify-between">
           <div 
             className="flex items-center space-x-3 flex-1 cursor-pointer hover:bg-white/5 transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1"
-            onClick={() => !selectedContact.isDocument && onOpenUserProfile()}
+onClick={() => {
+  if (selectedContact.isDocument) return; // ignore documents
+  if (selectedContact.isGroup) {
+    handleShowGroupInfo(selectedContact); // open group modal
+  } else {
+    onOpenUserProfile(); // open user profile
+  }
+}}
           >
             {isMobileView && (
               <button
@@ -179,15 +198,13 @@ const [chats, setChats] = useState([]); // your chat/group list
               <h2 className={`font-semibold ${effectiveTheme.text}`}>{selectedContact.name}</h2>
 
              {selectedContact?.isGroup ? (
-  <button
-  onClick={() => {
-  console.log("Clicked group info button");
-  onShowGroupInfo(selectedContact);
-}}
-    className={`text-sm font-medium ${effectiveTheme.textSecondary} hover:underline`}
-  >
-    {"Group info"}
-  </button>
+ <button
+  onClick={() => handleShowGroupInfo(selectedContact)}
+  className="px-2 py-1 text-sm text-blue-500 hover:underline"
+>
+  Group Info
+</button>
+
 ) : (
   <p className={`text-sm ${effectiveTheme.textSecondary}`}>
     {selectedContact?.isTyping
@@ -2802,56 +2819,28 @@ const handleDeleteGroup = (groupId) => {
   }
 };
 
-const handleAcceptChat = async (senderEmail) => {
+const handleAcceptChat = async () => {
   try {
-    const token = localStorage.getItem("token");
-    if (!token) throw new Error("No token found.");
-
-    const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
-      method: "PUT",
+    await fetch(`${API_BASE_URL}/api/user/request/accept`, {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ senderEmail }),
+      body: JSON.stringify({ senderEmail: contact.email }),
     });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message);
+    setChatStatus("accepted");
+    setShowInviteModal(false);
 
-    // Remove from received
-    setReceivedChats((prev) =>
-      prev.filter((c) => c.email !== senderEmail)
-    );
-
-    // Add to accepted instantly
-    if (data.acceptedChat) {
-      const normalized = {
-        _id: data.acceptedChat._id || data.acceptedChat.email,
-        email: data.acceptedChat.email,
-        name:
-          data.acceptedChat.name ||
-          data.acceptedChat.email?.split("@")[0] ||
-          "Unknown",
-        avatar:
-          data.acceptedChat.avatar ||
-          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
-        message: data.acceptedChat.message || "",
-        date: new Date(),
-      };
-
-      setFilteredAcceptedChats((prev) => [...prev, normalized]);
-      setAcceptedChats((prev) => [...prev, normalized]);
-    }
-
-    console.log("Chat accepted!");
-
-    // sync with backend
-    fetchAcceptedChats();
-  } catch (error) {
-    console.error(" Error accepting chat:", error);
+    // ✅ ONLY HERE
+    fetchAcceptedChats();   // populate Accepted
+    fetchRequests();        // remove from Received
+  } catch (err) {
+    console.error(err);
   }
 };
+
 
 const handleRejectChat = async (email) => {
   try {
@@ -2876,9 +2865,7 @@ const handleRejectChat = async (email) => {
 };
 
 
-useEffect(() => {
-  fetchAcceptedChats();
-}, []);
+
 
 
 
@@ -5891,27 +5878,23 @@ useEffect(() => {
   <>
     {console.log("Rendering modal for:", currentGroup)}
 {showGroupInfoModal && currentGroup && (
-  <div   className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
-  <GroupInfoModal
-  open={showGroupInfoModal}              // <-- renamed
-  onClose={handleCloseGroupInfo}         // same
-
-  group={currentGroup}                   // same
-  currentUserId={localStorage.getItem("userId")}   // <-- NEW REQUIRED
-
-  onUpdateGroup={(updated) => {
-    setCurrentGroup(updated);
-  }}
-
-  onDeleteGroup={(groupId) => {
-    console.log("Group deleted:", groupId);
-    setShowGroupInfoModal(false);
-  }}
-/>
-
-
+  <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
+    <GroupInfoModal
+      open={showGroupInfoModal}
+      onClose={handleCloseGroupInfo}
+      group={currentGroup}
+      currentUserId={localStorage.getItem("userId")}
+      onUpdateGroup={(updated) => setCurrentGroup(updated)}
+      onDeleteGroup={(groupId) => {
+        console.log("Group deleted:", groupId);
+        setShowGroupInfoModal(false);
+        setCurrentGroup(null);
+      }}
+    />
   </div>
 )}
+
+
 
 
   </>

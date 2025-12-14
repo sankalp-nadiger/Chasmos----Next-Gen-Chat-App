@@ -25,6 +25,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import Logo from "./Logo";
+//import { io } from "socket.io-client";
 
 // Business categories mock data
 const businessCategories = [
@@ -791,45 +792,52 @@ const NewChat = ({
 
 //Contacts appearing in new chat page
 
-const ContactItem = ({
-  contact,
-  effectiveTheme,
-  onClick,
-  showLastSeen,
-  token,
-}) => {
+const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, currentUserEmail }) => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteMessage, setInviteMessage] = useState("");
   const [sending, setSending] = useState(false);
-
-  // idle | sent | incoming
   const [inviteStatus, setInviteStatus] = useState("idle");
-
-  // none | outgoing | incoming | accepted
   const [chatStatus, setChatStatus] = useState("none");
 
-  // ---------------- FETCH CHAT STATUS ----------------
+  // ------------------- Polling / Initial Chat Status -------------------
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await fetch(
-          `${API_BASE_URL}/api/user/request/status/${contact.email}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-
+        const res = await fetch(`${API_BASE_URL}/api/user/request/status/${contact.email}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         const data = await res.json();
         setChatStatus(data.status);
       } catch (err) {
-        console.error(err);
+        console.error("Failed to fetch chat status:", err);
       }
     };
 
     fetchStatus();
+
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
   }, [contact.email, token]);
 
-  // ---------------- SEND INVITE ----------------
+  // ------------------- Socket Listener -------------------
+//  useEffect(() => {
+//   if (!socketRef.current) return;
+
+//   const handleChatAccepted = ({ senderEmail, receiverEmail }) => {
+//     if (contact.email === senderEmail || contact.email === receiverEmail) {
+//       setChatStatus("accepted");
+//     }
+//   };
+
+//   socketRef.current.on("chatAccepted", handleChatAccepted);
+
+//   return () => {
+//     socketRef.current.off("chatAccepted", handleChatAccepted);
+//   };
+// }, [contact.email]);
+
+
+  // ------------------- Send Invite -------------------
   const handleSendInvite = async () => {
     try {
       setSending(true);
@@ -839,10 +847,7 @@ const ContactItem = ({
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          recipientEmail: contact.email,
-          inviteMessage,
-        }),
+        body: JSON.stringify({ recipientEmail: contact.email, inviteMessage }),
       });
 
       setInviteStatus("sent");
@@ -854,7 +859,7 @@ const ContactItem = ({
     }
   };
 
-  // ---------------- WITHDRAW / REJECT ----------------
+  // ------------------- Withdraw Invite -------------------
   const handleWithdrawInvite = async () => {
     try {
       await fetch(`${API_BASE_URL}/api/user/request/withdraw`, {
@@ -874,10 +879,10 @@ const ContactItem = ({
     }
   };
 
-  // ---------------- ACCEPT ----------------
+  // ------------------- Accept Invite -------------------
   const handleAcceptInvite = async () => {
     try {
-      await fetch(`${API_BASE_URL}/api/user/request/accept`, {
+      const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -885,17 +890,26 @@ const ContactItem = ({
         },
         body: JSON.stringify({ senderEmail: contact.email }),
       });
+      const data = await res.json();
 
       setChatStatus("accepted");
       setShowInviteModal(false);
+
+      // Notify sender in real-time
+      socket.emit("chatAccepted", { senderEmail: contact.email, receiverEmail: currentUserEmail });
     } catch (err) {
       console.error(err);
     }
   };
 
+  // ------------------- Open Chat -------------------
+  const handleOpenChat = () => {
+    onClick(contact); // Make sure your ChatWindow receives contact info
+  };
+
   return (
     <>
-      {/* CONTACT ROW */}
+      {/* Contact Row */}
       <motion.div
         whileHover={{ x: 4 }}
         className={`flex items-center justify-between p-4 cursor-pointer border-b
@@ -903,15 +917,9 @@ const ContactItem = ({
         hover:${effectiveTheme.hover || "bg-gray-100"}`}
       >
         {/* LEFT */}
-        <div
-          className="flex items-center gap-3"
-          onClick={() => onClick(contact)}
-        >
+        <div className="flex items-center gap-3" onClick={() => onClick(contact)}>
           <img
-            src={
-              contact.avatar ||
-              "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-            }
+            src={contact.avatar || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"}
             className="w-12 h-12 rounded-full object-cover"
           />
           <div>
@@ -929,7 +937,7 @@ const ContactItem = ({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onClick(contact);
+              handleOpenChat();
             }}
             className="p-2 rounded-full hover:bg-green-500/20"
           >
@@ -977,16 +985,15 @@ const ContactItem = ({
         )}
       </motion.div>
 
-      {/* MODAL */}
+      {/* Invite Modal */}
       {showInviteModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className={`w-full max-w-md rounded-2xl p-6 shadow-xl
-            ${effectiveTheme.secondary || "bg-white dark:bg-gray-800"}`}
+            className={`w-full max-w-md rounded-2xl p-6 shadow-xl ${effectiveTheme.secondary || "bg-white dark:bg-gray-800"}`}
           >
-            {/* HEADER */}
+            {/* Header */}
             <div className="flex justify-between mb-4">
               <h2 className="font-semibold text-lg">{contact.name}</h2>
               <button
@@ -997,41 +1004,41 @@ const ContactItem = ({
               </button>
             </div>
 
-            {/* OUTGOING / SENT */}
+            {/* OUTGOING / INCOMING / IDLE */}
             {inviteStatus === "sent" && (
               <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-300">
                 <p className="text-sm font-medium">Invite pending</p>
-                <p className="text-xs text-gray-500">
-                  Waiting for {contact.name} to accept
-                </p>
+                <p className="text-xs text-gray-500">Waiting for {contact.name} to accept</p>
               </div>
             )}
 
-            {/* INCOMING */}
             {inviteStatus === "incoming" && (
               <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-300">
                 <p className="text-sm font-medium">Incoming request</p>
-                <p className="text-xs text-gray-500">
-                  {contact.name} has already sent you a request
-                </p>
+                <p className="text-xs text-gray-500">{contact.name} has already sent you a request</p>
+                <div className="flex justify-end mt-4 gap-2">
+                  <button
+                    onClick={handleAcceptInvite}
+                    className="px-4 py-2 rounded-xl bg-green-600 text-white"
+                  >
+                    Accept
+                  </button>
+                </div>
               </div>
             )}
 
-            {/* MESSAGE INPUT (ONLY FOR NEW) */}
             {inviteStatus === "idle" && (
               <textarea
                 rows="3"
                 value={inviteMessage}
                 onChange={(e) => setInviteMessage(e.target.value)}
                 placeholder="Add an optional message..."
-                className="w-full mt-4 p-3 rounded-xl border resize-none text-sm
-                focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                className="w-full mt-4 p-3 rounded-xl border resize-none text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
             )}
 
-            {/* FOOTER */}
+            {/* Footer */}
             <div className="flex justify-end mt-6 gap-2">
-             
               {inviteStatus === "sent" && (
                 <button
                   onClick={handleWithdrawInvite}
@@ -1040,7 +1047,6 @@ const ContactItem = ({
                   Withdraw
                 </button>
               )}
-
               {inviteStatus === "idle" && (
                 <>
                   <button
@@ -1054,11 +1060,7 @@ const ContactItem = ({
                     disabled={sending}
                     className="px-4 py-2 rounded-xl bg-blue-600 text-white flex items-center gap-2"
                   >
-                    {sending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4" />
-                    )}
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                     Send Invite
                   </button>
                 </>
@@ -1070,6 +1072,8 @@ const ContactItem = ({
     </>
   );
 };
+
+
 
 
 

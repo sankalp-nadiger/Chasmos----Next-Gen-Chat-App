@@ -96,47 +96,59 @@ export const fetchChats = asyncHandler(async (req, res) => {
   }
 });
 
-// export const createGroupChat = asyncHandler(async (req, res) => {
-//   const { name, users, description, avatar, isPublic } = req.body;
+export const createGroupChat = asyncHandler(async (req, res) => {
+  const { name, users, description, avatar, isPublic } = req.body;
 
-//   if (!users || !name) {
-//     return res.status(400).send({ message: "Please fill all the fields" });
-//   }
+  if (!users || !name) {
+    return res.status(400).json({ message: "Please fill all the fields" });
+  }
 
-//   let parsedUsers = JSON.parse(users);
+  // Handle both array or string
+  let parsedUsers = users;
+  if (typeof users === "string") {
+    try {
+      parsedUsers = JSON.parse(users);
+    } catch (err) {
+      return res.status(400).json({ message: "Invalid users format" });
+    }
+  }
 
-//   if (parsedUsers.length < 2) {
-//     return res.status(400).send("More than 2 users are required to form a group chat");
-//   }
+  if (!Array.isArray(parsedUsers) || parsedUsers.length < 2) {
+    return res.status(400).json({
+      message: "More than 2 users are required to form a group chat",
+    });
+  }
 
-//   parsedUsers.push(req.user._id);
+  // Add creator to group
+  parsedUsers.push(req.user._id);
 
-//   try {
-//     const groupChat = await Chat.create({
-//       chatName: name,
-//       users: parsedUsers,
-//       participants: parsedUsers,
-//       isGroupChat: true,
-//       groupAdmin: req.user._id,
-//       admins: [req.user._id],
-//       groupSettings: {
-//         description: description || "",
-//         avatar: avatar || "",
-//         isPublic: isPublic || false
-//       }
-//     });
+  try {
+    const groupChat = await Chat.create({
+      chatName: name,
+      users: parsedUsers,
+      participants: parsedUsers,
+      isGroupChat: true,
+      groupAdmin: req.user._id,
+      admins: [req.user._id],
+      groupSettings: {
+        description: description || "",
+        avatar: avatar || "",
+        isPublic: isPublic || false,
+      },
+    });
 
-//     const fullGroupChat = await Chat.findOne({ _id: groupChat._id })
-//       .populate("users", "-password")
-//       .populate("groupAdmin", "-password")
-//       .populate("admins", "name email avatar");
+    const fullGroupChat = await Chat.findById(groupChat._id)
+      .populate("users", "-password")
+      .populate("groupAdmin", "-password")
+      .populate("admins", "name email avatar");
 
-//     res.status(200).json(fullGroupChat);
-//   } catch (error) {
-//     res.status(400);
-//     throw new Error(error.message);
-//   }
-// });
+    res.status(200).json(fullGroupChat);
+  } catch (error) {
+    res.status(400);
+    throw new Error(error.message);
+  }
+});
+
 
 // export const renameGroup = asyncHandler(async (req, res) => {
 //   const { chatId, chatName } = req.body;

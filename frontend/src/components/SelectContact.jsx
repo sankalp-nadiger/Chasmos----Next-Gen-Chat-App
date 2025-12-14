@@ -19,7 +19,11 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
     return text.replace(/📎/g, "").replace(/🔗/g, "").trim();
   };
 
-  const previewText = cleanText(contact.lastMessage || "Attachment");
+  // Use bio if available, else default message
+  const previewText = contact.bio?.trim()
+    ? cleanText(contact.bio)
+    : "No bio available";
+
   const hasAttachment = contact.hasAttachment || false;
   const attachmentMime = contact.attachmentMime || "";
   const iconColor = effectiveTheme.mode === "dark" ? "text-gray-400" : "text-gray-600";
@@ -53,7 +57,7 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
           )}
         </div>
 
-        {/* Name + Google badge + preview */}
+        {/* Name + Google badge + bio/preview */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className={`font-semibold truncate ${effectiveTheme.text}`}>
@@ -90,11 +94,9 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
               </div>
             )}
             <p
-              className={`text-sm truncate ${
-                effectiveTheme.textSecondary || "text-gray-500"
-              }`}
+              className={`text-sm truncate ${effectiveTheme.textSecondary || "text-gray-500"}`}
             >
-              {previewText || (contact.isTyping ? "Typing..." : "Say hi!")}
+              {previewText}
             </p>
           </div>
         </div>
@@ -104,18 +106,13 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
       <div className="ml-3 flex-shrink-0">
         <div
           className={`w-6 h-6 rounded-full border-2 flex items-center justify-center
-            ${
-              selected
-                ? "bg-green-500 border-green-600 "
-                : "border-gray-400 "
-            }`}
+            ${selected ? "bg-green-500 border-green-600 " : "border-gray-400 "}`}
         >
           {selected && <Check className="w-4 h-4" />}
         </div>
       </div>
 
-      {/* (existing unread bubble — untouched) */}
-      {/* DO NOT REMOVE — YOU SAID DO NOT TOUCH LOGIC */}
+      {/* Unread bubble */}
       {contact.unreadCount > 0 && (
         <div className="flex-shrink-0 ml-3">
           <div className="w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center font-semibold">
