@@ -19,53 +19,78 @@ import {
 } from "lucide-react";
 import Logo from "./Logo";
 
-const Settings = ({ onClose, effectiveTheme }) => {
+const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
   const [notifications, setNotifications] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [language, setLanguage] = useState("English");
+  const [isLoading, setIsLoading] = useState(false);
 
-  const settingsOptions = [
-    {
-      id: "dtranslate",
-      title: "DTranslate",
-      description: "Real-time message translation",
-      icon: Languages,
-      type: "navigate",
-      action: () => console.log("DTranslate settings"),
-    },
-    {
-      id: "saritair",
-      title: "Saritair",
-      description: "Voice and audio settings",
-      icon: Volume2,
-      type: "navigate", 
-      action: () => console.log("Saritair settings"),
-    },
-    {
-      id: "privacy",
-      title: "Privacy",
-      description: "Control your privacy settings",
-      icon: Shield,
-      type: "navigate",
-      action: () => console.log("Privacy settings"),
-    },
-    {
-      id: "data-storage",
-      title: "Data and Storage",
-      description: "Manage data usage and storage",
-      icon: Database,
-      type: "navigate",
-      action: () => console.log("Data and Storage settings"),
-    },
-    {
-      id: "help",
-      title: "Help",
-      description: "Get help and support",
-      icon: HelpCircle,
-      type: "navigate",
-      action: () => console.log("Help center"),
-    },
-  ];
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+
+  // Load settings from backend on mount
+  React.useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_BASE_URL}/api/user/settings`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setNotifications(data.notifications);
+          setSoundEnabled(data.sound);
+        }
+      } catch (error) {
+        console.error('Error loading settings:', error);
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  // Update settings on backend
+  const updateSettings = async (settingName, value) => {
+    try {
+      setIsLoading(true);
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BASE_URL}/api/user/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          [settingName]: value
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Settings updated:', data);
+      } else {
+        console.error('Failed to update settings');
+      }
+    } catch (error) {
+      console.error('Error updating settings:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleNotificationsChange = (value) => {
+    setNotifications(value);
+    updateSettings('notifications', value);
+  };
+
+  const handleSoundChange = (value) => {
+    setSoundEnabled(value);
+    updateSettings('sound', value);
+  };
+
+
 
   const quickSettings = [
     {
@@ -75,7 +100,7 @@ const Settings = ({ onClose, effectiveTheme }) => {
       icon: Bell,
       type: "toggle",
       value: notifications,
-      onChange: setNotifications,
+      onChange: handleNotificationsChange,
     },
     {
       id: "sound",
@@ -84,15 +109,11 @@ const Settings = ({ onClose, effectiveTheme }) => {
       icon: soundEnabled ? Volume2 : VolumeX,
       type: "toggle",
       value: soundEnabled,
-      onChange: setSoundEnabled,
+      onChange: handleSoundChange,
     },
   ];
 
-  const handleSettingClick = (option) => {
-    if (option.type === "navigate") {
-      option.action();
-    }
-  };
+
 
   return (
     <motion.div
@@ -130,9 +151,12 @@ const Settings = ({ onClose, effectiveTheme }) => {
             </div>
           </div>
           
-          <div className={`p-2 rounded-lg ${effectiveTheme.hover}`}>
+          <button 
+            onClick={onProfileClick}
+            className={`p-2 rounded-lg ${effectiveTheme.hover} hover:scale-105 transition-transform cursor-pointer`}
+          >
             <User className={`w-5 h-5 ${effectiveTheme.text}`} />
-          </div>
+          </button>
         </div>
       </div>
 
@@ -185,40 +209,7 @@ const Settings = ({ onClose, effectiveTheme }) => {
             </div>
           </div>
 
-          {/* Main Settings */}
-          <div>
-            <h3 className={`text-sm font-semibold ${effectiveTheme.textSecondary} uppercase tracking-wide mb-3`}>
-              Settings
-            </h3>
-            <div className={`${effectiveTheme.secondary} rounded-lg border ${effectiveTheme.border} overflow-hidden`}>
-              {settingsOptions.map((option, index) => (
-                <motion.button
-                  key={option.id}
-                  onClick={() => handleSettingClick(option)}
-                  whileHover={{ x: 4 }}
-                  className={`w-full flex items-center justify-between p-4 text-left ${
-                    index !== settingsOptions.length - 1 ? `border-b ${effectiveTheme.border}` : ''
-                  } hover:${effectiveTheme.hover} transition-all duration-200`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className={`w-10 h-10 rounded-lg ${effectiveTheme.accent} flex items-center justify-center`}>
-                      <option.icon className="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                      <h4 className={`font-medium ${effectiveTheme.text}`}>
-                        {option.title}
-                      </h4>
-                      <p className={`text-sm ${effectiveTheme.textSecondary}`}>
-                        {option.description}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <ChevronRight className={`w-5 h-5 ${effectiveTheme.textSecondary}`} />
-                </motion.button>
-              ))}
-            </div>
-          </div>
+
 
           {/* App Information */}
           <div className="mt-6">

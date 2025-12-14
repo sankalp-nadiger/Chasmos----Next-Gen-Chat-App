@@ -31,15 +31,17 @@ const Profile = ({ onClose, effectiveTheme }) => {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    // Get user data from localStorage
-    const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+    // Get user data from localStorage (check both keys for compatibility)
+    const userData = JSON.parse(localStorage.getItem('userInfo') || localStorage.getItem('chasmos_user_data') || '{}');
+    
+    console.log('Profile - User data from localStorage:', userData);
     
     setProfileData({
       userId: userData.id || userData._id || userData.userId || "N/A",
       name: userData.name || userData.fullName || "Guest User",
       email: userData.email || "No email provided",
       phone: userData.phone || userData.phoneNumber || "No phone provided",
-      bio: userData.bio || "Hey there! I am using Chasmos.",
+      bio: userData.bio && userData.bio.trim() !== "" ? userData.bio : "Hey there! I am using Chasmos.",
       location: userData.location || "Not specified",
       joinedDate: userData.joinedDate || userData.createdAt || new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
       avatar: userData.avatar || userData.profilePicture || userData.profilePic || null,
@@ -53,21 +55,56 @@ const Profile = ({ onClose, effectiveTheme }) => {
     }));
   };
 
-  const handleSave = () => {
-    // Save profile data logic here
-    const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
-    const updatedData = {
-      ...userData,
-      name: profileData.name,
-      phone: profileData.phone,
-      bio: profileData.bio,
-      avatar: profileData.avatar,
-      profilePicture: profileData.avatar, // Also save as profilePicture for compatibility
-    };
-    localStorage.setItem('chasmos_user_data', JSON.stringify(updatedData));
-    setIsEditing(false);
-    setRefreshKey(prev => prev + 1); // Force refresh
-    console.log("Profile saved:", profileData);
+  const handleSave = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+      
+      console.log('Updating profile with:', {
+        name: profileData.name,
+        bio: profileData.bio,
+        pic: profileData.avatar
+      });
+      
+      // Update profile on backend
+      const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: profileData.name,
+          bio: profileData.bio,
+          pic: profileData.avatar
+        })
+      });
+
+      const data = await response.json();
+      console.log('Backend response:', data);
+
+      if (response.ok) {
+        // Update localStorage with the response from server
+        const updatedData = {
+          ...data,
+          phoneNumber: profileData.phone,
+          avatar: data.pic || profileData.avatar,
+        };
+        
+        localStorage.setItem('userInfo', JSON.stringify(updatedData));
+        localStorage.setItem('chasmos_user_data', JSON.stringify(updatedData));
+        setIsEditing(false);
+        setRefreshKey(prev => prev + 1);
+        console.log("Profile saved successfully:", updatedData);
+        alert('Profile updated successfully!');
+      } else {
+        console.error("Failed to update profile:", data);
+        alert('Failed to update profile: ' + (data.message || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error("Error saving profile:", error);
+      alert('Error saving profile: ' + error.message);
+    }
   };
 
   const handleAvatarUpload = () => {
@@ -282,7 +319,7 @@ const Profile = ({ onClose, effectiveTheme }) => {
               className={`p-4 ${effectiveTheme.secondary} rounded-xl border ${effectiveTheme.border} shadow-sm`}
             >
               <label className={`block text-sm font-medium ${effectiveTheme.textSecondary} mb-2`}>
-                About Me
+                Bio
               </label>
               {isEditing ? (
                 <textarea

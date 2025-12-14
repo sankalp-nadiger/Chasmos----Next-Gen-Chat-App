@@ -10,6 +10,8 @@ import {
   getReceivedChatRequests,
   getAcceptedChatRequestsSentByUser,
   withdrawChatRequest,
+  getUserSettings,
+  updateUserSettings,
 } from "../controllers/user.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { checkBlockStatus } from "../middleware/block.middleware.js"; // NEW
@@ -25,6 +27,10 @@ router.get("/", protect, allUsers);
 router.route("/profile")
   .get(protect, getUserProfile)
   .put(protect, updateUserProfile);
+
+router.route("/settings")
+  .get(protect, getUserSettings)
+  .put(protect, updateUserSettings);
 
 router.post("/request/send", protect, checkBlockStatus, sendChatRequest); 
 router.put("/request/accept", protect, acceptChatRequest);

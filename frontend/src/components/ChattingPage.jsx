@@ -47,7 +47,9 @@ import {
   UserMinus,
   Copy,
   PinOff,
-  Edit
+  Edit,
+  ZoomIn,
+  ZoomOut
 } from "lucide-react";
 import blockService from "../utils/blockService";
 import archiveService from "../utils/archiveService";
@@ -705,6 +707,22 @@ const AttachmentRenderer = React.memo(({ message, isOwnMessage, effectiveTheme }
     setZoomed(false);
   };
 
+  // Keyboard support
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        closeLightbox();
+      } else if (e.key === 'z' || e.key === 'Z') {
+        setZoomed(z => !z);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lightboxOpen]);
+
   const stripTimestampPrefix = (filename) => {
     if (!filename) return '';
     let base = filename.split('/').pop();
@@ -861,25 +879,137 @@ return (
 )}
 
       {lightboxOpen && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-95" onClick={closeLightbox}>
-          <div className="relative max-w-4xl max-h-full p-4" onClick={(e)=>e.stopPropagation()}>
-            <img src={lightboxSrc} alt="preview" className={`max-h-[80vh] max-w-full ${zoomed ? 'scale-125' : 'scale-100'} transition-transform`} />
-            <div className="flex items-center justify-between mt-2">
-              <div className="space-x-2">
-                <button onClick={() => setZoomed(z => !z)} className="bg-white px-3 py-1 rounded">{zoomed ? 'Reset' : 'Zoom'}</button>
-                <button
-                  onClick={(e) => handleDownload(e, lightboxSrc, (lightboxSrc || '').split('/').pop())}
-                  title="Download image"
-                  aria-label={`Download image`}
-                  className="bg-white px-3 py-1 rounded"
-                >
-                  Download
-                </button>
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-gradient-to-br from-black/95 via-black/98 to-black/95 backdrop-blur-xl" 
+          onClick={closeLightbox}
+        >
+          {/* Ambient glow effect */}
+          <div className="absolute inset-0 bg-gradient-radial from-blue-600/5 via-transparent to-transparent"></div>
+          
+          <div className="relative w-full h-full flex flex-col items-center justify-center p-6" onClick={(e)=>e.stopPropagation()}>
+            {/* Top bar with controls */}
+            <motion.div 
+              initial={{ y: -20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+              className="absolute top-4 left-0 right-0 flex items-center justify-between px-6 z-10"
+            >
+              {/* Image info */}
+              <div className="flex items-center gap-3 bg-white/10 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
+                <Eye className="w-4 h-4 text-white/70" />
+                <span className="text-white/90 text-sm font-medium">Image Preview</span>
               </div>
-              <button onClick={closeLightbox} className="bg-white px-3 py-1 rounded">Close</button>
-            </div>
+
+              {/* Close button */}
+              <motion.button
+                whileHover={{ scale: 1.1, rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+                onClick={closeLightbox}
+                className="bg-white/10 hover:bg-white/20 backdrop-blur-md text-white p-3 rounded-full transition-all duration-200 shadow-lg border border-white/20"
+                title="Close (ESC)"
+              >
+                <X className="w-5 h-5" />
+              </motion.button>
+            </motion.div>
+
+            {/* Image container with enhanced effects */}
+            <motion.div 
+              initial={{ scale: 0.85, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ type: "spring", stiffness: 200, damping: 20 }}
+              className="relative flex items-center justify-center max-w-7xl max-h-[80vh]"
+            >
+              {/* Glow behind image */}
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 to-blue-500/5 blur-3xl scale-105 rounded-2xl"></div>
+              
+              <motion.img 
+                src={lightboxSrc} 
+                alt="preview" 
+                initial={{ filter: "blur(10px)" }}
+                animate={{ filter: "blur(0px)" }}
+                transition={{ duration: 0.3 }}
+                className={`relative max-h-[80vh] max-w-full object-contain rounded-xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.8)] border border-white/10 ${
+                  zoomed ? 'scale-150 cursor-zoom-out' : 'scale-100 cursor-zoom-in'
+                } transition-transform duration-500 ease-out`}
+                onClick={() => setZoomed(z => !z)}
+                style={{
+                  imageRendering: 'high-quality'
+                }}
+              />
+            </motion.div>
+
+            {/* Enhanced action buttons with icons and labels */}
+            <motion.div 
+              initial={{ y: 30, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.15, type: "spring", stiffness: 200 }}
+              className="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-2 bg-white/5 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl border border-white/10"
+            >
+              {/* Zoom button */}
+              <motion.button
+                whileHover={{ scale: 1.05, y: -2 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setZoomed(z => !z)}
+                className={`group relative flex items-center gap-2 ${
+                  zoomed ? 'bg-blue-700 hover:bg-blue-800' : 'bg-blue-600 hover:bg-blue-700'
+                } hover:shadow-lg text-white px-5 py-2.5 rounded-xl font-medium transition-all duration-300`}
+                title={zoomed ? 'Reset zoom (Z)' : 'Zoom in (Z)'}
+              >
+                {zoomed ? (
+                  <>
+                    <ZoomOut className="w-5 h-5" />
+                    <span className="hidden sm:inline">Reset</span>
+                  </>
+                ) : (
+                  <>
+                    <ZoomIn className="w-5 h-5" />
+                    <span className="hidden sm:inline">Zoom</span>
+                  </>
+                )}
+                <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 bg-gray-900/90 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  Press Z
+                </div>
+              </motion.button>
+
+              {/* Divider */}
+              <div className="w-px h-8 bg-white/20"></div>
+              
+              {/* Download button */}
+              <motion.button
+                whileHover={{ scale: 1.05, y: -2 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={(e) => handleDownload(e, lightboxSrc, (lightboxSrc || '').split('/').pop())}
+                className="group relative flex items-center gap-2 bg-blue-500 hover:bg-blue-600 hover:shadow-lg text-white px-5 py-2.5 rounded-xl font-medium transition-all duration-300"
+                title="Download image"
+              >
+                <Download className="w-5 h-5" />
+                <span className="hidden sm:inline">Download</span>
+                <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 bg-gray-900/90 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  Save to device
+                </div>
+              </motion.button>
+            </motion.div>
+
+            {/* Keyboard hints */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5 }}
+              className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex items-center gap-4 text-white/40 text-xs"
+            >
+              <span className="flex items-center gap-1">
+                <kbd className="px-2 py-0.5 bg-white/10 rounded">ESC</kbd> Close
+              </span>
+              <span className="flex items-center gap-1">
+                <kbd className="px-2 py-0.5 bg-white/10 rounded">Z</kbd> Zoom
+              </span>
+            </motion.div>
           </div>
-        </div>, document.body
+        </motion.div>, document.body
       )}
     </div>
   );
@@ -5275,6 +5405,7 @@ useEffect(() => {
             <SettingsPage
               effectiveTheme={effectiveTheme}
               onClose={() => navigate('/chats')}
+              onProfileClick={() => navigate('/profile')}
             />
           ) : activeSection === "documents" && !selectedDocument && !isNewDocumentChat ? (
             // Documents section welcome screen

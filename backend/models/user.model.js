@@ -24,6 +24,22 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
     },
+    bio: {
+      type: String,
+      default: "Hey there! I am using Chasmos."
+    },
+    
+    // User settings
+    settings: {
+      notifications: {
+        type: Boolean,
+        default: true
+      },
+      sound: {
+        type: Boolean,
+        default: true
+      }
+    },
     
     // Chat request fields
     receivedChatRequests: [
