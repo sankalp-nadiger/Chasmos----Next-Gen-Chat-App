@@ -38,5 +38,17 @@ router.get("/requests", protect, getReceivedChatRequests);
 router.get("/requests/accepted", protect, getAcceptedChatRequestsSentByUser);
 router.get("/requests/received", protect, getReceivedChatRequests);
 router.post("/request/withdraw", protect, withdrawChatRequest);
+router.get(
+  "/request/status/:email",
+  protect,
+  getChatRequestStatus
+);
+router.post(
+  "/request/reject",
+  protect,
+  rejectChatRequest
+);
+
+
 
 export default router;

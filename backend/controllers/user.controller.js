@@ -416,6 +416,43 @@ export const acceptChatRequest = asyncHandler(async (req, res) => {
   });
 });
 
+// GET /api/user/request/status/:email
+export const getChatRequestStatus = asyncHandler(async (req, res) => {
+  const otherEmail = req.params.email.toLowerCase().trim();
+
+  const me = await User.findById(req.user._id);
+
+  if (!me) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  // Accepted
+  if (me.acceptedChatRequests?.includes(otherEmail)) {
+    return res.json({ status: "accepted" });
+  }
+
+  // I sent request
+  if (
+    me.sentChatRequests?.some(
+      (r) => r.email.toLowerCase() === otherEmail
+    )
+  ) {
+    return res.json({ status: "outgoing" });
+  }
+
+  // I received request
+  if (
+    me.receivedChatRequests?.some(
+      (r) => r.email.toLowerCase() === otherEmail
+    )
+  ) {
+    return res.json({ status: "incoming" });
+  }
+
+  return res.json({ status: "none" });
+});
+
 
 // Fetch accepted chat requests that other users accepted which were sent by the current user
 export const getAcceptedChatRequestsSentByUser = asyncHandler(
@@ -499,4 +536,37 @@ export const withdrawChatRequest = asyncHandler(async (req, res) => {
   }
 
   res.status(200).json({ message: "Chat request withdrawn successfully" });
+});
+
+// POST /api/user/request/reject
+export const rejectChatRequest = asyncHandler(async (req, res) => {
+  const { senderEmail } = req.body;
+
+  if (!senderEmail) {
+    res.status(400);
+    throw new Error("senderEmail is required");
+  }
+
+  const receiver = await User.findById(req.user._id);
+  const sender = await User.findOne({ email: senderEmail.toLowerCase().trim() });
+
+  if (!receiver || !sender) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  // Remove from receiver.received
+  receiver.receivedChatRequests = receiver.receivedChatRequests.filter(
+    (r) => r?.email?.toLowerCase() !== senderEmail.toLowerCase()
+  );
+
+  // Remove from sender.sent
+  sender.sentChatRequests = sender.sentChatRequests.filter(
+    (r) => r?.email?.toLowerCase() !== receiver.email.toLowerCase()
+  );
+
+  await receiver.save();
+  await sender.save();
+
+  res.status(200).json({ message: "Chat request rejected" });
 });

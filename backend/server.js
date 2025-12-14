@@ -45,6 +45,7 @@ app.use(express.json());
 app.use("/api/user", userRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/group", groupRoutes);
 app.use("/api/message", messageRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/sprints", sprintRoutes); 
@@ -584,7 +585,29 @@ socket.on("remove reaction", async (data) => {
     }
   });
 
+  //group-socket-events
   socket.on("disconnect", () => {
     console.log("USER DISCONNECTED", socket.id);
   });
+
+  socket.on("join-group", ({ groupId }) => {
+  socket.join(`group_${groupId}`);
+});
+
+socket.on("leave-group", ({ groupId }) => {
+  socket.leave(`group_${groupId}`);
+});
+
+socket.on("member-added", ({ groupId, userId }) => {
+  io.to(`group_${groupId}`).emit("member-added", { userId });
+});
+
+socket.on("member-removed", ({ groupId, userId }) => {
+  io.to(`group_${groupId}`).emit("member-removed", { userId });
+});
+
+socket.on("admin-changed", ({ groupId, newAdminId }) => {
+  io.to(`group_${groupId}`).emit("admin-changed", { newAdminId });
+});
+
 });
