@@ -54,7 +54,7 @@ export const allUsers = asyncHandler(async (req, res) => {
 });
 
 export const registerUser = asyncHandler(async (req, res) => {
-  const { name, email, password, phoneNumber, avatar } = req.body;
+  const { name, email, password, phoneNumber, avatar, bio } = req.body;
 
   // Validate required fields
   if (!name || !email || !password || !phoneNumber) {
@@ -91,6 +91,7 @@ export const registerUser = asyncHandler(async (req, res) => {
     email: email.toLowerCase().trim(),
     password,
     phoneNumber,
+    bio: bio || "Hey there! I am using Chasmos.",
     avatar:
       avatar ||
       "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
@@ -104,6 +105,7 @@ export const registerUser = asyncHandler(async (req, res) => {
       isAdmin: user.isAdmin,
       avatar: user.avatar,
       phoneNumber: user.phoneNumber,
+      bio: user.bio,
       token: generateToken(user._id),
     });
   } else {
@@ -134,6 +136,7 @@ export const authUser = asyncHandler(async (req, res) => {
       isAdmin: user.isAdmin,
       avatar: user.avatar,
       phoneNumber: user.phoneNumber,
+      bio: user.bio,
       token: generateToken(user._id),
     });
   } else {
@@ -160,6 +163,7 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
     user.name = req.body.name || user.name;
     user.email = req.body.email || user.email;
     user.pic = req.body.pic || user.pic;
+    user.bio = req.body.bio !== undefined ? req.body.bio : user.bio;
 
     // Only update password if provided
     if (req.body.password) {
@@ -177,8 +181,54 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
       name: updatedUser.name,
       email: updatedUser.email,
       pic: updatedUser.pic,
+      bio: updatedUser.bio,
       isAdmin: updatedUser.isAdmin,
       token: generateToken(updatedUser._id),
+    });
+  } else {
+    res.status(404);
+    throw new Error("User not found");
+  }
+});
+
+// Get user settings
+export const getUserSettings = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id).select("settings");
+
+  if (user) {
+    res.status(200).json({
+      notifications: user.settings?.notifications ?? true,
+      sound: user.settings?.sound ?? true,
+    });
+  } else {
+    res.status(404);
+    throw new Error("User not found");
+  }
+});
+
+// Update user settings
+export const updateUserSettings = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id);
+
+  if (user) {
+    // Initialize settings object if it doesn't exist
+    if (!user.settings) {
+      user.settings = {};
+    }
+
+    // Update settings fields if provided
+    if (req.body.notifications !== undefined) {
+      user.settings.notifications = req.body.notifications;
+    }
+    if (req.body.sound !== undefined) {
+      user.settings.sound = req.body.sound;
+    }
+
+    const updatedUser = await user.save();
+
+    res.status(200).json({
+      notifications: updatedUser.settings.notifications,
+      sound: updatedUser.settings.sound,
     });
   } else {
     res.status(404);

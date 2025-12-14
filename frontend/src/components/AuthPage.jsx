@@ -376,16 +376,7 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
-        <label className="flex items-center">
-          <input
-            type="checkbox"
-            className={`rounded border ${currentTheme.border} text-blue-600 focus:ring-blue-500`}
-          />
-          <span className={`ml-2 text-sm ${currentTheme.textSecondary}`}>
-            Remember me
-          </span>
-        </label>
+      <div className="flex items-center justify-end">
         <button
           type="button"
           className="text-sm text-blue-600 hover:text-blue-500 font-medium transition-colors"
@@ -422,6 +413,7 @@ const SignupForm = ({ currentTheme, onSignup }) => {
     phoneNumber: "",
     password: "",
     confirmPassword: "",
+    bio: "",
     avatar: "",
     picFile: null,
   });
@@ -446,7 +438,7 @@ const SignupForm = ({ currentTheme, onSignup }) => {
         setError("Passwords don't match!");
         return;
       }
-      if (!formData.name || !formData.email || !formData.password || !formData.phoneNumber) {
+      if (!formData.name || !formData.email || !formData.password || !formData.phoneNumber || !formData.bio) {
         setError("Please fill in all required fields");
         return;
       }
@@ -469,6 +461,7 @@ const SignupForm = ({ currentTheme, onSignup }) => {
             email: formData.email,
             phoneNumber: formData.phoneNumber,
             password: formData.password,
+            bio: formData.bio,
             avatar: avatarUrl,
           }),
         });
@@ -552,6 +545,22 @@ const SignupForm = ({ currentTheme, onSignup }) => {
             setFormData((prev) => ({ ...prev, phoneNumber: e.target.value }))
           }
           className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${currentTheme.text}`}
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label className={`block text-sm font-medium ${currentTheme.text}`}>
+          Bio
+        </label>
+        <textarea
+          placeholder="Tell us about yourself"
+          value={formData.bio}
+          onChange={(e) =>
+            setFormData((prev) => ({ ...prev, bio: e.target.value }))
+          }
+          rows="3"
+          className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${currentTheme.text} resize-none`}
           required
         />
       </div>
