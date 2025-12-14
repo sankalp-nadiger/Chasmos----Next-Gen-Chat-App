@@ -1338,6 +1338,20 @@ const MessagesArea = ({
   );
 };
 
+function LoadingChatsIndicator() {
+  const [show, setShow] = React.useState(true);
+  React.useEffect(() => {
+    const timer = setTimeout(() => setShow(false), 800); // Show for 800ms
+    return () => clearTimeout(timer);
+  }, []);
+  if (!show) return null;
+  return (
+    <div className="text-center py-4 text-gray-400 dark:text-gray-500 animate-pulse">
+      Loading chats...
+    </div>
+  );
+}
+
 const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const { currentTheme, setTheme, theme } = useTheme();
   const navigate = useNavigate();
@@ -5752,7 +5766,9 @@ useEffect(() => {
       ) : (
         <>
           {/* Recent Chats */}
-          {recentChats.length > 0 && (
+          {loading ? (
+            <LoadingChatsIndicator />
+          ) : recentChats.length > 0 ? (
             <div className="flex flex-col gap-2">
               <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
                 Recent Chats
@@ -5766,7 +5782,7 @@ useEffect(() => {
                 />
               ))}
             </div>
-          )}
+          ) : null}
 
           {/* All Contacts */}
           {contacts.length > 0 && (
