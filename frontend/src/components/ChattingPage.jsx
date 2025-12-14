@@ -4590,7 +4590,7 @@ useEffect(() => {
                 </div>
 
                 {/* Chat Sidebar Area */}
-                <div className="flex-1 flex flex-col overflow-hidden">
+                 <div className="flex-1 flex flex-col overflow-hidden">
                   
   {/* Alerts Section: Chat Requests & Accepted - Hide for documents section */}
   {activeSection !== 'documents' && (
@@ -4978,8 +4978,7 @@ useEffect(() => {
         </motion.div>
       )}
     </AnimatePresence>
-
-    {/* 🆕 Floating New Chat Button */}
+        {/* 🆕 Floating New Chat Button */}
     <div className="flex justify-center mt-8">
       <motion.button
         initial={{ opacity: 0, y: 10 }}
