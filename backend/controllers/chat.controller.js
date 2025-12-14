@@ -386,9 +386,14 @@ export const getRecentChats = async (req, res) => {
       let lastMessageText = "";
       if (chat.lastMessage) {
         const msg = chat.lastMessage;
-        const text = (msg.content || msg.text || "").toString().trim();
+        
+        // Skip system messages for chat preview
+        if (msg.type === 'system') {
+          lastMessageText = "";
+        } else {
+          const text = (msg.content || msg.text || "").toString().trim();
 
-        const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+          const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
 
         if (text && text.length > 0) {
           const preview = text.split(/\s+/).slice(0, 8).join(" ");
@@ -406,6 +411,7 @@ export const getRecentChats = async (req, res) => {
 
           filename = filename.replace(/^[\d\-:.]+_/, "");
           lastMessageText = filename || "Attachment";
+        }
         }
       }
 

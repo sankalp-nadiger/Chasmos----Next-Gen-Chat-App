@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_ANON_KEY;
+// Prefer the service role key for server-side operations (bypass RLS)
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
 let supabase = null;
 
@@ -26,7 +27,7 @@ if (supabaseUrl && supabaseServiceKey) {
     })
     .catch((err) => console.error("⚠️ Supabase init error:", err.message));
 } else {
-  console.warn("⚠️ Missing Supabase environment variables!");
+  console.warn("⚠️ Missing Supabase environment variables! Ensure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set.");
 }
 
 

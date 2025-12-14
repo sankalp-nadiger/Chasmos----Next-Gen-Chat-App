@@ -14,6 +14,11 @@ const messageSchema = new Schema(
     isEdited: { type: Boolean, default: false },
     editedAt: { type: Date },
     
+    // Scheduled message fields
+    isScheduled: { type: Boolean, default: false },
+    scheduledFor: { type: Date },
+    scheduledSent: { type: Boolean, default: false },
+    
     // New starring feature
     starredBy: [{ 
       user: { type: Schema.Types.ObjectId, ref: "User" },
@@ -34,5 +39,6 @@ const messageSchema = new Schema(
 messageSchema.index({ chat: 1, createdAt: -1 });
 messageSchema.index({ "starredBy.user": 1 });
 messageSchema.index({ "reactions.user": 1 });
+messageSchema.index({ isScheduled: 1, scheduledFor: 1, scheduledSent: 1 });
 
 export default mongoose.model("Message", messageSchema);

@@ -16,7 +16,10 @@ import {
   getPinnedMessages,
   getMediaAttachments,
   getLinkAttachments,
-  getDocumentAttachments
+  getDocumentAttachments,
+  getScheduledMessages,
+  cancelScheduledMessage,
+  updateScheduledMessage
 } from "../controllers/message.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 
@@ -34,6 +37,11 @@ router.route("/forward").post(protect, forwardMessage);
 router.route("/pin").post(protect, pinMessage);
 router.route("/unpin").post(protect, unpinMessage);
 router.route("/pinned/:chatId").get(protect, getPinnedMessages);
+
+// Scheduled message routes (must be before /:chatId and /:messageId)
+router.route("/scheduled/:chatId").get(protect, getScheduledMessages);
+router.route("/scheduled/:messageId/cancel").delete(protect, cancelScheduledMessage);
+router.route("/scheduled/:messageId/update").put(protect, updateScheduledMessage);
 
 // Starring routes (must be before /:messageId)
 router.route("/starred/:chatId").get(protect, getStarredMessages);

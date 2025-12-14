@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom';
 
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from "socket.io-client";
+import { useScreenshotDetection } from '../hooks/useScreenshotDetection';
 import Swal from "sweetalert2";
 import { motion, AnimatePresence } from "framer-motion";
 import chatReqIcon from "../assets/Chat-reuest.png";
@@ -110,6 +111,8 @@ const ChatHeader = React.memo(
     isBlocked,
     isArchived,
     onOpenUserProfile,
+    setShowDeleteChatModal,
+    setChatToDelete,
   }) => {
     const [menuOpen, setMenuOpen] = React.useState(false);
     const menuRef = React.useRef(null);
@@ -354,7 +357,7 @@ onClick={() => {
                           </button>
                     </li> */}
                         <li>
-                          <button className={`w-full text-left px-4 py-3 flex items-center gap-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900`} onClick={()=>{ if(window.confirm('Delete this chat? This will remove the chat for everyone if you are allowed. Continue?')){ onDeleteChat && onDeleteChat(selectedContact); } setMenuOpen(false); }}>
+                          <button className={`w-full text-left px-4 py-3 flex items-center gap-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900`} onClick={() => { setShowDeleteChatModal(true); setChatToDelete(selectedContact); setMenuOpen(false); }}>
                             <Trash2 className="w-4 h-4 opacity-90" />
                             <span>Delete Chat</span>
                           </button>
@@ -386,29 +389,6 @@ onClick={() => {
 // MessageBubble component definition
 const MessageBubble = React.memo(
   ({ message, isPinned, onPinToggle, onDeleteMessage, onForwardMessage, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange }) => {
-    // Check if this is a system message and render it centered
-    if (message.isSystemMessage) {
-      return (
-        <motion.div
-          key={message.id}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -10 }}
-          className="w-full flex justify-center my-2"
-        >
-          <div
-            className={`px-4 py-2 rounded-lg text-sm text-center ${
-              effectiveTheme.mode === 'dark'
-                ? 'bg-gray-700/50 text-gray-300'
-                : 'bg-gray-200/70 text-gray-700'
-            }`}
-          >
-            {message.content}
-          </div>
-        </motion.div>
-      );
-    }
-
     const sender = message.sender;
     const isOwnMessage = (() => {
       if (!sender) return false;
@@ -1096,6 +1076,7 @@ const MessagesArea = ({
   onForwardMessage,
   onEditMessage,
   onHoverDateChange,
+  manualScrollInProgress,
 }) => {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -1171,10 +1152,10 @@ const MessagesArea = ({
 
   // ✅ FIX: Only auto-scroll when NEW messages arrive AND user is at bottom
   useEffect(() => {
-    if (shouldAutoScrollRef.current && messagesEndRef.current) {
+    if (shouldAutoScrollRef.current && messagesEndRef.current && !manualScrollInProgress?.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [filteredMessages, isTyping]);
+  }, [filteredMessages, isTyping, manualScrollInProgress]);
 
   // ✅ Always scroll on contact change
   useEffect(() => {
@@ -1232,7 +1213,7 @@ const MessagesArea = ({
       <div
         ref={messagesContainerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto p-4 space-y-4 relative"
+        className="h-full overflow-y-auto p-4 space-y-4 relative messages-container-capture"
         style={{
           scrollbarWidth: 'thin',
           scrollbarColor: effectiveTheme.mode === 'dark' 
@@ -1249,7 +1230,7 @@ const MessagesArea = ({
                     <DateTag label={formatDayLabel(item.timestamp)} />
                   </div>
                 );
-              } else if (item && item.isSystemMessage) {
+              } else if (item && (item.isSystemMessage || item.type === 'system')) {
                 // System notification (block/unblock)
                 return (
                   <motion.div
@@ -1260,7 +1241,7 @@ const MessagesArea = ({
                     className="w-full flex justify-center my-2"
                   >
                     <div
-                      className={`px-4 py-2 rounded-lg text-sm ${
+                      className={`px-4 py-2 rounded-lg text-sm text-center ${
                         effectiveTheme.mode === 'dark'
                           ? 'bg-gray-700/50 text-gray-300'
                           : 'bg-gray-200/70 text-gray-700'
@@ -1270,7 +1251,8 @@ const MessagesArea = ({
                     </div>
                   </motion.div>
                 );
-              } else {
+              } else if (item && !item.isSystemMessage && item.type !== 'system') {
+                // Regular user messages
                 return (
                   <MessageBubble
                     key={item.id}
@@ -1286,6 +1268,7 @@ const MessagesArea = ({
                   />
                 );
               }
+              return null;
             })}
           </AnimatePresence>
 
@@ -1392,6 +1375,20 @@ const MessagesArea = ({
   );
 };
 
+function LoadingChatsIndicator() {
+  const [show, setShow] = React.useState(true);
+  React.useEffect(() => {
+    const timer = setTimeout(() => setShow(false), 800); // Show for 800ms
+    return () => clearTimeout(timer);
+  }, []);
+  if (!show) return null;
+  return (
+    <div className="text-center py-4 text-gray-400 dark:text-gray-500 animate-pulse">
+      Loading chats...
+    </div>
+  );
+}
+
 const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const { currentTheme, setTheme, theme } = useTheme();
   const navigate = useNavigate();
@@ -1401,6 +1398,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [chatSearchTerm, setChatSearchTerm] = useState("");
   const [contacts, setContacts] = useState([]);
+  const manualScrollInProgressRef = useRef(false);
   const [googleContacts, setGoogleContacts] = useState([]);
   const [activeGroup, setActiveGroup] = useState(null); // current group for modal
   const [showGroupInfoModal, setShowGroupInfoModal] = useState(false);
@@ -1444,6 +1442,19 @@ const [selectedContact, setSelectedContact] = useState(null);
   // Delete message state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [messageToDelete, setMessageToDelete] = useState(null);
+
+  // --- Delete Chat Modal State ---
+const [showDeleteChatModal, setShowDeleteChatModal] = useState(false);
+const [chatToDelete, setChatToDelete] = useState(null);
+
+// Confirm delete chat handler
+const confirmDeleteChat = async () => {
+  if (chatToDelete) {
+    await handleDeleteChat(chatToDelete);
+    setShowDeleteChatModal(false);
+    setChatToDelete(null);
+  }
+};
 
   // User profile modal state
   const [showUserProfileModal, setShowUserProfileModal] = useState(false);
@@ -1598,17 +1609,25 @@ const deleteDocument = async (documentId) => {
 
     toast.success("Document deleted", {
       style: {
-        background: effectiveTheme.toastBg,
-        color: effectiveTheme.toastText,
-        border: effectiveTheme.toastBorder,
+        background: 'linear-gradient(135deg, #8b5cf6 0%, #60a5fa 100%)',
+        color: '#fff',
+        border: '1.5px solid #a78bfa',
+        boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.15)',
+        backdropFilter: 'blur(8px)',
+        fontWeight: 600,
+        letterSpacing: '0.01em',
       },
     });
   } catch (err) {
     toast.error("Delete failed", {
       style: {
-        background: effectiveTheme.toastBg,
-        color: effectiveTheme.toastText,
-        border: effectiveTheme.toastBorder,
+        background: 'linear-gradient(135deg, #f43f5e 0%, #fbbf24 100%)',
+        color: '#fff',
+        border: '1.5px solid #f43f5e',
+        boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.10)',
+        backdropFilter: 'blur(8px)',
+        fontWeight: 600,
+        letterSpacing: '0.01em',
       },
     });
   }
@@ -1753,7 +1772,6 @@ const togglePin = async (docId, isPinnedNow) => {
   const handleDeleteChat = async (contact) => {
     const chatId = contact?.id || contact?._id || selectedContact?.id || selectedContact?._id;
     if (!chatId) return;
-    if (!window.confirm('Are you sure you want to delete this chat? This will remove all messages.')) return;
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
       const res = await fetch(`${API_BASE_URL}/api/chat/${chatId}`, {
@@ -2002,20 +2020,29 @@ const togglePin = async (docId, isPinnedNow) => {
     if (!Array.isArray(messages) || messages.length === 0) return messages;
     
     const filtered = [];
-    let lastSystemMessage = null;
+    const systemMessageLastIndex = new Map(); // Track the last occurrence index of each system message type
     
-    for (const msg of messages) {
-      if (msg.isSystemMessage) {
-        // Check if this system message is the same as the last one
-        if (lastSystemMessage && 
-            lastSystemMessage.content === msg.content && 
-            Math.abs(msg.timestamp - lastSystemMessage.timestamp) < 2000) { // Within 2 seconds
-          // Skip duplicate
-          continue;
-        }
-        lastSystemMessage = msg;
+    // First pass: find the last occurrence of each system message type
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg.isSystemMessage || msg.type === 'system') {
+        // Use content as the key (e.g., "You blocked this contact", "You unblocked this contact")
+        systemMessageLastIndex.set(msg.content, i);
       }
-      filtered.push(msg);
+    }
+    
+    // Second pass: only include the latest occurrence of each system message type
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg.isSystemMessage || msg.type === 'system') {
+        // Only include this system message if it's the last occurrence of its type
+        if (systemMessageLastIndex.get(msg.content) === i) {
+          filtered.push(msg);
+        }
+      } else {
+        // Include all non-system messages
+        filtered.push(msg);
+      }
     }
     
     return filtered;
@@ -2812,7 +2839,6 @@ const handleDeleteGroup = (groupId) => {
     console.log("🔹 Normalized Accepted Chats:", normalizedChats);
 
     setAcceptedChats(normalizedChats);
-    setFilteredAcceptedChats(normalizedChats); // important
   } catch (err) {
     console.error("Error fetching accepted chats:", err);
     setAcceptedChats([]);
@@ -3779,6 +3805,169 @@ const handleSendMessageFromInput = useCallback(
     await handlePinMessage(messageId);
   }, [handlePinMessage]);
 
+  // Screenshot detection handler
+  const handleScreenshotDetected = useCallback(async ({ blob, dimensions, timestamp }) => {
+    console.log('🖼️ [Screenshot] Detection triggered', { 
+      blobSize: blob?.size, 
+      dimensions, 
+      timestamp,
+      selectedContact: selectedContact?.name 
+    });
+
+    if (!selectedContact) {
+      console.error('❌ [Screenshot] No selected contact');
+      toast.error('No active chat to save screenshot', {
+        style: {
+          background: 'linear-gradient(135deg, #f43f5e 0%, #fbbf24 100%)',
+          color: '#fff',
+          border: '1.5px solid #f43f5e',
+          boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.10)',
+          backdropFilter: 'blur(8px)',
+          fontWeight: 600,
+          letterSpacing: '0.01em',
+        },
+        position: 'bottom-center',
+      });
+      return;
+    }
+
+    const chatId = selectedContact.chatId || selectedContact._id || selectedContact.id;
+    console.log('📤 [Screenshot] Uploading for chat:', chatId);
+    
+    // Show loading toast
+    const loadingToast = toast.loading('Screenshot detected!', {
+      position: 'bottom-center',
+      style: {
+        background: 'linear-gradient(135deg, #6366f1 0%, #a78bfa 100%)',
+        color: '#fff',
+        border: '1.5px solid #6366f1',
+        boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.10)',
+        backdropFilter: 'blur(8px)',
+        fontWeight: 600,
+        letterSpacing: '0.01em',
+      },
+    });
+    
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      if (!token) {
+        console.error('❌ [Screenshot] No token found');
+        toast.error('Authentication required', {
+          id: loadingToast,
+          style: {
+            background: 'linear-gradient(135deg, #f43f5e 0%, #fbbf24 100%)',
+            color: '#fff',
+            border: '1.5px solid #f43f5e',
+            boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.10)',
+            backdropFilter: 'blur(8px)',
+            fontWeight: 600,
+            letterSpacing: '0.01em',
+          },
+        });
+        return;
+      }
+
+      // Create form data
+      const formData = new FormData();
+      const filename = `screenshot_${Date.now()}.png`;
+      formData.append('screenshot', blob, filename);
+      formData.append('chatId', chatId);
+      formData.append('width', dimensions.width.toString());
+      formData.append('height', dimensions.height.toString());
+
+      console.log('📡 [Screenshot] Sending to:', `${API_BASE_URL}/api/screenshot/upload`);
+      console.log('📦 [Screenshot] FormData contents:', {
+        filename,
+        chatId,
+        blobSize: blob.size,
+        width: dimensions.width,
+        height: dimensions.height
+      });
+
+      // Upload screenshot
+      const response = await fetch(`${API_BASE_URL}/api/screenshot/upload`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          // Don't set Content-Type - let browser set it with boundary for FormData
+        },
+        body: formData,
+      });
+
+      console.log('📨 [Screenshot] Response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ [Screenshot] Upload failed:', response.status, errorText);
+        throw new Error(`Failed to upload screenshot: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ [Screenshot] Uploaded successfully:', data);
+      
+      // Success toast
+      toast.success('Screenshot saved!', {
+        id: loadingToast,
+        duration: 3000,
+        position: 'bottom-center',
+        style: {
+          background: 'linear-gradient(135deg, #8b5cf6 0%, #60a5fa 100%)',
+          color: '#fff',
+          border: '1.5px solid #a78bfa',
+          boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.15)',
+          backdropFilter: 'blur(8px)',
+          fontWeight: 600,
+          letterSpacing: '0.01em',
+        },
+      });
+      
+      // Add system message to chat
+      if (data.systemMessage) {
+        const formatted = {
+          id: data.systemMessage._id || data.systemMessage.id,
+          type: 'system',
+          content: data.systemMessage.content,
+          sender: data.systemMessage.sender._id || data.systemMessage.sender,
+          timestamp: new Date(data.systemMessage.createdAt).getTime(),
+          isSystemMessage: true,
+        };
+
+        setMessages((prev) => ({
+          ...prev,
+          [chatId]: [...(prev[chatId] || []), formatted],
+        }));
+
+        // Emit socket event
+        if (socketRef.current?.emit) {
+          socketRef.current.emit('new message', data.systemMessage);
+        }
+      }
+
+    } catch (error) {
+      console.error('💥 [Screenshot] Error:', error);
+      toast.error(`Failed to save screenshot: ${error.message}`, {
+        position: 'bottom-center',
+        style: {
+          background: 'linear-gradient(135deg, #f43f5e 0%, #fbbf24 100%)',
+          color: '#fff',
+          border: '1.5px solid #f43f5e',
+          boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.10)',
+          backdropFilter: 'blur(8px)',
+          fontWeight: 600,
+          letterSpacing: '0.01em',
+        },
+      });
+    }
+  }, [selectedContact, API_BASE_URL, setMessages, socketRef]);
+
+  // Use screenshot detection hook
+  useScreenshotDetection({
+    chatId: selectedContact?.chatId || selectedContact?._id || selectedContact?.id,
+    userId: currentUserId,
+    onScreenshotDetected: handleScreenshotDetected,
+    enabled: !!selectedContact && !selectedContact.isDocument,
+  });
+
   const handleReplaceOldestPin = useCallback(async () => {
     const chatId = selectedContact?.chatId || selectedContact?._id;
     if (!chatId || !pendingPinMessageId) return;
@@ -3879,19 +4068,65 @@ const handleSendMessageFromInput = useCallback(
       return;
     }
     
-    const messageElement = document.getElementById(`message-${messageId}`);
+    console.log('Navigating to message:', messageId);
     
-    if (messageElement) {
-      messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Disable auto-scroll during manual navigation
+    manualScrollInProgressRef.current = true;
+    
+    const scrollToMessage = (attempts = 0) => {
+      const messageElement = document.getElementById(`message-${messageId}`);
       
-      // Highlight the message briefly
-      messageElement.classList.add('highlight-message');
-      setTimeout(() => {
-        messageElement.classList.remove('highlight-message');
-      }, 2000);
-    } else {
-      console.warn(`Message element not found for ID: ${messageId}`);
-    }
+      if (messageElement) {
+        console.log('Found message element, scrolling...');
+        
+        // Get the messages container
+        const messagesContainer = messageElement.closest('.overflow-y-auto');
+        
+        if (messagesContainer) {
+          // Calculate the offset from the top of the container
+          const containerRect = messagesContainer.getBoundingClientRect();
+          const messageRect = messageElement.getBoundingClientRect();
+          const scrollTop = messagesContainer.scrollTop;
+          const offsetTop = messageRect.top - containerRect.top + scrollTop;
+          
+          // Account for header and pinned messages bar (approximately 150px)
+          const targetScroll = offsetTop - 150;
+          
+          messagesContainer.scrollTo({
+            top: targetScroll,
+            behavior: 'smooth'
+          });
+        } else {
+          // Fallback to scrollIntoView
+          messageElement.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'center',
+            inline: 'nearest'
+          });
+        }
+        
+        // Highlight the message briefly
+        messageElement.classList.add('highlight-message');
+        setTimeout(() => {
+          messageElement.classList.remove('highlight-message');
+        }, 2000);
+        
+        // Re-enable auto-scroll after navigation completes (after smooth scroll animation)
+        setTimeout(() => {
+          manualScrollInProgressRef.current = false;
+        }, 1000);
+      } else if (attempts < 5) {
+        console.log(`Message element not found yet, retrying... (attempt ${attempts + 1})`);
+        // Retry after a short delay to allow DOM to update
+        setTimeout(() => scrollToMessage(attempts + 1), 200);
+      } else {
+        console.warn(`Message element not found for ID after ${attempts} attempts: ${messageId}`);
+        // Re-enable auto-scroll even if we fail to find the message
+        manualScrollInProgressRef.current = false;
+      }
+    };
+    
+    scrollToMessage();
   }, []);
 
   // Time-based cosmic overlay system
@@ -4128,24 +4363,7 @@ const handleCreateGroup = useCallback(() => {
 
     fetchDocumentHistory();
   }, []);
-
-  // 🔹 Message input state
-  const [messageInput, setMessageInput] = useState("");
-
-  // 🔹 Function to send message (triggered by Enter key or Send button)
-  const handleSendClick = useCallback(() => {
-    if (!messageInput.trim() || !selectedDocument) return;
-
-    // Here, send the message to your backend or append to chat array
-    console.log(
-      `📩 Sending message: "${messageInput}" for document:`,
-      selectedDocument
-    );
-
-    // Clear input after sending
-    setMessageInput("");
-  }, [messageInput, selectedDocument]);
-
+  
   // Fetch recent chats
   useEffect(() => {
     const fetchRecentChats = async () => {
@@ -4392,6 +4610,31 @@ useEffect(() => {
 
   return (
     <>
+      {showDeleteChatModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-8 max-w-sm w-full relative border border-gray-200 dark:border-gray-700">
+            <h2 className="text-xl font-bold mb-4 text-gray-900 dark:text-white flex items-center gap-2">
+              <Trash2 className="w-6 h-6 text-red-500" />
+              Delete Chat
+            </h2>
+            <p className="mb-6 text-gray-700 dark:text-gray-300">Are you sure you want to delete this chat? This will remove the chat for everyone if you are allowed. This action cannot be undone.</p>
+            <div className="flex gap-3 justify-end">
+              <button
+                className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+                onClick={() => { setShowDeleteChatModal(false); setChatToDelete(null); }}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition"
+                onClick={confirmDeleteChat}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <style>
         {`
           @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&family=Exo+2:wght@400;500;600;700&display=swap');
@@ -4470,7 +4713,7 @@ useEffect(() => {
                 ?
               </h2>
               <p className={`${effectiveTheme.textSecondary} mt-3 text-sm leading-relaxed`}>
-                This person won't be able to message or call you. They won't know you blocked them.
+                This person won't be able to message. They won't know you blocked them.
               </p>
             </div>
 
@@ -5115,10 +5358,13 @@ useEffect(() => {
                       )}
 </AnimatePresence>
                     </div>
+  </div>
+  )}
 
-                    {/* 🔹 Accepted Chats Dropdown */}
-                    {showChatInvitesAccepted && (
-                    <div className="rounded-md justify-between items-center px-2 py-1">
+  {/* 🔹 Accepted Chats Dropdown */}
+  {activeSection !== 'documents' && showChatInvitesAccepted && (
+  <div className="flex-shrink-0">
+                    <div className="mb-2 rounded-md justify-between items-center px-2 py-1">
   <button
     onClick={() => setShowAcceptedDropdown(!showAcceptedDropdown)}
     className={`w-full flex justify-between items-center px-3 py-2 rounded-lg ${
@@ -5225,9 +5471,7 @@ useEffect(() => {
     )}
   </AnimatePresence>
 </div>
-                    )}
-
-                  </div>
+                    </div>
   )}
 
                   {/* 🧭 Contacts/Documents List */}
@@ -5459,7 +5703,9 @@ useEffect(() => {
       ) : (
         <>
           {/* Recent Chats */}
-          {recentChats.length > 0 && (
+          {loading ? (
+            <LoadingChatsIndicator />
+          ) : recentChats.length > 0 ? (
             <div className="flex flex-col gap-2">
               <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
                 Recent Chats
@@ -5473,7 +5719,7 @@ useEffect(() => {
                 />
               ))}
             </div>
-          )}
+          ) : null}
 
           {/* All Contacts */}
           {contacts.length > 0 && (
@@ -5837,6 +6083,8 @@ useEffect(() => {
                 onDeleteChat={handleDeleteChat}
                 isBlocked={isBlockedState}
                 isArchived={isArchivedState}
+                setShowDeleteChatModal={setShowDeleteChatModal}
+                setChatToDelete={setChatToDelete}
                 onOpenUserProfile={() => {
                   // For group chats or documents, we can't show a single user profile
                   if (selectedContact.isGroup || selectedContact.isDocument) {
@@ -5953,6 +6201,7 @@ useEffect(() => {
                   onDeleteMessage={handleDeleteMessage}
                   onForwardMessage={handleForwardMessage}
                   onEditMessage={handleEditMessage}
+                  manualScrollInProgress={manualScrollInProgressRef}
                 />
               </div>
               <MessageInput
