@@ -349,6 +349,29 @@ const ChatHeader = React.memo(
 // MessageBubble component definition
 const MessageBubble = React.memo(
   ({ message, isPinned, onPinToggle, onDeleteMessage, onForwardMessage, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange }) => {
+    // Check if this is a system message and render it centered
+    if (message.isSystemMessage) {
+      return (
+        <motion.div
+          key={message.id}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          className="w-full flex justify-center my-2"
+        >
+          <div
+            className={`px-4 py-2 rounded-lg text-sm text-center ${
+              effectiveTheme.mode === 'dark'
+                ? 'bg-gray-700/50 text-gray-300'
+                : 'bg-gray-200/70 text-gray-700'
+            }`}
+          >
+            {message.content}
+          </div>
+        </motion.div>
+      );
+    }
+
     const sender = message.sender;
     const isOwnMessage = (() => {
       if (!sender) return false;
