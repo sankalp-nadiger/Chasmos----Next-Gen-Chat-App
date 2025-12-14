@@ -2810,10 +2810,12 @@ useEffect(() => {
 
   // Fetch pinned messages when chat is selected
   useEffect(() => {
+    // Clear pinned messages immediately when contact changes
+    setPinnedMessagesData([]);
+    setPinnedMessages({});
+
     const fetchPinnedMessages = async () => {
       if (!selectedContact) {
-        setPinnedMessagesData([]);
-        setPinnedMessages({});
         return;
       }
 
