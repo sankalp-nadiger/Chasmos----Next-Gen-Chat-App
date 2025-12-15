@@ -10,6 +10,8 @@ import React, {
 } from "react";
 import { toast } from "react-hot-toast";
 import { createPortal } from 'react-dom';
+
+
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from "socket.io-client";
 import { useScreenshotDetection } from '../hooks/useScreenshotDetection';
@@ -83,6 +85,9 @@ import PinnedMessagesBar from "./PinnedMessagesBar";
 import DeleteMessageModal from "./DeleteMessageModal";
 import UserProfileModal from "./UserProfileModal";
 
+const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+
 // Memoized Chat Header Component
 const ChatHeader = React.memo(
   ({
@@ -125,12 +130,34 @@ const ChatHeader = React.memo(
     const pinnedCount = Object.values(pinnedMessages || {}).filter(
       Boolean
     ).length;
+
+    const [activeGroup, setActiveGroup] = useState(null);
+const [showGroupInfoModal, setShowGroupInfoModal] = useState(false);
+const [currentGroup, setCurrentGroup] = useState(null);
+const [chats, setChats] = useState([]); // your chat/group list
+
+const handleShowGroupInfo = (group) => {
+  // Make sure group exists
+  if (!group) return;
+
+  setCurrentGroup(group);          // Set the group to view
+  setShowGroupInfoModal(true);     // Open modal
+};
+
+
     return (
       <div className={`${effectiveTheme.secondary} relative`}>
         <div className="p-4 flex items-center justify-between">
           <div 
             className="flex items-center space-x-3 flex-1 cursor-pointer hover:bg-white/5 transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1"
-            onClick={() => !selectedContact.isDocument && onOpenUserProfile()}
+onClick={() => {
+  if (selectedContact.isDocument) return; // ignore documents
+  if (selectedContact.isGroup) {
+    handleShowGroupInfo(selectedContact); // open group modal
+  } else {
+    onOpenUserProfile(); // open user profile
+  }
+}}
           >
             {isMobileView && (
               <button
@@ -170,17 +197,27 @@ const ChatHeader = React.memo(
               )}
             </div>
 
-            <div>
-              <h2 className={`font-semibold ${effectiveTheme.text}`}>
-                {selectedContact.name}
-              </h2>
-              <p className={`text-sm ${effectiveTheme.textSecondary}`}>
-                {selectedContact.isTyping
-                  ? "typing..."
-                  : selectedContact.isOnline && !selectedContact.isDocument
-                    ? "Online"
-                    : "Offline"}
-              </p>
+        <div>
+              <h2 className={`font-semibold ${effectiveTheme.text}`}>{selectedContact.name}</h2>
+
+             {selectedContact?.isGroup ? (
+ <button
+  onClick={() => handleShowGroupInfo(selectedContact)}
+  className="px-2 py-1 text-sm text-blue-500 hover:underline"
+>
+  Group Info
+</button>
+
+) : (
+  <p className={`text-sm ${effectiveTheme.textSecondary}`}>
+    {selectedContact?.isTyping
+      ? "Typing..."
+      : selectedContact?.isOnline
+      ? "Online"
+      : "Offline"}
+  </p>
+)}
+
             </div>
           </div>
 
@@ -1357,12 +1394,14 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [selectedContact, setSelectedContact] = useState(null);
+  // const [selectedContact, setSelectedContact] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [chatSearchTerm, setChatSearchTerm] = useState("");
   const [contacts, setContacts] = useState([]);
   const manualScrollInProgressRef = useRef(false);
   const [googleContacts, setGoogleContacts] = useState([]);
+  const [activeGroup, setActiveGroup] = useState(null); // current group for modal
+  const [showGroupInfoModal, setShowGroupInfoModal] = useState(false);
 
   // Clear any stale contacts on mount (helps when user account was deleted and re-created)
   useEffect(() => {
@@ -1393,6 +1432,8 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [showProfile, setShowProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [activeNavItem, setActiveNavItem] = useState(activeSection); // 'chats', 'groups', 'documents', 'community', 'profile', 'settings'
+const [selectedContact, setSelectedContact] = useState(null);
+
 
   // Forward message state
   const [showForwardModal, setShowForwardModal] = useState(false);
@@ -1694,8 +1735,7 @@ const togglePin = async (docId, isPinnedNow) => {
   const floatingButtonRef = useRef(null);
   const userMenuRef = useRef(null);
   // API Base URL from environment variable
-  const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+ 
 
   // Load synced Google contacts (if any) and merge into contacts list
   useEffect(() => {
@@ -2726,6 +2766,35 @@ const togglePin = async (docId, isPinnedNow) => {
     })();
   };
 
+  //Group functions
+  const [currentGroup, setCurrentGroup] = useState(null);
+
+const handleOpenGroupInfo = (group) => {
+  if (!group || !group.isGroup) return;
+
+  setCurrentGroup(group);
+  setShowGroupInfoModal(true);
+};
+
+
+
+const handleCloseGroupInfo = () => {
+  setShowGroupInfoModal(false);
+  setCurrentGroup(null);
+};
+
+ const handleUpdateGroup = (updatedGroup) => {
+    setChats(prev => prev.map(c => c.id === updatedGroup.id ? updatedGroup : c));
+    setCurrentGroup(updatedGroup);
+  };
+
+// delete group
+const handleDeleteGroup = (groupId) => {
+  setChats(prev => prev.filter(c => c.id !== groupId));
+  handleCloseGroupInfo();
+};
+
+
   //handle on clicking accept button
   // ✅ Accept Chat Request
   const fetchAcceptedChats = async () => {
@@ -2776,60 +2845,53 @@ const togglePin = async (docId, isPinnedNow) => {
   }
 };
 
-const handleAcceptChat = async (senderEmail) => {
+const handleAcceptChat = async () => {
   try {
-    const token = localStorage.getItem("token");
-    if (!token) throw new Error("No token found.");
-
-    const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
-      method: "PUT",
+    await fetch(`${API_BASE_URL}/api/user/request/accept`, {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ senderEmail }),
+      body: JSON.stringify({ senderEmail: contact.email }),
     });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message);
+    setChatStatus("accepted");
+    setShowInviteModal(false);
 
-    // Remove from received
-    setReceivedChats((prev) =>
-      prev.filter((c) => c.email !== senderEmail)
-    );
-
-    // Add to accepted instantly
-    if (data.acceptedChat) {
-      const normalized = {
-        _id: data.acceptedChat._id || data.acceptedChat.email,
-        email: data.acceptedChat.email,
-        name:
-          data.acceptedChat.name ||
-          data.acceptedChat.email?.split("@")[0] ||
-          "Unknown",
-        avatar:
-          data.acceptedChat.avatar ||
-          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
-        message: data.acceptedChat.message || "",
-        date: new Date(),
-      };
-
-      // No need to setFilteredAcceptedChats, filteredAcceptedChats is derived from acceptedChats
-      setAcceptedChats((prev) => [...prev, normalized]);
-    }
-
-    console.log("✅ Chat accepted!");
-
-    // sync with backend
-    fetchAcceptedChats();
-  } catch (error) {
-    console.error("❌ Error accepting chat:", error);
+    // ✅ ONLY HERE
+    fetchAcceptedChats();   // populate Accepted
+    fetchRequests();        // remove from Received
+  } catch (err) {
+    console.error(err);
   }
 };
 
-useEffect(() => {
-  fetchAcceptedChats();
-}, []);
+
+const handleRejectChat = async (email) => {
+  try {
+    const token = localStorage.getItem("token");
+
+    await fetch(`${API_BASE_URL}/api/user/request/reject`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ senderEmail: email }),
+    });
+
+    // Remove immediately from UI
+    setReceivedChats((prev) =>
+      prev.filter((req) => req.email !== email)
+    );
+  } catch (err) {
+    console.error("Reject failed", err);
+  }
+};
+
+
+
 
 
 
@@ -4147,13 +4209,16 @@ const handleSendMessageFromInput = useCallback(
     setShowFloatingMenu(false);
   }, []);
 
-   const handleCreateGroup = useCallback(() => {
+
+
+const handleCreateGroup = useCallback(() => {
       setShowGroupCreation(true);
       setShowFloatingMenu(false);
       if (isMobileView) {
         setShowSidebar(false);
       }
     }, [isMobileView]);
+
 
   const handleNewChat = useCallback(() => {
     setShowNewChat(true);
@@ -4177,12 +4242,23 @@ const handleSendMessageFromInput = useCallback(
   }, []);
 
   const handleCreateGroupComplete = useCallback((newGroup) => {
-    // Add the new group to contacts
-    setContacts((prev) => [newGroup, ...prev]);
-    setShowGroupCreation(false);
-    // Optionally select the new group
-    setSelectedContact(newGroup);
-  }, []);
+
+  // Normalize group object so UI detects it is a group
+  const formatted = {
+    ...newGroup,
+    isGroup: true,
+    chatId: newGroup.chat?._id || newGroup.chat,  // ensure chat id is present
+    participants: newGroup.participants || [],
+  };
+
+  setContacts((prev) => [formatted, ...prev]);
+  setShowGroupCreation(false);
+
+  // Auto-select the new group
+  setSelectedContact(formatted);
+
+}, []);
+
 
   const handleStartNewChat = useCallback(
     (contact) => {
@@ -5235,12 +5311,34 @@ useEffect(() => {
       )}
     </div>
   </div>
+ <div className="flex gap-2">
+  {/* Reject */}
+ <button
+  onClick={() => handleRejectChat(req.email)}
+  className="
+    px-3 py-1 text-xs rounded-md
+    border border-red-500
+    text-red-500
+    hover:bg-red-600/20 hover:text-red-700
+    active:bg-red-500/30
+    transition-colors duration-200
+  "
+>
+  Reject
+</button>
+
+
+  {/* Accept */}
   <button
     onClick={() => handleAcceptChat(req.email)}
-    className="px-3 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition"
+    className="px-3 py-1 text-xs rounded-md
+      bg-green-600 text-white
+      hover:bg-green-700 transition"
   >
     Accept
   </button>
+</div>
+
 </div>
 
                             ))
@@ -5574,168 +5672,7 @@ useEffect(() => {
   </div>
 </>
 
-//  <>
-//   <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
-//     {/* Header with dropdown toggle */}
-//     <div
-//       className="flex items-center justify-between cursor-pointer"
-//       onClick={() => setIsExpanded(!isExpanded)}
-//     >
-//       <h4 className="text-gray-900 dark:text-gray-100 font-semibold">
-//         Document History
-//       </h4>
-
-//       {isExpanded ? (
-//         <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-//       ) : (
-//         <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-//       )}
-//     </div>
-
-//     {/* Animated Dropdown */}
-//     <AnimatePresence initial={false}>
-//       {isExpanded && (
-//         <motion.div
-//           initial={{ opacity: 0, height: 0 }}
-//           animate={{ opacity: 1, height: "auto" }}
-//           exit={{ opacity: 0, height: 0 }}
-//           transition={{ duration: 0.3 }}
-//           className="space-y-3 overflow-hidden"
-//         >
-//           {loading ? (
-//             <div className="text-gray-600 dark:text-gray-400 text-center py-4">
-//               Loading...
-//             </div>
-//           ) : (
-//             <>
-//               {/* 📌 PINNED DOCUMENTS */}
-//               {pinnedDocs.length > 0 && (
-//                 <div className="space-y-3">
-//                   <h4 className="text-gray-800 dark:text-gray-200 text-sm font-semibold">
-//                     📌 Pinned
-//                   </h4>
-
-//                   {pinnedDocs.map((doc) => (
-//                     <motion.div
-//                       key={doc._id}
-//                       whileHover={{ scale: 1.02 }}
-//                       whileTap={{ scale: 0.97 }}
-//                       onClick={() => {
-//                         if (!selectedDocument || selectedDocument._id !== doc._id) {
-//                           setSelectedDocument(doc);
-//                           setIsNewDocumentChat(false);
-//                         }
-//                       }}
-//                       className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
-//                         ${effectiveTheme.secondary} border ${effectiveTheme.border} hover:${effectiveTheme.hover}
-//                         flex justify-between items-center`}
-//                     >
-//                       {/* Text */}
-//                       <div className="flex flex-col">
-//                         <p className="font-medium truncate text-gray-900 dark:text-gray-200">
-//                           {doc.fileName || "Untitled Document"}
-//                         </p>
-//                         <p className="text-xs text-gray-600 dark:text-gray-400 truncate mt-0.5">
-//                           {doc.updatedAt
-//                             ? new Date(doc.updatedAt).toLocaleString()
-//                             : "No date"}
-//                         </p>
-//                       </div>
-
-//                       {/* UNPIN button */}
-//                       <button
-//                         onClick={(e) => {
-//                           e.stopPropagation();
-//                           togglePin(doc._id, true);
-//                         }}
-//                         className="p-2"
-//                       >
-//                         <PinOff className="w-5 h-5 text-yellow-500" />
-//                       </button>
-//                     </motion.div>
-//                   ))}
-//                 </div>
-//               )}
-
-//               {/* 🗂️ NORMAL UNPINNED DOCUMENTS */}
-//               <div className="space-y-2 mt-4">
-//                 <h4 className="text-gray-800 dark:text-gray-200 text-sm font-semibold">
-//                   📄 All Documents
-//                 </h4>
-
-//                 {documentChats
-//                   .filter((d) => !d.isPinned)
-//                   .map((doc) => (
-//                     <motion.div
-//                       key={doc._id}
-//                       whileHover={{ scale: 1.02 }}
-//                       whileTap={{ scale: 0.97 }}
-//                       onClick={() => {
-//                         if (!selectedDocument || selectedDocument._id !== doc._id) {
-//                           setSelectedDocument(doc);
-//                           setIsNewDocumentChat(false);
-//                         }
-//                       }}
-//                       className={`p-3 rounded-lg cursor-pointer transition-all duration-200 
-//                         ${effectiveTheme.secondary} border ${effectiveTheme.border} hover:${effectiveTheme.hover}
-//                         flex justify-between items-center`}
-//                     >
-//                       <div className="flex flex-col">
-//                         <p className="font-medium truncate text-gray-900 dark:text-gray-200">
-//                           {doc.fileName || "Untitled Document"}
-//                         </p>
-//                         <p className="text-xs text-gray-600 dark:text-gray-400 truncate mt-0.5">
-//                           {doc.updatedAt
-//                             ? new Date(doc.updatedAt).toLocaleString()
-//                             : "No date available"}
-//                         </p>
-//                       </div>
-
-//                       {/* PIN button */}
-//                       <button
-//                         onClick={(e) => {
-//                           e.stopPropagation();
-//                           togglePin(doc._id, false); // pin
-//                         }}
-//                         className="p-2"
-//                       >
-//                         <Pin className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-//                       </button>
-//                     </motion.div>
-//                   ))}
-//               </div>
-//             </>
-//           )}
-//         </motion.div>
-//       )}
-//     </AnimatePresence>
-
-//     {/* 🆕 Floating New Chat Button */}
-//     <div className="flex justify-center mt-8">
-//       <motion.button
-//         initial={{ opacity: 0, y: 10 }}
-//         animate={{ opacity: 1, y: 0 }}
-//         whileHover={{ scale: 1.05 }}
-//         whileTap={{ scale: 0.95 }}
-//         transition={{ type: "spring", stiffness: 220 }}
-//         onClick={() => {
-//           setSelectedDocument(null);
-//           setIsNewDocumentChat(true);
-//         }}
-//         className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-5 py-3 rounded-xl shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-all duration-200 group`}
-//       >
-//         <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
-//           <MessageSquare className="w-5 h-5 text-white" />
-//         </div>
-
-//         <span className="text-gray-900 dark:text-gray-100 font-semibold">
-//           New Chat
-//         </span>
-//       </motion.button>
-//     </div>
-//   </div>
-// </>
 
 
   ) : (
@@ -6184,6 +6121,34 @@ useEffect(() => {
                   }
                 }}
               />
+
+ {showGroupInfoModal && currentGroup && (
+  <>
+    {console.log("Rendering modal for:", currentGroup)}
+{showGroupInfoModal && currentGroup && (
+  <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
+    <GroupInfoModal
+      open={showGroupInfoModal}
+      onClose={handleCloseGroupInfo}
+      group={currentGroup}
+      currentUserId={localStorage.getItem("userId")}
+      onUpdateGroup={(updated) => setCurrentGroup(updated)}
+      onDeleteGroup={(groupId) => {
+        console.log("Group deleted:", groupId);
+        setShowGroupInfoModal(false);
+        setCurrentGroup(null);
+      }}
+    />
+  </div>
+)}
+
+
+
+
+  </>
+)}
+
+
               
               {/* Pinned Messages Bar */}
               <PinnedMessagesBar

@@ -100,15 +100,26 @@ export const createGroupChat = asyncHandler(async (req, res) => {
   const { name, users, description, avatar, isPublic } = req.body;
 
   if (!users || !name) {
-    return res.status(400).send({ message: "Please fill all the fields" });
+    return res.status(400).json({ message: "Please fill all the fields" });
   }
 
-  let parsedUsers = JSON.parse(users);
-
-  if (parsedUsers.length < 2) {
-    return res.status(400).send("More than 2 users are required to form a group chat");
+  // Handle both array or string
+  let parsedUsers = users;
+  if (typeof users === "string") {
+    try {
+      parsedUsers = JSON.parse(users);
+    } catch (err) {
+      return res.status(400).json({ message: "Invalid users format" });
+    }
   }
 
+  if (!Array.isArray(parsedUsers) || parsedUsers.length < 2) {
+    return res.status(400).json({
+      message: "More than 2 users are required to form a group chat",
+    });
+  }
+
+  // Add creator to group
   parsedUsers.push(req.user._id);
 
   try {
@@ -122,11 +133,11 @@ export const createGroupChat = asyncHandler(async (req, res) => {
       groupSettings: {
         description: description || "",
         avatar: avatar || "",
-        isPublic: isPublic || false
-      }
+        isPublic: isPublic || false,
+      },
     });
 
-    const fullGroupChat = await Chat.findOne({ _id: groupChat._id })
+    const fullGroupChat = await Chat.findById(groupChat._id)
       .populate("users", "-password")
       .populate("groupAdmin", "-password")
       .populate("admins", "name email avatar");
@@ -138,208 +149,209 @@ export const createGroupChat = asyncHandler(async (req, res) => {
   }
 });
 
-export const renameGroup = asyncHandler(async (req, res) => {
-  const { chatId, chatName } = req.body;
 
-  const chat = await Chat.findById(chatId);
-  if (!chat) {
-    res.status(404);
-    throw new Error("Chat Not Found");
-  }
+// export const renameGroup = asyncHandler(async (req, res) => {
+//   const { chatId, chatName } = req.body;
 
-  // Check if user is admin
-  if (!chat.admins.includes(req.user._id)) {
-    res.status(403);
-    throw new Error("Only admins can rename the group");
-  }
+//   const chat = await Chat.findById(chatId);
+//   if (!chat) {
+//     res.status(404);
+//     throw new Error("Chat Not Found");
+//   }
 
-  const updatedChat = await Chat.findByIdAndUpdate(
-    chatId,
-    { chatName: chatName },
-    { new: true }
-  )
-    .populate("users", "-password")
-    .populate("groupAdmin", "-password")
-    .populate("admins", "name email avatar");
+//   // Check if user is admin
+//   if (!chat.admins.includes(req.user._id)) {
+//     res.status(403);
+//     throw new Error("Only admins can rename the group");
+//   }
 
-  res.json(updatedChat);
-});
+//   const updatedChat = await Chat.findByIdAndUpdate(
+//     chatId,
+//     { chatName: chatName },
+//     { new: true }
+//   )
+//     .populate("users", "-password")
+//     .populate("groupAdmin", "-password")
+//     .populate("admins", "name email avatar");
 
-export const updateGroupSettings = asyncHandler(async (req, res) => {
-  const { chatId, description, avatar, isPublic, allowInvites } = req.body;
+//   res.json(updatedChat);
+// });
 
-  const chat = await Chat.findById(chatId);
-  if (!chat) {
-    res.status(404);
-    throw new Error("Chat Not Found");
-  }
+// export const updateGroupSettings = asyncHandler(async (req, res) => {
+//   const { chatId, description, avatar, isPublic, allowInvites } = req.body;
 
-  // Check if user is admin
-  if (!chat.admins.includes(req.user._id)) {
-    res.status(403);
-    throw new Error("Only admins can update group settings");
-  }
+//   const chat = await Chat.findById(chatId);
+//   if (!chat) {
+//     res.status(404);
+//     throw new Error("Chat Not Found");
+//   }
 
-  const updateData = {};
-  if (description !== undefined) updateData["groupSettings.description"] = description;
-  if (avatar !== undefined) updateData["groupSettings.avatar"] = avatar;
-  if (isPublic !== undefined) updateData["groupSettings.isPublic"] = isPublic;
-  if (allowInvites !== undefined) updateData["groupSettings.allowInvites"] = allowInvites;
+//   // Check if user is admin
+//   if (!chat.admins.includes(req.user._id)) {
+//     res.status(403);
+//     throw new Error("Only admins can update group settings");
+//   }
 
-  const updatedChat = await Chat.findByIdAndUpdate(
-    chatId,
-    updateData,
-    { new: true }
-  )
-    .populate("users", "-password")
-    .populate("groupAdmin", "-password")
-    .populate("admins", "name email avatar");
+//   const updateData = {};
+//   if (description !== undefined) updateData["groupSettings.description"] = description;
+//   if (avatar !== undefined) updateData["groupSettings.avatar"] = avatar;
+//   if (isPublic !== undefined) updateData["groupSettings.isPublic"] = isPublic;
+//   if (allowInvites !== undefined) updateData["groupSettings.allowInvites"] = allowInvites;
 
-  res.json(updatedChat);
-});
+//   const updatedChat = await Chat.findByIdAndUpdate(
+//     chatId,
+//     updateData,
+//     { new: true }
+//   )
+//     .populate("users", "-password")
+//     .populate("groupAdmin", "-password")
+//     .populate("admins", "name email avatar");
 
-export const removeFromGroup = asyncHandler(async (req, res) => {
-  const { chatId, userId } = req.body;
+//   res.json(updatedChat);
+// });
 
-  const chat = await Chat.findById(chatId);
-  if (!chat) {
-    res.status(404);
-    throw new Error("Chat Not Found");
-  }
+// export const removeFromGroup = asyncHandler(async (req, res) => {
+//   const { chatId, userId } = req.body;
 
-  // Check if user is admin or removing themselves
-  const isAdmin = chat.admins.includes(req.user._id);
-  const isSelf = userId === req.user._id.toString();
+//   const chat = await Chat.findById(chatId);
+//   if (!chat) {
+//     res.status(404);
+//     throw new Error("Chat Not Found");
+//   }
 
-  if (!isAdmin && !isSelf) {
-    res.status(403);
-    throw new Error("Only admins can remove other users");
-  }
+//   // Check if user is admin or removing themselves
+//   const isAdmin = chat.admins.includes(req.user._id);
+//   const isSelf = userId === req.user._id.toString();
 
-  // Prevent admin from removing themselves if they're the only admin
-  if (isSelf && isAdmin && chat.admins.length === 1) {
-    res.status(400);
-    throw new Error("You are the only admin. Assign another admin before leaving.");
-  }
+//   if (!isAdmin && !isSelf) {
+//     res.status(403);
+//     throw new Error("Only admins can remove other users");
+//   }
 
-  const removed = await Chat.findByIdAndUpdate(
-    chatId,
-    {
-      $pull: { users: userId, participants: userId, admins: userId },
-    },
-    { new: true }
-  )
-    .populate("users", "-password")
-    .populate("groupAdmin", "-password")
-    .populate("admins", "name email avatar");
+//   // Prevent admin from removing themselves if they're the only admin
+//   if (isSelf && isAdmin && chat.admins.length === 1) {
+//     res.status(400);
+//     throw new Error("You are the only admin. Assign another admin before leaving.");
+//   }
 
-  res.json(removed);
-});
+//   const removed = await Chat.findByIdAndUpdate(
+//     chatId,
+//     {
+//       $pull: { users: userId, participants: userId, admins: userId },
+//     },
+//     { new: true }
+//   )
+//     .populate("users", "-password")
+//     .populate("groupAdmin", "-password")
+//     .populate("admins", "name email avatar");
 
-export const addToGroup = asyncHandler(async (req, res) => {
-  const { chatId, userId } = req.body;
+//   res.json(removed);
+// });
 
-  const chat = await Chat.findById(chatId);
-  if (!chat) {
-    res.status(404);
-    throw new Error("Chat Not Found");
-  }
+// export const addToGroup = asyncHandler(async (req, res) => {
+//   const { chatId, userId } = req.body;
 
-  // Check if user is admin
-  if (!chat.admins.includes(req.user._id)) {
-    res.status(403);
-    throw new Error("Only admins can add users to the group");
-  }
+//   const chat = await Chat.findById(chatId);
+//   if (!chat) {
+//     res.status(404);
+//     throw new Error("Chat Not Found");
+//   }
 
-  // Check if user is already in group
-  if (chat.users.includes(userId)) {
-    res.status(400);
-    throw new Error("User is already in the group");
-  }
+//   // Check if user is admin
+//   if (!chat.admins.includes(req.user._id)) {
+//     res.status(403);
+//     throw new Error("Only admins can add users to the group");
+//   }
 
-  const added = await Chat.findByIdAndUpdate(
-    chatId,
-    {
-      $push: { users: userId, participants: userId },
-    },
-    { new: true }
-  )
-    .populate("users", "-password")
-    .populate("groupAdmin", "-password")
-    .populate("admins", "name email avatar");
+//   // Check if user is already in group
+//   if (chat.users.includes(userId)) {
+//     res.status(400);
+//     throw new Error("User is already in the group");
+//   }
 
-  res.json(added);
-});
+//   const added = await Chat.findByIdAndUpdate(
+//     chatId,
+//     {
+//       $push: { users: userId, participants: userId },
+//     },
+//     { new: true }
+//   )
+//     .populate("users", "-password")
+//     .populate("groupAdmin", "-password")
+//     .populate("admins", "name email avatar");
 
-export const addAdmin = asyncHandler(async (req, res) => {
-  const { chatId, userId } = req.body;
+//   res.json(added);
+// });
 
-  const chat = await Chat.findById(chatId);
-  if (!chat) {
-    res.status(404);
-    throw new Error("Chat Not Found");
-  }
+// export const addAdmin = asyncHandler(async (req, res) => {
+//   const { chatId, userId } = req.body;
 
-  // Check if current user is admin
-  if (!chat.admins.includes(req.user._id)) {
-    res.status(403);
-    throw new Error("Only admins can add new admins");
-  }
+//   const chat = await Chat.findById(chatId);
+//   if (!chat) {
+//     res.status(404);
+//     throw new Error("Chat Not Found");
+//   }
 
-  // Check if target user is in the group
-  if (!chat.users.includes(userId)) {
-    res.status(400);
-    throw new Error("User is not in the group");
-  }
+//   // Check if current user is admin
+//   if (!chat.admins.includes(req.user._id)) {
+//     res.status(403);
+//     throw new Error("Only admins can add new admins");
+//   }
 
-  const updatedChat = await Chat.findByIdAndUpdate(
-    chatId,
-    {
-      $addToSet: { admins: userId },
-    },
-    { new: true }
-  )
-    .populate("users", "-password")
-    .populate("groupAdmin", "-password")
-    .populate("admins", "name email avatar");
+//   // Check if target user is in the group
+//   if (!chat.users.includes(userId)) {
+//     res.status(400);
+//     throw new Error("User is not in the group");
+//   }
 
-  res.json(updatedChat);
-});
+//   const updatedChat = await Chat.findByIdAndUpdate(
+//     chatId,
+//     {
+//       $addToSet: { admins: userId },
+//     },
+//     { new: true }
+//   )
+//     .populate("users", "-password")
+//     .populate("groupAdmin", "-password")
+//     .populate("admins", "name email avatar");
 
-export const removeAdmin = asyncHandler(async (req, res) => {
-  const { chatId, userId } = req.body;
+//   res.json(updatedChat);
+// });
 
-  const chat = await Chat.findById(chatId);
-  if (!chat) {
-    res.status(404);
-    throw new Error("Chat Not Found");
-  }
+// export const removeAdmin = asyncHandler(async (req, res) => {
+//   const { chatId, userId } = req.body;
 
-  // Check if current user is admin
-  if (!chat.admins.includes(req.user._id)) {
-    res.status(403);
-    throw new Error("Only admins can remove admins");
-  }
+//   const chat = await Chat.findById(chatId);
+//   if (!chat) {
+//     res.status(404);
+//     throw new Error("Chat Not Found");
+//   }
 
-  // Prevent removing the last admin
-  if (chat.admins.length === 1 && chat.admins[0].toString() === userId) {
-    res.status(400);
-    throw new Error("Cannot remove the only admin");
-  }
+//   // Check if current user is admin
+//   if (!chat.admins.includes(req.user._id)) {
+//     res.status(403);
+//     throw new Error("Only admins can remove admins");
+//   }
 
-  const updatedChat = await Chat.findByIdAndUpdate(
-    chatId,
-    {
-      $pull: { admins: userId },
-    },
-    { new: true }
-  )
-    .populate("users", "-password")
-    .populate("groupAdmin", "-password")
-    .populate("admins", "name email avatar");
+//   // Prevent removing the last admin
+//   if (chat.admins.length === 1 && chat.admins[0].toString() === userId) {
+//     res.status(400);
+//     throw new Error("Cannot remove the only admin");
+//   }
 
-  res.json(updatedChat);
-});
+//   const updatedChat = await Chat.findByIdAndUpdate(
+//     chatId,
+//     {
+//       $pull: { admins: userId },
+//     },
+//     { new: true }
+//   )
+//     .populate("users", "-password")
+//     .populate("groupAdmin", "-password")
+//     .populate("admins", "name email avatar");
+
+//   res.json(updatedChat);
+// });
 
 export const getRecentChats = async (req, res) => {
   try {
@@ -624,4 +636,30 @@ export const joinGroupByInvite = asyncHandler(async (req, res) => {
     message: "Successfully joined the group",
     chat: updatedChat
   });
+});
+
+export const getGroupChatById = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+
+  if (!chatId) {
+    return res.status(400).json({ message: "Chat ID is required" });
+  }
+
+  try {
+   // Backend: controllers/chatController.js
+const groupChat = await Chat.findById(chatId)
+  .populate("participants", "_id name email avatar") // ✅ populate members
+  .populate("admins", "_id name email avatar")      // populate admins
+  .populate("groupAdmin", "_id name email avatar"); // populate creator
+
+
+    if (!groupChat || !groupChat.isGroupChat) {
+      return res.status(404).json({ message: "Group not found" });
+    }
+
+    res.status(200).json(groupChat);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to fetch group chat" });
+  }
 });

@@ -9,6 +9,7 @@ import {
   XCircle,
   MessageCircle,
   Clock,
+   UserCheck,
   Users,
   Briefcase,
   Utensils,
@@ -24,6 +25,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import Logo from "./Logo";
+//import { io } from "socket.io-client";
 
 // Business categories mock data
 const businessCategories = [
@@ -790,89 +792,119 @@ const NewChat = ({
 
 //Contacts appearing in new chat page
 
-const ContactItem = ({
-  contact,
-  effectiveTheme,
-  onClick,
-  showLastSeen,
-  token,
-}) => {
+const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, currentUserEmail }) => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteMessage, setInviteMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const [inviteStatus, setInviteStatus] = useState("idle"); // idle | sent
-  const [isAccepted, setIsAccepted] = useState(false);
+  const [inviteStatus, setInviteStatus] = useState("idle");
+  const [chatStatus, setChatStatus] = useState("none");
 
-  // ---- Check Accepted ----
+  // ------------------- Polling / Initial Chat Status -------------------
   useEffect(() => {
-    const fetchAcceptedChats = async () => {
+    const fetchStatus = async () => {
       try {
-        const userToken = localStorage.getItem("token");
-        if (!userToken) return;
-
-        const res = await fetch(`${API_BASE_URL}/api/user/requests/accepted`, {
-          headers: { Authorization: `Bearer ${userToken}` },
+        const res = await fetch(`${API_BASE_URL}/api/user/request/status/${contact.email}`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
-
         const data = await res.json();
-        if (Array.isArray(data) && data.includes(contact.email)) {
-          setIsAccepted(true);
-        }
+        setChatStatus(data.status);
       } catch (err) {
-        console.error(err);
+        console.error("Failed to fetch chat status:", err);
       }
     };
 
-    fetchAcceptedChats();
-  }, [contact.email]);
+    fetchStatus();
 
-  // ---- Send Invite ----
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
+  }, [contact.email, token]);
+
+  // ------------------- Socket Listener -------------------
+//  useEffect(() => {
+//   if (!socketRef.current) return;
+
+//   const handleChatAccepted = ({ senderEmail, receiverEmail }) => {
+//     if (contact.email === senderEmail || contact.email === receiverEmail) {
+//       setChatStatus("accepted");
+//     }
+//   };
+
+//   socketRef.current.on("chatAccepted", handleChatAccepted);
+
+//   return () => {
+//     socketRef.current.off("chatAccepted", handleChatAccepted);
+//   };
+// }, [contact.email]);
+
+
+  // ------------------- Send Invite -------------------
   const handleSendInvite = async () => {
     try {
-      if (!token) throw new Error("Unauthorized");
-
       setSending(true);
-      const res = await fetch(`${API_BASE_URL}/api/user/request/send`, {
+      await fetch(`${API_BASE_URL}/api/user/request/send`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          recipientEmail: contact.email,
-          inviteMessage,
-        }),
+        body: JSON.stringify({ recipientEmail: contact.email, inviteMessage }),
       });
 
-      if (!res.ok) throw new Error("Invite already sent");
-
       setInviteStatus("sent");
-      setInviteMessage("");
+      setChatStatus("outgoing");
     } catch {
-      setInviteStatus("sent"); // treat already sent as sent state
+      setInviteStatus("sent");
     } finally {
       setSending(false);
     }
   };
 
-  // ---- Withdraw Invite ----
+  // ------------------- Withdraw Invite -------------------
   const handleWithdrawInvite = async () => {
     try {
-      const userToken = localStorage.getItem("token");
       await fetch(`${API_BASE_URL}/api/user/request/withdraw`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${userToken}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ recipientEmail: contact.email }),
       });
 
       setInviteStatus("idle");
+      setChatStatus("none");
       setShowInviteModal(false);
     } catch (err) {
       console.error(err);
     }
+  };
+
+  // ------------------- Accept Invite -------------------
+  const handleAcceptInvite = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ senderEmail: contact.email }),
+      });
+      const data = await res.json();
+
+      setChatStatus("accepted");
+      setShowInviteModal(false);
+
+      // Notify sender in real-time
+      socket.emit("chatAccepted", { senderEmail: contact.email, receiverEmail: currentUserEmail });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // ------------------- Open Chat -------------------
+  const handleOpenChat = () => {
+    onClick(contact); // Make sure your ChatWindow receives contact info
   };
 
   return (
@@ -881,19 +913,13 @@ const ContactItem = ({
       <motion.div
         whileHover={{ x: 4 }}
         className={`flex items-center justify-between p-4 cursor-pointer border-b
-          ${effectiveTheme.border || "border-gray-300"}
-          hover:${effectiveTheme.hover || "bg-gray-100"}`}
+        ${effectiveTheme.border || "border-gray-300"}
+        hover:${effectiveTheme.hover || "bg-gray-100"}`}
       >
-        {/* Left */}
-        <div
-          className="flex items-center gap-3"
-          onClick={() => onClick(contact)}
-        >
+        {/* LEFT */}
+        <div className="flex items-center gap-3" onClick={() => onClick(contact)}>
           <img
-            src={
-              contact.avatar ||
-              "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-            }
+            src={contact.avatar || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"}
             className="w-12 h-12 rounded-full object-cover"
           />
           <div>
@@ -906,26 +932,55 @@ const ContactItem = ({
           </div>
         </div>
 
-        {/* Right */}
-        {isAccepted ? (
+        {/* RIGHT ICONS */}
+        {chatStatus === "accepted" && (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onClick(contact);
+              handleOpenChat();
             }}
             className="p-2 rounded-full hover:bg-green-500/20"
           >
             <MessageCircle className="w-5 h-5 text-green-500" />
           </button>
-        ) : (
+        )}
+
+        {chatStatus === "none" && (
           <button
             onClick={(e) => {
               e.stopPropagation();
+              setInviteStatus("idle");
               setShowInviteModal(true);
             }}
             className="p-2 rounded-full hover:bg-blue-500/20"
           >
             <Send className="w-5 h-5 text-blue-500" />
+          </button>
+        )}
+
+        {chatStatus === "outgoing" && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setInviteStatus("sent");
+              setShowInviteModal(true);
+            }}
+            className="p-2 rounded-full hover:bg-yellow-500/20"
+          >
+            <Clock className="w-5 h-5 text-yellow-500" />
+          </button>
+        )}
+
+        {chatStatus === "incoming" && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setInviteStatus("incoming");
+              setShowInviteModal(true);
+            }}
+            className="p-2 rounded-full hover:bg-orange-500/20"
+          >
+            <Clock className="w-5 h-5 text-orange-500" />
           </button>
         )}
       </motion.div>
@@ -936,91 +991,76 @@ const ContactItem = ({
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className={`w-full max-w-md rounded-2xl p-6 shadow-xl
-              ${effectiveTheme.secondary || "bg-white dark:bg-gray-800"}`}
+            className={`w-full max-w-md rounded-2xl p-6 shadow-xl ${effectiveTheme.secondary || "bg-white dark:bg-gray-800"}`}
           >
             {/* Header */}
             <div className="flex justify-between mb-4">
               <h2 className="font-semibold text-lg">{contact.name}</h2>
-              <button onClick={() => setShowInviteModal(false)}>
-                <XCircle className="w-5 h-5 text-gray-400" />
+              <button
+                onClick={() => setShowInviteModal(false)}
+                className="p-1 rounded-full hover:bg-red-500/20 transition"
+              >
+                <XCircle className="w-5 h-5 text-gray-400 hover:text-red-500" />
               </button>
             </div>
 
-            {/* Invite Sent Box */}
+            {/* OUTGOING / INCOMING / IDLE */}
             {inviteStatus === "sent" && (
-              <div
-                className={`flex items-center gap-3 p-4 rounded-xl border
-                  ${effectiveTheme.border || "border-gray-200 dark:border-gray-600"}
-                  ${effectiveTheme.secondary || "bg-gray-100 dark:bg-gray-700"}`}
-              >
-                <div className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500/10">
-                  <Send className="w-4 h-4 text-blue-500" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">Invite sent</p>
-                  <p className="text-xs text-gray-500">
-                    Waiting for {contact.name} to accept
-                  </p>
+              <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-300">
+                <p className="text-sm font-medium">Invite pending</p>
+                <p className="text-xs text-gray-500">Waiting for {contact.name} to accept</p>
+              </div>
+            )}
+
+            {inviteStatus === "incoming" && (
+              <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-300">
+                <p className="text-sm font-medium">Incoming request</p>
+                <p className="text-xs text-gray-500">{contact.name} has already sent you a request</p>
+                <div className="flex justify-end mt-4 gap-2">
+                  <button
+                    onClick={handleAcceptInvite}
+                    className="px-4 py-2 rounded-xl bg-green-600 text-white"
+                  >
+                    Accept
+                  </button>
                 </div>
               </div>
             )}
 
-            {/* Message Input */}
-            {inviteStatus !== "sent" && (
+            {inviteStatus === "idle" && (
               <textarea
                 rows="3"
                 value={inviteMessage}
                 onChange={(e) => setInviteMessage(e.target.value)}
                 placeholder="Add an optional message..."
-                className={`w-full mt-4 p-3 rounded-xl border resize-none text-sm
-    ${effectiveTheme.bg || "bg-white dark:bg-gray-800"}
-    ${effectiveTheme.border || "border-gray-300 dark:border-gray-600"}
-    text-gray-900 dark:text-gray-100
-    placeholder-gray-400 dark:placeholder-gray-500
-    focus:ring-2 focus:ring-blue-500 focus:outline-none`}
+                className="w-full mt-4 p-3 rounded-xl border resize-none text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
             )}
 
             {/* Footer */}
             <div className="flex justify-end mt-6 gap-2">
-              {inviteStatus === "sent" ? (
+              {inviteStatus === "sent" && (
                 <button
                   onClick={handleWithdrawInvite}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg
-                    ${effectiveTheme.secondary || "bg-gray-100 dark:bg-gray-700"}
-                    hover:bg-red-500/10 hover:text-red-500 transition`}
+                  className="px-4 py-2 rounded-xl border border-red-500 text-red-500 hover:bg-red-500/10"
                 >
-                  <X className="w-4 h-4" />
-                  Withdraw Invite
+                  Withdraw
                 </button>
-              ) : (
+              )}
+              {inviteStatus === "idle" && (
                 <>
                   <button
                     onClick={() => setShowInviteModal(false)}
-                    className={`
-    px-4 py-2 rounded-xl text-sm font-medium
-    border
-    ${effectiveTheme.border || "border-gray-300 dark:border-gray-600"}
-    ${effectiveTheme.text || "text-gray-700 dark:text-gray-200"}
-    bg-transparent
-    hover:bg-blue-600 dark:hover:bg-blue-600
-    active:scale-[0.98]
-    transition-all duration-200
-  `}
+                    className="px-4 py-2 rounded-xl border hover:bg-red-500/10 hover:text-red-500"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleSendInvite}
                     disabled={sending}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white"
+                    className="px-4 py-2 rounded-xl bg-blue-600 text-white flex items-center gap-2"
                   >
-                    {sending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4" />
-                    )}
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                     Send Invite
                   </button>
                 </>
@@ -1032,6 +1072,10 @@ const ContactItem = ({
     </>
   );
 };
+
+
+
+
 
 // Business Contact Item Component - for business professionals/contacts
 const BusinessContactItem = ({ business, effectiveTheme, onClick }) => {

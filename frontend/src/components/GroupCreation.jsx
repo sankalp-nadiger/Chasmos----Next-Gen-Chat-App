@@ -1,454 +1,4 @@
 /* eslint-disable no-unused-vars */
-// /* eslint-disable no-unused-vars */
-// import React, { useState, useMemo } from "react";
-// import { motion, AnimatePresence } from "framer-motion";
-// import {
-//   Search,
-//   X,
-//   Check,
-//   Users,
-//   Camera,
-//   ArrowRight,
-//   ChevronLeft,
-// } from "lucide-react";
-// import Logo from "./Logo";
-
-// const GroupCreation = ({ 
-//   contacts, 
-//   effectiveTheme, 
-//   onClose, 
-//   onCreateGroup 
-// }) => {
-//   const [searchTerm, setSearchTerm] = useState("");
-//   const [selectedContacts, setSelectedContacts] = useState([]);
-//   const [groupName, setGroupName] = useState("");
-//   const [groupDescription, setGroupDescription] = useState("");
-//   const [step, setStep] = useState(1); // 1: Select contacts, 2: Group details
-
-//   // Filter contacts (exclude documents and groups - only show individual contacts for group creation)
-//   const availableContacts = useMemo(() => {
-//     const filtered = contacts.filter(contact => !contact.isDocument && !contact.isGroup);
-//     // Remove duplicates based on ID
-//     const uniqueContacts = filtered.filter((contact, index, self) => 
-//       index === self.findIndex(c => c.id === contact.id)
-//     );
-//     return uniqueContacts;
-//   }, [contacts]);
-
-//   const filteredContacts = useMemo(() => 
-//     availableContacts.filter(contact => 
-//       contact.name.toLowerCase().includes(searchTerm.toLowerCase())
-//     ), 
-//     [availableContacts, searchTerm]
-//   );
-
-//   const handleContactToggle = (contact) => {
-//     setSelectedContacts(prev => {
-//       const isSelected = prev.some(c => c.id === contact.id);
-//       if (isSelected) {
-//         return prev.filter(c => c.id !== contact.id);
-//       } else {
-//         return [...prev, contact];
-//       }
-//     });
-//   };
-
-//   const handleNext = () => {
-//     if (selectedContacts.length > 0) {
-//       setStep(2);
-//     }
-//   };
-
-//   const handleBack = () => {
-//     setStep(1);
-//   };
-
-//   const handleCreateGroup = () => {
-//     if (groupName.trim() && selectedContacts.length > 0) {
-//       const newGroup = {
-//         id: Date.now(),
-//         name: groupName,
-//         description: groupDescription,
-//         members: selectedContacts,
-//         isGroup: true,
-//         avatar: null,
-//         createdBy: "You",
-//         createdAt: new Date(),
-//       };
-//       onCreateGroup(newGroup);
-//       onClose();
-//     }
-//   };
-
-//   const removeSelectedContact = (contactId) => {
-//     setSelectedContacts(prev => prev.filter(c => c.id !== contactId));
-//   };
-
-//   return (
-//     <motion.div
-//       initial={{ x: "100%" }}
-//       animate={{ x: 0 }}
-//       exit={{ x: "100%" }}
-//       transition={{ duration: 0.3, ease: "easeInOut" }}
-//       className={`fixed inset-0 ${effectiveTheme.primary} flex flex-col h-screen w-screen z-50`}
-//     >
-//       {/* Header */}
-//       <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-4`}>
-//         <div className="flex items-center justify-between">
-//           <div className="flex items-center space-x-3">
-//             <button
-//               onClick={step === 1 ? onClose : handleBack}
-//               className={`p-2 rounded-full hover:${effectiveTheme.hover} transition-colors`}
-//             >
-//               {step === 1 ? (
-//                 <X className={`w-5 h-5 ${effectiveTheme.text}`} />
-//               ) : (
-//                 <ChevronLeft className={`w-5 h-5 ${effectiveTheme.text}`} />
-//               )}
-//             </button>
-            
-//             {/* Chasmos Logo and Name */}
-//             <div className="flex items-center space-x-2">
-//               <Logo size="md" showText={true} textClassName={effectiveTheme.text} />
-//             </div>
-            
-//             <div className={`hidden sm:block border-l ${effectiveTheme.border} h-8 mx-2`}></div>
-            
-//             <div className="hidden sm:block">
-//               <h2 className={`text-lg font-semibold ${effectiveTheme.text}`}>
-//                 {step === 1 ? "New Group" : "Group Details"}
-//               </h2>
-//               <p className={`text-sm ${effectiveTheme.textSecondary}`}>
-//                 {step === 1 
-//                   ? `${selectedContacts.length} of ${availableContacts.length} selected`
-//                   : "Add group name and description"
-//                 }
-//               </p>
-//             </div>
-//           </div>
-          
-//           {/* Create Group Button - Top Right */}
-//           {step === 1 && selectedContacts.length > 0 && (
-//             <button
-//               onClick={handleNext}
-//               className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-2"
-//             >
-//               <Users className="w-4 h-4" />
-//               <span className="hidden sm:inline">Create Group</span>
-//             </button>
-//           )}
-          
-//           {step === 2 && (
-//             <button
-//               onClick={handleCreateGroup}
-//               disabled={!groupName.trim()}
-//               className={`px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 ${
-//                 groupName.trim()
-//                   ? 'bg-blue-500 text-white hover:bg-blue-600'
-//                   : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-//               }`}
-//             >
-//               <Users className="w-4 h-4" />
-//               <span className="hidden sm:inline">Create</span>
-//             </button>
-//           )}
-//         </div>
-//       </div>
-
-//       {step === 1 ? (
-//         <div className="flex-1 flex flex-col min-h-0">
-//           {/* Search Bar */}
-//           <div className="p-4 flex-shrink-0">
-//             <div className={`relative ${effectiveTheme.searchBg} rounded-lg`}>
-//               <Search
-//                 className={`absolute left-3 top-3 w-4 h-4 ${effectiveTheme.textSecondary}`}
-//               />
-//               <input
-//                 type="text"
-//                 placeholder="Search contacts..."
-//                 value={searchTerm}
-//                 onChange={(e) => setSearchTerm(e.target.value)}
-//                 className={`w-full pl-10 pr-4 py-3 bg-transparent ${effectiveTheme.text} placeholder-gray-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300`}
-//               />
-//             </div>
-//           </div>
-
-//           {/* Selected Contacts Pills */}
-//           {selectedContacts.length > 0 && (
-//             <div className="px-4 pb-4 flex-shrink-0">
-//               <div className="flex flex-wrap gap-2">
-//                 {selectedContacts.map((contact) => (
-//                   <motion.div
-//                     key={contact.id}
-//                     initial={{ scale: 0 }}
-//                     animate={{ scale: 1 }}
-//                     exit={{ scale: 0 }}
-//                     className={`flex items-center space-x-2 ${effectiveTheme.accent} px-3 py-1 rounded-full`}
-//                   >
-//                     <div className="w-6 h-6 rounded-full bg-gradient-to-r from-purple-400 to-blue-500 flex items-center justify-center text-white text-xs font-bold">
-//                       {contact.name.charAt(0)}
-//                     </div>
-//                     <span className={`text-sm ${effectiveTheme.text}`}>
-//                       {contact.name.split(' ')[0]}
-//                     </span>
-//                     <button
-//                       onClick={() => removeSelectedContact(contact.id)}
-//                       className="p-1 hover:bg-red-500 rounded-full transition-colors"
-//                     >
-//                       <X className="w-3 h-3 text-white" />
-//                     </button>
-//                   </motion.div>
-//                 ))}
-//               </div>
-//             </div>
-//           )}
-
-//           {/* Contacts List */}
-//           <div className="flex-1 overflow-y-auto scrollbar-hide">
-//             <div className="px-4">
-//             {filteredContacts.length === 0 ? (
-//               <div className="flex flex-col items-center justify-center p-8">
-//                 <Users className={`w-16 h-16 ${effectiveTheme.textSecondary} mb-4`} />
-//                 <h3 className={`text-lg font-medium ${effectiveTheme.text} mb-2`}>
-//                   {searchTerm ? "No contacts found" : "No contacts available"}
-//                 </h3>
-//                 <p className={`text-sm ${effectiveTheme.textSecondary} text-center`}>
-//                   {searchTerm 
-//                     ? "Try adjusting your search terms"
-//                     : `Total contacts: ${contacts.length}, Available: ${availableContacts.length}`
-//                   }
-//                 </p>
-//               </div>
-//             ) : (
-//               filteredContacts.map((contact) => {
-//                 const isSelected = selectedContacts.some(c => c.id === contact.id);
-//                 return (
-//                   <motion.div
-//                     key={contact.id}
-//                     whileHover={{ x: 4 }}
-//                     className={`flex items-center space-x-3 p-4 cursor-pointer border-b ${effectiveTheme.border} ${
-//                       isSelected 
-//                         ? `${effectiveTheme.accent} bg-blue-50` 
-//                         : `hover:${effectiveTheme.hover}`
-//                     }`}
-//                     onClick={() => handleContactToggle(contact)}
-//                   >
-//                   {/* Avatar */}
-//                   <div className="relative">
-//                     {contact.avatar ? (
-//                       <img
-//                         src={contact.avatar}
-//                         alt={contact.name}
-//                         className="w-12 h-12 rounded-full object-cover"
-//                       />
-//                     ) : (
-//                       <div className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-400 to-blue-500 flex items-center justify-center text-white font-bold text-lg">
-//                         {contact.name.charAt(0)}
-//                       </div>
-//                     )}
-//                     {contact.isOnline && (
-//                       <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
-//                     )}
-//                   </div>
-
-//                   {/* Contact Info */}
-//                   <div className="flex-1">
-//                     <h3 className={`font-semibold ${effectiveTheme.text}`}>
-//                       {contact.name}
-//                     </h3>
-//                     <p className={`text-sm ${effectiveTheme.textSecondary}`}>
-//                       {contact.lastMessage}
-//                     </p>
-//                   </div>
-
-//                   {/* Selection Indicator */}
-//                   <div className="flex-shrink-0">
-//                     {isSelected ? (
-//                       <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
-//                         <Check className="w-4 h-4 text-white" />
-//                       </div>
-//                     ) : (
-//                       <div className={`w-6 h-6 border-2 ${effectiveTheme.border} rounded-full`} />
-//                     )}
-//                   </div>
-//                 </motion.div>
-//               );
-//             })
-//             )}
-//             </div>
-//           </div>
-
-//         </div>
-//       ) : (
-//         <div className="flex-1 flex flex-col h-full overflow-hidden">
-//           {/* Group Details Form */}
-//           <div className="flex-1 overflow-y-auto scrollbar-hide">
-//             <div className="p-4 space-y-6">
-//               {/* Group Avatar */}
-//               <div className="flex items-center space-x-4">
-//                 <div className="w-20 h-20 bg-gray-200 rounded-full flex items-center justify-center cursor-pointer hover:bg-gray-300 transition-colors">
-//                   <Camera className="w-8 h-8 text-gray-500" />
-//                 </div>
-//                 <div className="flex-1">
-//                   <h3 className={`font-medium ${effectiveTheme.text}`}>Group Photo</h3>
-//                   <p className={`text-sm ${effectiveTheme.textSecondary}`}>
-//                     Add a photo to make your group easy to identify
-//                   </p>
-//                 </div>
-//               </div>
-
-//               {/* Group Name */}
-//               <div>
-//                 <label className={`block text-sm font-medium ${effectiveTheme.text} mb-2`}>
-//                   Group Name *
-//                 </label>
-//                 <input
-//                   type="text"
-//                   value={groupName}
-//                   onChange={(e) => setGroupName(e.target.value)}
-//                   placeholder="Enter group name"
-//                   className={`w-full px-4 py-3 ${effectiveTheme.inputBg} ${effectiveTheme.text} rounded-lg border ${effectiveTheme.border} focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all`}
-//                   maxLength={50}
-//                 />
-//                 <p className={`text-xs ${effectiveTheme.textSecondary} mt-1`}>
-//                   {groupName.length}/50 characters
-//                 </p>
-//               </div>
-
-//               {/* Group Description */}
-//               <div>
-//                 <label className={`block text-sm font-medium ${effectiveTheme.text} mb-2`}>
-//                   Group Description (Optional)
-//                 </label>
-//                 <textarea
-//                   value={groupDescription}
-//                   onChange={(e) => setGroupDescription(e.target.value)}
-//                   placeholder="Add a description for your group"
-//                   rows={3}
-//                   className={`w-full px-4 py-3 ${effectiveTheme.inputBg} ${effectiveTheme.text} rounded-lg border ${effectiveTheme.border} focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none`}
-//                   maxLength={200}
-//                 />
-//                 <p className={`text-xs ${effectiveTheme.textSecondary} mt-1`}>
-//                   {groupDescription.length}/200 characters
-//                 </p>
-//               </div>
-
-//               {/* Group Settings */}
-//               <div>
-//                 <h3 className={`font-medium ${effectiveTheme.text} mb-3`}>
-//                   Group Settings
-//                 </h3>
-//                 <div className="space-y-3">
-//                   <div className="flex items-center justify-between">
-//                     <div>
-//                       <h4 className={`text-sm font-medium ${effectiveTheme.text}`}>Send messages</h4>
-//                       <p className={`text-xs ${effectiveTheme.textSecondary}`}>Who can send messages to this group</p>
-//                     </div>
-//                     <select className={`px-3 py-2 ${effectiveTheme.inputBg} ${effectiveTheme.text} rounded-lg border ${effectiveTheme.border} text-sm`}>
-//                       <option>All members</option>
-//                       <option>Admins only</option>
-//                     </select>
-//                   </div>
-//                   <div className="flex items-center justify-between">
-//                     <div>
-//                       <h4 className={`text-sm font-medium ${effectiveTheme.text}`}>Edit group info</h4>
-//                       <p className={`text-xs ${effectiveTheme.textSecondary}`}>Who can edit group name and description</p>
-//                     </div>
-//                     <select className={`px-3 py-2 ${effectiveTheme.inputBg} ${effectiveTheme.text} rounded-lg border ${effectiveTheme.border} text-sm`}>
-//                       <option>All members</option>
-//                       <option>Admins only</option>
-//                     </select>
-//                   </div>
-//                 </div>
-//               </div>
-
-//               {/* Selected Members Preview */}
-//               <div>
-//                 <h3 className={`font-medium ${effectiveTheme.text} mb-3`}>
-//                   Members ({selectedContacts.length})
-//                 </h3>
-//                 <div className="space-y-2 max-h-60 overflow-y-auto scrollbar-hide">
-//                   {selectedContacts.map((contact) => (
-//                     <div key={contact.id} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-gray-50 transition-colors">
-//                       <div className="w-10 h-10 rounded-full bg-gradient-to-r from-purple-400 to-blue-500 flex items-center justify-center text-white text-sm font-bold">
-//                         {contact.name.charAt(0)}
-//                       </div>
-//                       <div className="flex-1">
-//                         <span className={`text-sm font-medium ${effectiveTheme.text}`}>
-//                           {contact.name}
-//                         </span>
-//                         <p className={`text-xs ${effectiveTheme.textSecondary}`}>
-//                           {contact.lastMessage}
-//                         </p>
-//                       </div>
-//                       <span className={`text-xs px-2 py-1 ${effectiveTheme.accent} rounded-full`}>
-//                         Member
-//                       </span>
-//                     </div>
-//                   ))}
-//                 </div>
-//               </div>
-
-//               {/* Privacy Settings */}
-//               <div>
-//                 <h3 className={`font-medium ${effectiveTheme.text} mb-3`}>
-//                   Privacy & Security
-//                 </h3>
-//                 <div className="space-y-3">
-//                   <div className="flex items-center justify-between">
-//                     <div>
-//                       <h4 className={`text-sm font-medium ${effectiveTheme.text}`}>Group visibility</h4>
-//                       <p className={`text-xs ${effectiveTheme.textSecondary}`}>Who can find this group</p>
-//                     </div>
-//                     <select className={`px-3 py-2 ${effectiveTheme.inputBg} ${effectiveTheme.text} rounded-lg border ${effectiveTheme.border} text-sm`}>
-//                       <option>Members only</option>
-//                       <option>Public</option>
-//                     </select>
-//                   </div>
-//                   <div className="flex items-center justify-between">
-//                     <div>
-//                       <h4 className={`text-sm font-medium ${effectiveTheme.text}`}>Disappearing messages</h4>
-//                       <p className={`text-xs ${effectiveTheme.textSecondary}`}>Messages disappear after selected time</p>
-//                     </div>
-//                     <select className={`px-3 py-2 ${effectiveTheme.inputBg} ${effectiveTheme.text} rounded-lg border ${effectiveTheme.border} text-sm`}>
-//                       <option>Off</option>
-//                       <option>24 hours</option>
-//                       <option>7 days</option>
-//                       <option>90 days</option>
-//                     </select>
-//                   </div>
-//                 </div>
-//               </div>
-
-//               {/* Additional space for scrolling demonstration */}
-//               <div className="pb-8">
-//                 <h3 className={`font-medium ${effectiveTheme.text} mb-3`}>
-//                   Additional Options
-//                 </h3>
-//                 <div className="space-y-2">
-//                   <label className="flex items-center space-x-3">
-//                     <input type="checkbox" className="rounded border-gray-300" />
-//                     <span className={`text-sm ${effectiveTheme.text}`}>Send notification when group is created</span>
-//                   </label>
-//                   <label className="flex items-center space-x-3">
-//                     <input type="checkbox" className="rounded border-gray-300" />
-//                     <span className={`text-sm ${effectiveTheme.text}`}>Add group to favorites</span>
-//                   </label>
-//                   <label className="flex items-center space-x-3">
-//                     <input type="checkbox" className="rounded border-gray-300" defaultChecked />
-//                     <span className={`text-sm ${effectiveTheme.text}`}>Enable group notifications</span>
-//                   </label>
-//                 </div>
-//               </div>
-//             </div>
-//           </div>
-//         </div>
-//       )}
-//     </motion.div>
-//   );
-// };
-
-// export default GroupCreation;
 import React, { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Search, X, Users, ChevronLeft } from "lucide-react";
@@ -458,13 +8,13 @@ import SelectContact from "./SelectContact";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
 const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose, onCreateGroup }) => {
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(2); // start directly at Add Members
   const [contacts, setContacts] = useState(initialContacts || []);
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [contactsError, setContactsError] = useState(null);
 
   const [selectedContacts, setSelectedContacts] = useState([]);
-  const [groupType, setGroupType] = useState("Casual");
+  const [groupType, setGroupType] = useState("Casual"); // default Casual
   const [searchTerm, setSearchTerm] = useState("");
   const [groupName, setGroupName] = useState("");
   const [groupDescription, setGroupDescription] = useState("");
@@ -473,18 +23,42 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
 
   const MAX_MEMBERS = 200;
 
-  // ✅ UNIVERSAL CONTACT ID SYSTEM
+  const [inviteEnabled, setInviteEnabled] = useState(false);
+  const [inviteLink, setInviteLink] = useState("");
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  const [allowCreatorAdmin, setAllowCreatorAdmin] = useState(true);
+  const [allowOthersAdmin, setAllowOthersAdmin] = useState(false);
+  const [allowMembersAdd, setAllowMembersAdd] = useState(true);
+
+  const [featureMedia, setFeatureMedia] = useState(true);
+  const [featureGallery, setFeatureGallery] = useState(true);
+  const [featureDocs, setFeatureDocs] = useState(true);
+  const [featurePolls, setFeaturePolls] = useState(true);
+
+  const generateInviteLink = () => {
+    const token = Math.random().toString(36).slice(2, 10);
+    const link = `${window.location.origin}/invite/group-${Date.now()}-${token}`;
+    setInviteLink(link);
+    setInviteCopied(false);
+  };
+
+  const copyInviteLink = async () => {
+    if (!inviteLink) generateInviteLink();
+    try {
+      await navigator.clipboard.writeText(inviteLink || "");
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch (err) {
+      console.error("copy failed", err);
+    }
+  };
+
   const getContactId = (contact) =>
-    contact?.id ||
-    contact?._id ||
-    contact?.userId ||
-    contact?.contactId ||
-    contact?.googleId ||
-    "";
+    contact?.id || contact?._id || contact?.userId || contact?.contactId || contact?.googleId || "";
 
   const normalizeId = (id) => (!id ? "" : id.startsWith("google-") ? id.replace("google-", "") : id);
 
-  // Load app + Google contacts
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -546,7 +120,6 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
     );
   }, [availableContacts, searchTerm]);
 
-  // Toggle selection
   const handleContactToggle = (rawId) => {
     const id = normalizeId(rawId);
 
@@ -565,9 +138,7 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
 
   const removeSelected = (rawId) => {
     const id = normalizeId(rawId);
-    setSelectedContacts((prev) =>
-      prev.filter((p) => normalizeId(p) !== id)
-    );
+    setSelectedContacts((prev) => prev.filter((p) => normalizeId(p) !== id));
   };
 
   const isSelected = (c) => {
@@ -593,52 +164,109 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
   };
 
   const goBack = () => {
-    if (step === 1) return onClose?.();
-    if (step === 2) return setStep(1);
+    if (step === 2) return onClose?.();
     if (step === 3) return setStep(2);
   };
 
-  const handleCreateGroup = () => {
-    if (!groupName.trim()) return;
+  const handleCreateGroup = async () => {
+  if (!groupName.trim()) return;
 
-    const memberObjects = selectedContacts
-      .map((id) =>
-        contacts.find(
-          (c) =>
-            normalizeId(getContactId(c)) === normalizeId(id)
-        )
-      )
-      .filter(Boolean)
-      .map((m) => ({
-        id: getContactId(m),
-        name: m.name,
-        username: m.username || m.email || m.phone || null,
-        avatar: m.avatar || null,
-        isGoogleContact: !!m.isGoogleContact,
-      }));
+  const memberIds = selectedContacts.map((id) => normalizeId(id));
+  const currentUserId = localStorage.getItem("userId");
 
-    const newGroup = {
-      id: Date.now(),
-      name: groupName.trim(),
-      description: groupDescription.trim(),
-      type: groupType,
-      isGroup: true,
-      avatar: iconPreview || null,
-      createdAt: new Date().toISOString(),
-      members: memberObjects,
-      settings: {
-        whoCanSend: "all",
-        whoCanEdit: "admins",
-        notifyOnCreate: true,
-        notificationsEnabled: true,
-      },
-    };
+  if (!memberIds.includes(currentUserId)) {
+    memberIds.push(currentUserId);
+  }
 
-    onCreateGroup?.(newGroup);
-    onClose?.();
+  const payload = {
+    name: groupName.trim(),
+    users: memberIds,
+    admins: [currentUserId],
+    createdBy: currentUserId,
+    description: groupDescription.trim() || "",
+    isPublic: true,
   };
 
-  // UI
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/chat/group`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("token")}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      console.error("Failed to create group:", json);
+      alert("Group creation failed: " + (json.message || "Unknown error"));
+    } else {
+      console.log("Group created", json);
+      onCreateGroup?.(json); // send group object directly
+      onClose?.();
+    }
+  } catch (e) {
+    console.error("Error creating group:", e);
+    alert("Error creating group");
+  }
+};
+
+
+  // BUSINESS CORE FEATURES (default true)
+  const [coreTask, setCoreTask] = useState(true);
+  const [coreSprint, setCoreSprint] = useState(true);
+  const [coreMeets, setCoreMeets] = useState(true);
+  const [coreDocs, setCoreDocs] = useState(true);
+  const [coreThreads, setCoreThreads] = useState(true);
+  const [coreMentions, setCoreMentions] = useState(true);
+
+  // BUSINESS OPTIONAL ADD-ONS (default false)
+  const [optDirectory, setOptDirectory] = useState(false);
+  const [optOrgProfile, setOptOrgProfile] = useState(false);
+  const [optAI, setOptAI] = useState(false);
+
+  const PermissionItem = ({ title, desc, value, onChange }) => (
+    <div className="flex items-center justify-between">
+      <div>
+        <div className="font-medium">{title}</div>
+        <div className="text-xs opacity-70">{desc}</div>
+      </div>
+
+      <label className="relative w-12 h-6 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={(e) => onChange(e.target.checked)}
+          className="peer hidden"
+        />
+        <div className="absolute inset-0 bg-gray-400 rounded-full peer-checked:bg-blue-600 transition"></div>
+        <div className="absolute w-5 h-5 bg-white rounded-full top-0.5 left-0.5 peer-checked:translate-x-6 transition"></div>
+      </label>
+    </div>
+  );
+
+  const FeatureToggle = ({ label, desc, value, setValue }) => (
+    <div className="flex items-center justify-between p-3 rounded-xl shadow-sm bg-white/5 backdrop-blur border border-white/10">
+      <div>
+        <div className="font-medium">{label}</div>
+        <div className="text-xs opacity-70">{desc}</div>
+      </div>
+
+      <label className="relative w-10 h-5 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={(e) => setValue(e.target.checked)}
+          className="peer hidden"
+        />
+        <div className="absolute inset-0 bg-gray-400 rounded-full peer-checked:bg-blue-600 transition"></div>
+        <div className="absolute w-4 h-4 bg-white rounded-full top-0.5 left-0.5 peer-checked:translate-x-5 transition"></div>
+      </label>
+    </div>
+  );
+
   return (
     <motion.div
       initial={{ x: "100%" }}
@@ -649,74 +277,23 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
     >
       {/* HEADER */}
       <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-4`}>
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={goBack}
-            className={`p-2 rounded-full hover:${effectiveTheme.hover} transition-colors`}
-          >
-            {step === 1 ? (
-              <X className={`w-5 h-5 ${effectiveTheme.text}`} />
-            ) : (
-              <ChevronLeft className={`w-5 h-5 ${effectiveTheme.text}`} />
-            )}
+        <div className="flex items-center justify-between relative">
+          <div className="flex items-center gap-2">
+            <Logo size="sm" textClassName={effectiveTheme.text} />
+          </div>
+
+          <h2 className={`absolute left-1/2 -translate-x-1/2 text-lg font-semibold ${effectiveTheme.text}`}>
+            {step === 2 ? "Add Members" : "Group Details"}
+          </h2>
+
+          <button onClick={goBack} className="p-2 rounded-full hover:bg-gray-200 transition-colors ml-auto">
+            <ChevronLeft className={`w-5 h-5 ${effectiveTheme.text}`} />
           </button>
-          
-          {/* Chasmos Logo and Name */}
-          <div className="flex items-center space-x-2">
-            <Logo size="md" showText={true} textClassName={effectiveTheme.text} />
-          </div>
-          
-          <div className={`hidden sm:block border-l ${effectiveTheme.border} h-8 mx-2`}></div>
-          
-          <div>
-            <h2 className={`text-lg font-semibold ${effectiveTheme.text}`}>
-              {step === 1 ? "Select Group Type" : step === 2 ? "Add Members" : "Group Details"}
-            </h2>
-            <p className={`text-sm ${effectiveTheme.textSecondary}`}>
-              {step === 1 
-                ? "Choose between Casual or Business"
-                : step === 2 
-                ? `${selectedContacts.length} member${selectedContacts.length !== 1 ? 's' : ''} selected`
-                : "Customize your group"
-              }
-            </p>
-          </div>
         </div>
       </div>
 
       {/* BODY */}
       <div className="flex-1 overflow-y-auto">
-        {/* STEP 1 */}
-        {step === 1 && (
-          <div className="flex flex-col items-center justify-center h-full p-6 space-y-6">
-            <h2 className={`text-xl font-semibold ${effectiveTheme.text}`}>Choose Group Type</h2>
-            <div className="flex gap-4">
-              <button
-                onClick={() => {
-                  setGroupType("Casual");
-                  setStep(2);
-                }}
-                className="px-6 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600"
-              >
-                Casual
-              </button>
-
-              <button
-                onClick={() => {
-                  setGroupType("Business");
-                  setStep(2);
-                }}
-                className="px-6 py-3 bg-purple-500 text-white rounded-xl hover:bg-purple-600"
-              >
-                Business
-              </button>
-            </div>
-            <p className={`${effectiveTheme.textSecondary} text-sm`}>
-              You can change this later inside group settings.
-            </p>
-          </div>
-        )}
-
         {/* STEP 2 */}
         {step === 2 && (
           <>
@@ -735,16 +312,10 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
               {contactsError && <p className="mt-2 text-sm text-red-500">Failed to load contacts: {contactsError}</p>}
             </div>
 
-            {/* Pills */}
             {selectedContacts.length > 0 && (
               <div className="px-4 flex flex-wrap gap-2 mb-2">
                 {selectedContacts
-                  .map((id) =>
-                    contacts.find(
-                      (c) =>
-                        normalizeId(getContactId(c)) === normalizeId(id)
-                    )
-                  )
+                  .map((id) => contacts.find((c) => normalizeId(getContactId(c)) === normalizeId(id)))
                   .filter(Boolean)
                   .map((c) => (
                     <div
@@ -771,7 +342,6 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
               </div>
             )}
 
-            {/* Contact list */}
             <div className="flex-1 overflow-y-auto px-4 space-y-2">
               {filteredContacts.length === 0 ? (
                 <p className={`text-center mt-10 ${effectiveTheme.textSecondary}`}>No contacts found</p>
@@ -779,15 +349,9 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
                 filteredContacts.map((c) => {
                   const cid = getContactId(c);
                   return (
-                    <div
-                      key={cid}
-                      className={`rounded-lg ${isSelected(c) ? "bg-blue-50" : ""}`}
-                    >
+                    <div key={cid} className={`rounded-lg ${isSelected(c) ? "bg-blue-50" : ""}`}>
                       <SelectContact
-                        contact={{
-                          ...c,
-                          id: cid,
-                        }}
+                        contact={{ ...c, id: cid }}
                         selected={isSelected(c)}
                         onSelect={handleContactToggle}
                         effectiveTheme={effectiveTheme}
@@ -801,46 +365,45 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
         )}
 
         {/* STEP 3 */}
-        {step === 3 && (
-  <div className="p-4 space-y-6">
+         {step === 3 && (
+  <div className="p-4 space-y-8 animate-fadeIn">
+
     {/* GROUP PHOTO */}
-    <div className="flex items-center space-x-4">
-      <div className={`w-20 h-20 rounded-full overflow-hidden flex items-center justify-center ${effectiveTheme.secondary}`}>
+    <div className="flex items-center gap-5 p-4 rounded-2xl shadow-md bg-white/5 backdrop-blur border border-white/10">
+      
+      {/* ICON */}
+      <div className={`w-24 h-24 rounded-2xl overflow-hidden flex items-center justify-center shadow-md ${effectiveTheme.secondary}`}>
         {iconPreview ? (
           <img src={iconPreview} className="w-full h-full object-cover" />
         ) : (
-          <div className="p-2">
-            <Logo size="md" showText={false} textClassName={effectiveTheme.text} />
-          </div>
+          <Logo size="lg" showText={false} textClassName={effectiveTheme.text} />
         )}
       </div>
 
-      <div>
-        <h3 className={`font-medium ${effectiveTheme.text}`}>Group Photo</h3>
-        <p className={`text-sm ${effectiveTheme.textSecondary}`}>
-          Add a photo to make your group easy to identify
-        </p>
+      {/* CONTROLS */}
+      <div className="flex-1 space-y-2">
+        <h3 className={`text-lg font-semibold ${effectiveTheme.text}`}>Group Photo</h3>
+        <p className={`text-sm opacity-70 ${effectiveTheme.text}`}>Upload a group display photo</p>
 
-        <div className="mt-2 flex items-center gap-2">
-          <label
-            className={`px-3 py-2 rounded-md cursor-pointer text-sm border ${effectiveTheme.border} ${effectiveTheme.secondary} ${effectiveTheme.text}`}
-          >
+        <div className="flex items-center gap-3">
+          <label className="cursor-pointer">
+            <div className="px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow hover:scale-[1.03] transition">
+              Upload Photo
+            </div>
             <input
               type="file"
               accept="image/*"
               onChange={(e) => handleIconChange(e.target.files?.[0])}
               className="hidden"
             />
-            Upload photo
           </label>
 
           <button
-            type="button"
             onClick={() => {
               setIconFile(null);
               setIconPreview("");
             }}
-            className={`px-3 py-2 rounded-md text-sm border ${effectiveTheme.border} ${effectiveTheme.secondary} ${effectiveTheme.textSecondary}`}
+            className="px-4 py-2 rounded-lg bg-red-600 text-white shadow hover:bg-red-700 transition"
           >
             Remove
           </button>
@@ -849,68 +412,184 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
     </div>
 
     {/* GROUP NAME */}
-    <div>
-      <label className={effectiveTheme.text}>Group Name *</label>
+    <div className="space-y-1">
+      <label className={`text-sm font-medium ${effectiveTheme.text}`}>Group Name</label>
       <input
         type="text"
         value={groupName}
         onChange={(e) => setGroupName(e.target.value)}
-        placeholder="Group name"
-        maxLength={50}
-        className={`w-full px-4 py-3 rounded-lg border ${effectiveTheme.border} ${effectiveTheme.text} ${effectiveTheme.inputBg}`}
+        placeholder="Enter group name"
+        className={`w-full px-4 py-3 rounded-xl border ${effectiveTheme.border} ${effectiveTheme.inputBg} ${effectiveTheme.text} shadow-sm`}
       />
     </div>
 
     {/* DESCRIPTION */}
-    <div>
-      <label className={effectiveTheme.text}>Description</label>
+    <div className="space-y-1">
+      <label className={`text-sm font-medium ${effectiveTheme.text}`}>Description</label>
       <textarea
         value={groupDescription}
         onChange={(e) => setGroupDescription(e.target.value)}
+        placeholder="Write a short description"
         rows={3}
-        maxLength={200}
-        placeholder="Description"
-        className={`w-full px-4 py-3 rounded-lg border ${effectiveTheme.border} ${effectiveTheme.text} ${effectiveTheme.inputBg}`}
+        className={`w-full px-4 py-3 rounded-xl border ${effectiveTheme.border} ${effectiveTheme.inputBg} ${effectiveTheme.text} shadow-sm`}
       />
     </div>
 
-    {/* MEMBERS LIST */}
-    <div>
-      <h3 className={`font-medium ${effectiveTheme.text}`}>
-        Members ({selectedContacts.length})
-      </h3>
+    {/* INVITE LINK */}
+    <div className={`p-5 rounded-2xl shadow-md border ${effectiveTheme.border} ${effectiveTheme.secondary}`}>
+      
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className={`font-semibold ${effectiveTheme.text}`}>Invite Link</h4>
+          <p className={`text-sm ${effectiveTheme.textSecondary}`}>Allow joining via link</p>
+        </div>
 
-      <div className="space-y-2 mt-3">
+        {/* switch */}
+        <label className="relative w-12 h-6 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={inviteEnabled}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setInviteEnabled(on);
+              if (on && !inviteLink) generateInviteLink();
+            }}
+            className="hidden peer"
+          />
+          <div className="absolute inset-0 bg-gray-400 rounded-full peer-checked:bg-blue-600 transition"></div>
+          <div className="absolute w-5 h-5 bg-white rounded-full top-0.5 left-0.5 peer-checked:translate-x-6 transition"></div>
+        </label>
+      </div>
+
+      {inviteEnabled && (
+        <div className="mt-4 flex gap-3">
+          <input
+            readOnly
+            value={inviteLink || ""}
+            placeholder="Invite link"
+            className={`flex-1 px-4 py-2 rounded-xl border ${effectiveTheme.border} ${effectiveTheme.inputBg} ${effectiveTheme.text}`}
+          />
+
+          <button
+            onClick={() => {
+              if (!inviteLink) generateInviteLink();
+              copyInviteLink();
+            }}
+            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl shadow transition"
+          >
+            {inviteCopied ? "Copied" : inviteLink ? "Copy" : "Generate"}
+          </button>
+        </div>
+      )}
+    </div>
+
+    {/* PERMISSIONS */}
+    <div className={`p-5 rounded-2xl shadow-md border ${effectiveTheme.border} ${effectiveTheme.secondary}`}>
+      <h4 className={`font-semibold text-lg ${effectiveTheme.text}`}>Permissions</h4>
+
+      <div className="space-y-4 mt-3">
+
+        {/* Creator Admin */}
+        <PermissionItem
+          title="You are the Admin"
+          desc="Creator becomes default admin"
+          value={allowCreatorAdmin}
+          onChange={(v) => setAllowCreatorAdmin(v)}
+        />
+
+        {/* Others Admin */}
+        <PermissionItem
+          title="Allow others to be admins"
+          desc="Members can be promoted"
+          value={allowOthersAdmin}
+          onChange={(v) => setAllowOthersAdmin(v)}
+        />
+
+        {/* Members Add */}
+        <PermissionItem
+          title="Allow members to add users"
+          desc="Members can invite or add people"
+          value={allowMembersAdd}
+          onChange={(v) => setAllowMembersAdd(v)}
+        />
+
+      </div>
+    </div>
+
+    {/* FEATURES */}
+   {/* FEATURES */}
+<div className={`p-5 rounded-2xl shadow-md border ${effectiveTheme.border} ${effectiveTheme.secondary}`}>
+  <h4 className={`font-semibold text-lg ${effectiveTheme.text}`}>Group Features</h4>
+
+  {/* BUSINESS GROUP FEATURES */}
+  {groupType === "Business" ? (
+    <div className="space-y-6 mt-5">
+
+      {/* CORE FEATURES */}
+      <div>
+        <h5 className={`text-md font-semibold mb-3 ${effectiveTheme.text}`}>Core Features</h5>
+
+        <FeatureToggle label="Task Management" value={coreTask} setValue={setCoreTask} />
+        <FeatureToggle label="Sprint Management" value={coreSprint} setValue={setCoreSprint} />
+        <FeatureToggle label="Meets + Calendar" value={coreMeets} setValue={setCoreMeets} />
+        <FeatureToggle label="Collaborative Docs" value={coreDocs} setValue={setCoreDocs} />
+        <FeatureToggle label="Task-based Threads" value={coreThreads} setValue={setCoreThreads} />
+        <FeatureToggle label="Mention Notifications" value={coreMentions} setValue={setCoreMentions} />
+      </div>
+
+      {/* OPTIONAL ADD-ONS */}
+      <div>
+        <h5 className={`text-md font-semibold mb-3 ${effectiveTheme.text}`}>Optional Add-ons</h5>
+
+        <FeatureToggle label="Business Directory" value={optDirectory} setValue={setOptDirectory} />
+        <FeatureToggle label="Organization Profile" value={optOrgProfile} setValue={setOptOrgProfile} />
+        <FeatureToggle label="AI Assistance" value={optAI} setValue={setOptAI} />
+      </div>
+
+    </div>
+  ) : (
+
+    /* CASUAL GROUP FEATURES (existing) */
+    <div className="grid grid-cols-2 gap-4 mt-4">
+      <FeatureToggle label="Media" desc="Send photos/videos" value={featureMedia} setValue={setFeatureMedia} />
+      <FeatureToggle label="Gallery" desc="View shared media" value={featureGallery} setValue={setFeatureGallery} />
+      <FeatureToggle label="Docs" desc="Share documents" value={featureDocs} setValue={setFeatureDocs} />
+      <FeatureToggle label="Polls" desc="Create polls" value={featurePolls} setValue={setFeaturePolls} />
+    </div>
+
+  )}
+</div>
+
+
+    {/* MEMBERS */}
+    <div>
+      <h3 className={`font-semibold text-lg ${effectiveTheme.text}`}>Members ({selectedContacts.length})</h3>
+
+      <div className="space-y-3 mt-3">
         {selectedContacts
           .map((id) =>
-            contacts.find(
-              (c) =>
-                normalizeId(getContactId(c)) === normalizeId(id)
-            )
+            contacts.find((c) => normalizeId(getContactId(c)) === normalizeId(id))
           )
           .filter(Boolean)
           .map((c) => (
             <div
               key={`member-${getContactId(c)}`}
-              className={`flex items-center space-x-3 p-3 rounded-lg border ${effectiveTheme.border} ${effectiveTheme.secondary}`}
+              className={`flex items-center gap-3 p-4 rounded-xl shadow border ${effectiveTheme.border} ${effectiveTheme.secondary}`}
             >
-              <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-semibold">
+              <div className="w-11 h-11 rounded-full bg-blue-600 text-white flex items-center justify-center text-lg font-bold">
                 {(c.name || c.username || "?")[0]}
               </div>
 
-              <span className={`${effectiveTheme.text} font-medium`}>
-                {c.name || c.username}
-              </span>
-
-              {c.isGoogleContact && (
-                <span className="text-xs px-2 py-0.5 bg-blue-900 text-blue-200 rounded-full">
-                  Google
+              <div className="flex flex-col">
+                <span className={`font-medium ${effectiveTheme.text}`}>{c.name || c.username}</span>
+                <span className={`text-xs ${effectiveTheme.textSecondary}`}>
+                  {c.username || c.email || c.phone}
                 </span>
-              )}
+              </div>
 
               <button
                 onClick={() => removeSelected(getContactId(c))}
-                className="ml-auto px-2 py-1 text-xs rounded bg-red-600 text-white"
+                className="ml-auto px-3 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700 transition"
               >
                 Remove
               </button>
@@ -918,30 +597,22 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
           ))}
       </div>
     </div>
+
   </div>
 )}
-
       </div>
 
       {/* FOOTER */}
       <div className={`p-4 border-t ${effectiveTheme.border} ${effectiveTheme.secondary} flex items-center justify-between`}>
         <span className={effectiveTheme.textSecondary}>
-          {step === 1
-            ? "Choose group type"
-            : step === 2
-            ? `${selectedContacts.length} selected`
-            : `${selectedContacts.length} members • ${groupType}`}
+          {step === 2 ? `${selectedContacts.length} selected` : `${selectedContacts.length} members • ${groupType}`}
         </span>
 
         {step === 2 && (
           <button
             onClick={goNextFromContacts}
             disabled={selectedContacts.length === 0}
-            className={`px-4 py-2 rounded-lg ${
-              selectedContacts.length === 0
-                ? "bg-gray-300 text-gray-500"
-                : "bg-blue-500 text-white hover:bg-blue-600"
-            }`}
+            className={`px-4 py-2 rounded-lg ${selectedContacts.length === 0 ? "bg-gray-300 text-gray-500" : "bg-blue-500 text-white hover:bg-blue-600"}`}
           >
             Next
           </button>
@@ -951,11 +622,7 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
           <button
             onClick={handleCreateGroup}
             disabled={!groupName.trim()}
-            className={`px-4 py-2 rounded-lg ${
-              !groupName.trim()
-                ? "bg-gray-300 text-gray-500"
-                : "bg-blue-600 text-white hover:bg-blue-700"
-            }`}
+            className={`px-4 py-2 rounded-lg ${!groupName.trim() ? "bg-gray-300 text-gray-500" : "bg-blue-600 text-white hover:bg-blue-700"}`}
           >
             Create Group
           </button>
