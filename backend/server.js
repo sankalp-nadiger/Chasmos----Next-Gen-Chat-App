@@ -122,15 +122,23 @@ io.on("connection", (socket) => {
           }
         }
 
+        if (!chat) {
+          console.warn("[SOCKET] new message received with null/undefined chat", newMessageRecieved);
+          return;
+        }
+
+        if (!Object.prototype.hasOwnProperty.call(chat, 'isGroupChat')) {
+          // Defensive: fallback to false if missing
+          chat.isGroupChat = false;
+        }
+
         if (!chat.isGroupChat) {
           const senderId = newMessageRecieved.sender?._id
             ? String(newMessageRecieved.sender._id)
             : String(newMessageRecieved.sender);
-            
           const otherUser = chat.users.find(user => 
             String(user._id) !== senderId
           );
-          
           if (otherUser && otherUser.blockedUsers && 
               otherUser.blockedUsers.includes(senderId)) {
             socket.emit("message blocked", { 

@@ -25,6 +25,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import Logo from "./Logo";
+import CosmosBackground from "./CosmosBg";
 //import { io } from "socket.io-client";
 
 // Business categories mock data
@@ -414,6 +415,8 @@ const NewChat = ({
           isOnline: Math.random() < 0.5, // ✅ assigned once
           timestamp: u.createdAt,
           type: "user",
+          bio: u.bio || "",
+          acceptedChatRequests: u.acceptedChatRequests || [],
         }));
 
         // Separate existing contacts from new registered users
@@ -479,8 +482,16 @@ const NewChat = ({
     );
   }, [selectedBusinessCategory, searchTerm]);
 
+  // Open chat UI for contact, but only set as pending if no chatId exists
   const handleStartChat = (contact) => {
-    onStartChat(contact);
+    // Always provide userId for ChattingPage profile logic
+    let userId = contact.userId || contact._id || contact.id || contact.participantId || contact.email;
+    // If contact is a chat (has chatId or id of length 24), open as normal chat
+    if (contact.chatId || (contact.id && String(contact.id).length === 24)) {
+      onStartChat({ ...contact, isPendingChat: false, userId });
+    } else {
+      onStartChat({ ...contact, isPendingChat: true, userId });
+    }
     onClose();
   };
 
@@ -630,16 +641,24 @@ const NewChat = ({
                   </p>
                 </div>
               ) : (
-                filteredAllContacts.map((contact) => (
-                  <ContactItem
-                    key={contact.id}
-                    contact={contact}
-                    effectiveTheme={effectiveTheme}
-                    onClick={() => handleStartChat(contact)}
-                    showLastSeen
-                    token={localStorage.getItem("token")} //  Added token here
-                  />
-                ))
+                (() => {
+                  let userEmail = "";
+                  try {
+                    const userInfo = JSON.parse(localStorage.getItem("userInfo"));
+                    userEmail = userInfo?.email || userInfo?.user?.email || "";
+                  } catch {}
+                  return filteredAllContacts.map((contact) => (
+                    <ContactItem
+                      key={contact.id}
+                      contact={contact}
+                      effectiveTheme={effectiveTheme}
+                      onClick={() => handleStartChat(contact)}
+                      showLastSeen
+                      token={localStorage.getItem("token")}
+                      currentUserEmail={userEmail}
+                    />
+                  ));
+                })()
               )}
             </div>
 
@@ -670,16 +689,24 @@ const NewChat = ({
                   </p>
                 </div>
               ) : (
-                filteredRegisteredUsers.map((user) => (
-                  <ContactItem
-                    key={user.id}
-                    contact={user}
-                    effectiveTheme={effectiveTheme}
-                    showLastSeen
-                    onClick={() => handleStartChat(user)}
-                    token={localStorage.getItem("token")} //  Added token here
-                  />
-                ))
+                (() => {
+                  let userEmail = "";
+                  try {
+                    const userInfo = JSON.parse(localStorage.getItem("userInfo"));
+                    userEmail = userInfo?.email || userInfo?.user?.email || "";
+                  } catch {}
+                  return filteredRegisteredUsers.map((user) => (
+                    <ContactItem
+                      key={user.id}
+                      contact={user}
+                      effectiveTheme={effectiveTheme}
+                      showLastSeen
+                      onClick={() => handleStartChat(user)}
+                      token={localStorage.getItem("token")}
+                      currentUserEmail={userEmail}
+                    />
+                  ));
+                })()
               )}
             </div>
           </div>
@@ -791,7 +818,6 @@ const NewChat = ({
 };
 
 //Contacts appearing in new chat page
-
 const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, currentUserEmail }) => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteMessage, setInviteMessage] = useState("");
@@ -799,7 +825,7 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
   const [inviteStatus, setInviteStatus] = useState("idle");
   const [chatStatus, setChatStatus] = useState("none");
 
-  // ------------------- Polling / Initial Chat Status -------------------
+  // Fetch chat status only (acceptedChatRequests is now in contact)
   useEffect(() => {
     const fetchStatus = async () => {
       try {
@@ -812,12 +838,15 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
         console.error("Failed to fetch chat status:", err);
       }
     };
-
     fetchStatus();
-
     const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
   }, [contact.email, token]);
+
+  // Show chat icon if my email is in contact's acceptedChatRequests (case-insensitive)
+  const myEmailLower = currentUserEmail ? currentUserEmail.toLowerCase() : "";
+  const isMyEmailAcceptedByContact = myEmailLower && (contact.acceptedChatRequests || []).some(e => (e || "").toLowerCase() === myEmailLower);
+  const canSendInvite = chatStatus === "none" && !isMyEmailAcceptedByContact;
 
   // ------------------- Socket Listener -------------------
 //  useEffect(() => {
@@ -882,8 +911,14 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
   // ------------------- Accept Invite -------------------
   const handleAcceptInvite = async () => {
     try {
+      const token = localStorage.getItem("token");
+      if (!token || !contact || !contact.email) {
+        console.error("Missing token or contact info", { token, contact });
+        return;
+      }
+      console.log("Sending accept invite POST", { token, contact });
       const res = await fetch(`${API_BASE_URL}/api/user/request/accept`, {
-        method: "POST",
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
@@ -896,9 +931,11 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
       setShowInviteModal(false);
 
       // Notify sender in real-time
-      socket.emit("chatAccepted", { senderEmail: contact.email, receiverEmail: currentUserEmail });
+      if (typeof socket !== 'undefined' && socket?.emit) {
+        socket.emit("chatAccepted", { senderEmail: contact.email, receiverEmail: currentUserEmail });
+      }
     } catch (err) {
-      console.error(err);
+      console.error("Error accepting invite:", err);
     }
   };
 
@@ -933,7 +970,7 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
         </div>
 
         {/* RIGHT ICONS */}
-        {chatStatus === "accepted" && (
+        {(chatStatus === "accepted" || isMyEmailAcceptedByContact) && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -945,7 +982,7 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
           </button>
         )}
 
-        {chatStatus === "none" && (
+        {canSendInvite && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -987,15 +1024,25 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
 
       {/* Invite Modal */}
       {showInviteModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{background: 'rgba(0,0,0,0.4)'}}>
+          <div className="absolute inset-0 w-full h-full pointer-events-none">
+            <CosmosBackground opacity={0.25} theme={document.documentElement.classList.contains('dark') ? 'dark' : 'light'} />
+          </div>
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className={`w-full max-w-md rounded-2xl p-6 shadow-xl ${effectiveTheme.secondary || "bg-white dark:bg-gray-800"}`}
+            className={`relative w-full max-w-md rounded-2xl p-6 shadow-xl ${effectiveTheme.secondary || (document.documentElement.classList.contains('dark') ? 'bg-gray-800' : 'bg-white')}`}
+            style={{ zIndex: 10 }}
           >
             {/* Header */}
+
             <div className="flex justify-between mb-4">
-              <h2 className="font-semibold text-lg">{contact.name}</h2>
+              <div>
+                <h2 className="font-semibold text-lg">{contact.name}</h2>
+                {contact.bio && (
+                  <p className="text-sm text-gray-500 mt-1 max-w-xs truncate">{contact.bio}</p>
+                )}
+              </div>
               <button
                 onClick={() => setShowInviteModal(false)}
                 className="p-1 rounded-full hover:bg-red-500/20 transition"
@@ -1033,7 +1080,7 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
                 value={inviteMessage}
                 onChange={(e) => setInviteMessage(e.target.value)}
                 placeholder="Add an optional message..."
-                className="w-full mt-4 p-3 rounded-xl border resize-none text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                className={`w-full mt-4 p-3 rounded-xl border resize-none text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none ${document.documentElement.classList.contains('dark') ? 'bg-gray-800 text-gray-100 border-gray-600 placeholder-gray-500' : 'bg-white text-gray-900 border-gray-300 placeholder-gray-400'}`}
               />
             )}
 
@@ -1072,10 +1119,6 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
     </>
   );
 };
-
-
-
-
 
 // Business Contact Item Component - for business professionals/contacts
 const BusinessContactItem = ({ business, effectiveTheme, onClick }) => {

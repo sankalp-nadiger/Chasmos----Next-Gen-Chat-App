@@ -21,8 +21,8 @@ export const allMessages = asyncHandler(async (req, res) => {
 });
 
 export const sendMessage = asyncHandler(async (req, res) => {
-  const { content, chatId, attachments, type = "text", isScheduled = false, scheduledFor } = req.body;
-  console.log("➡️ [SEND MESSAGE] Request received");
+  const { content, chatId, attachments, type = "text", isScheduled = false, scheduledFor, userId } = req.body;
+  console.log("➡️ [SEND MESSAGE] Request received", { chatId, userId, content, attachments, type, isScheduled, scheduledFor });
   if (!content && (!attachments || attachments.length === 0)) {
     console.log("Invalid data passed into request");
     return res.sendStatus(400);
@@ -34,7 +34,6 @@ export const sendMessage = asyncHandler(async (req, res) => {
       res.status(400);
       throw new Error("Scheduled time is required for scheduled messages");
     }
-    
     const scheduledDate = new Date(scheduledFor);
     if (scheduledDate <= new Date()) {
       res.status(400);
@@ -42,10 +41,47 @@ export const sendMessage = asyncHandler(async (req, res) => {
     }
   }
 
-  const chat = await Chat.findById(chatId);
+  let chat = null;
+  let createdNewChat = false;
+  if (chatId) {
+    chat = await Chat.findById(chatId);
+    if (chat) {
+      console.log("[sendMessage] Found existing chat:", chat._id);
+    } else {
+      console.log("[sendMessage] No chat found for chatId:", chatId);
+    }
+  }
+  // If chat does not exist, try to create it (for 1-on-1 only)
   if (!chat) {
-    res.status(404);
-    throw new Error("Chat not found");
+    console.log("[sendMessage] Attempting to create/access chat for userId:", userId);
+    if (!userId || userId === req.user._id.toString()) {
+      console.error("[sendMessage] userId missing or invalid for new chat creation", { userId, reqUser: req.user._id });
+      res.status(400);
+      throw new Error("userId is required to create a new chat");
+    }
+    // Check if chat already exists between these users
+    let isChat = await Chat.find({
+      isGroupChat: false,
+      $and: [
+        { users: { $elemMatch: { $eq: req.user._id } } },
+        { users: { $elemMatch: { $eq: userId } } },
+      ],
+    });
+    if (isChat.length > 0) {
+      chat = isChat[0];
+      console.log("[sendMessage] Found existing 1-on-1 chat:", chat._id);
+    } else {
+      // Create new chat
+      const chatData = {
+        chatName: "sender",
+        isGroupChat: false,
+        users: [req.user._id, userId],
+        participants: [req.user._id, userId],
+      };
+      chat = await Chat.create(chatData);
+      createdNewChat = true;
+      console.log("[sendMessage] Created new 1-on-1 chat:", chat._id);
+    }
   }
 
   // Check if user is blocked in 1-on-1 chat
@@ -63,7 +99,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
   var newMessage = {
     sender: req.user._id,
     content: content,
-    chat: chatId,
+    chat: chat._id,
     type: type,
     attachments: attachments || [],
     isScheduled: isScheduled,
@@ -73,6 +109,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
 
   try {
     var message = await Message.create(newMessage);
+    console.log("[sendMessage] Message created:", message._id);
 
     message = await message.populate("sender", "name avatar");
     message = await message.populate("attachments");
@@ -84,11 +121,18 @@ export const sendMessage = asyncHandler(async (req, res) => {
 
     // Only update lastMessage if it's not scheduled or if it's being sent now
     if (!isScheduled) {
-      await Chat.findByIdAndUpdate(chatId, { lastMessage: message });
+      await Chat.findByIdAndUpdate(chat._id, { lastMessage: message });
+      console.log("[sendMessage] Updated chat lastMessage:", chat._id);
     }
 
+    // If a new chat was created, return chat info as well
+    if (createdNewChat) {
+      console.log("[sendMessage] Returning new chat and message");
+      return res.json({ message, chat });
+    }
     res.json(message);
   } catch (error) {
+    console.error("[sendMessage] Error creating message:", error);
     res.status(400);
     throw new Error(error.message);
   }

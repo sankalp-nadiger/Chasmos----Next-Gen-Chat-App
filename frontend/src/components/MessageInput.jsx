@@ -27,114 +27,99 @@ const MessageInput = React.memo(({
   }, []);
 
   const handleSendClick = useCallback(async (isScheduled = false) => {
-  if (uploading) return;
+    if (uploading) return;
 
-  // If pending attachment exists, upload it with caption and let backend create message
-  if (pendingAttachment && selectedContact) {
-    try {
-      setUploading(true);
-      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-      const form = new FormData();
-      form.append('file', pendingAttachment.file);
-      const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
-      if (chatId) form.append('chatId', chatId);
-      if (messageInput && messageInput.trim()) form.append('content', messageInput.trim());
-      
-      if (isScheduled && scheduledDate && scheduledTime) {
-        const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
-        form.append('scheduledFor', scheduledDateTime.toISOString());
-        form.append('isScheduled', 'true');
+    // Always build a payload object for onSendMessage
+    let chatId = selectedContact?.chatId || selectedContact?.id || selectedContact?._id;
+    let userId = null;
+    if (!chatId && selectedContact && !selectedContact.isGroup) {
+      // Prefer userId, then id, then fallback to _id (but not self)
+      if (selectedContact.userId && selectedContact.userId !== selectedContact.currentUserId) {
+        userId = selectedContact.userId;
+      } else if (selectedContact.id && selectedContact.id !== selectedContact.currentUserId) {
+        userId = selectedContact.id;
+      } else if (selectedContact._id && selectedContact._id !== selectedContact.currentUserId) {
+        userId = selectedContact._id;
+      } else if (selectedContact.participants && Array.isArray(selectedContact.participants)) {
+        const other = selectedContact.participants.find(pid => pid !== selectedContact.currentUserId);
+        if (other) userId = other;
       }
+    }
 
-      const uploadRes = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/upload`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: form,
-      });
-
-      if (!uploadRes.ok) throw new Error('Upload failed');
-      const data = await uploadRes.json();
-
-      if (data.message) {
-        // backend-created message returned
-        if (!isScheduled) onSendMessage(data.message);
-      } else if (data.attachment) {
-        // fallback: instruct parent to create message with attachment id
-        const payload = { 
-          content: messageInput || '', 
-          attachments: [data.attachment._id], 
-          type: pendingAttachment.type === 'image' ? 'image' : 'file' 
-        };
-        
+    // If pending attachment exists, upload it with caption and let backend create message
+    if (pendingAttachment && selectedContact) {
+      try {
+        setUploading(true);
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        const form = new FormData();
+        form.append('file', pendingAttachment.file);
+        if (chatId) form.append('chatId', chatId);
+        if (userId) form.append('userId', userId);
+        if (messageInput && messageInput.trim()) form.append('content', messageInput.trim());
         if (isScheduled && scheduledDate && scheduledTime) {
           const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
-          payload.isScheduled = true;
-          payload.scheduledFor = scheduledDateTime.toISOString();
+          form.append('scheduledFor', scheduledDateTime.toISOString());
+          form.append('isScheduled', 'true');
         }
-        if (!isScheduled) onSendMessage(payload);
+        const uploadRes = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/upload`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: form,
+        });
+        if (!uploadRes.ok) throw new Error('Upload failed');
+        const data = await uploadRes.json();
+        if (data.message) {
+          if (!isScheduled) onSendMessage(data.message);
+        } else if (data.attachment) {
+          const payload = {
+            content: messageInput || '',
+            attachments: [data.attachment._id],
+            type: pendingAttachment.type === 'image' ? 'image' : 'file',
+            chatId,
+            userId,
+          };
+          if (isScheduled && scheduledDate && scheduledTime) {
+            const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
+            payload.isScheduled = true;
+            payload.scheduledFor = scheduledDateTime.toISOString();
+          }
+          if (!isScheduled) onSendMessage(payload);
+        }
+      } catch (err) {
+        console.error('Upload + send error', err);
+      } finally {
+        setUploading(false);
+        setPendingAttachment(null);
+        setMessageInput('');
+        setScheduledDate('');
+        setScheduledTime('');
+        setShowScheduleModal(false);
       }
-    } catch (err) {
-      console.error('Upload + send error', err);
-    } finally {
-      setUploading(false);
-      setPendingAttachment(null);
-      setMessageInput('');
+      return;
+    }
+
+    // For plain text messages
+    if (messageInput.trim() && selectedContact) {
+      const payload = {
+        content: messageInput.trim(),
+        type: 'text',
+        chatId,
+        userId,
+      };
+      if (isScheduled && scheduledDate && scheduledTime) {
+        const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
+        payload.isScheduled = true;
+        payload.scheduledFor = scheduledDateTime.toISOString();
+      }
+      onSendMessage(payload);
+      setMessageInput("");
       setScheduledDate('');
       setScheduledTime('');
       setShowScheduleModal(false);
     }
-
-    return;
-  }
-
-  // For plain text messages
-  if (messageInput.trim() && selectedContact) {
-    const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-    const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
-    
-    if (isScheduled && scheduledDate && scheduledTime) {
-      // For scheduled messages, send as object with all required fields
-      const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
-      const payload = {
-        content: messageInput.trim(),
-        type: 'text',
-        isScheduled: true,
-        scheduledFor: scheduledDateTime.toISOString(),
-        chatId
-      };
-      console.log('Sending scheduled message:', payload);
-      
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/message`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(payload),
-        });
-        
-        if (!res.ok) throw new Error('Failed to send scheduled message');
-        // Do not call onSendMessage for scheduled messages
-        // const data = await res.json();
-        // onSendMessage(data);
-      } catch (err) {
-        console.error('Scheduled message send error', err);
-      }
-    } else {
-      // For immediate messages, send as string (like the original)
-      console.log('Sending immediate message:', messageInput.trim());
-      onSendMessage(messageInput.trim());
-    }
-    
-    setMessageInput("");
-    setScheduledDate('');
-    setScheduledTime('');
-    setShowScheduleModal(false);
-  }
-}, [messageInput, selectedContact, onSendMessage, pendingAttachment, uploading, scheduledDate, scheduledTime]);
+  }, [messageInput, selectedContact, onSendMessage, pendingAttachment, uploading, scheduledDate, scheduledTime]);
 
   const handleScheduleClick = useCallback(() => {
     if (!messageInput.trim() && !pendingAttachment) {

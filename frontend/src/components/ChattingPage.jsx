@@ -2543,22 +2543,10 @@ const togglePin = async (docId, isPinnedNow) => {
       console.log("Merged received chats:", finalReceived);
       console.log("Merged accepted chats:", finalAccepted);
 
-      // ⭐ 5️⃣ FINAL MERGE FOR UI — this fixes your problem ⭐
-      const finalMerged = [
-        ...finalAccepted,
-        ...finalReceived.filter(
-          (r) => !finalAccepted.some((a) => a.email === r.email)
-        ),
-      ];
 
-      console.log("🔥 FINAL MERGED FOR UI:", finalMerged);
-
+      // Only set acceptedChats to accepted, and receivedChats to received
       if (!mounted) return;
-
-      // ⬇️ set ONLY ONE STATE (UI expects one list)
-      setAcceptedChats(finalMerged);
-
-      // (Optional) keep separate list too
+      setAcceptedChats(finalAccepted);
       setReceivedChats(finalReceived);
 
     } catch (err) {
@@ -2667,7 +2655,9 @@ const togglePin = async (docId, isPinnedNow) => {
           return;
         }
 
-        // For existing chats, access or create chat on backend
+        // Always resolve the unique 1-on-1 chat between two users before fetching messages
+        // Never use a user id as a chat id
+        // Always POST to /api/chat with userId to get the chat, then fetch messages using the returned chat._id
         const res = await fetch(`${API_BASE_URL}/api/chat`, {
           method: "POST",
           headers: {
@@ -2683,14 +2673,8 @@ const togglePin = async (docId, isPinnedNow) => {
           return;
         }
 
-        console.debug("handleOpenChat: opening chat", { chat });
-
         const chatObj = await res.json();
-        console.debug("handleOpenChat: chatObj response", { chatObj });
-
-        // Normalize chat id to string so keys match when storing/fetching messages
         const normalizedChatId = String(chatObj._id || chatObj.chatId || chatObj.id);
-        console.debug("handleOpenChat: normalizedChatId", { normalizedChatId });
 
         // Find the other participant for display
         const localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
@@ -2708,7 +2692,6 @@ const togglePin = async (docId, isPinnedNow) => {
         };
 
         setSelectedContact(contactForUI);
-        console.debug("handleOpenChat: selectedContact set", { contactForUI });
 
         // Join socket room
         if (socketRef.current && socketRef.current.emit) {
@@ -2717,7 +2700,6 @@ const togglePin = async (docId, isPinnedNow) => {
 
         // Fetch messages for this chat (use normalized id)
         const msgsUrl = `${API_BASE_URL}/api/message/${normalizedChatId}`;
-        console.debug("handleOpenChat: fetching messages", { msgsUrl });
         const msgsRes = await fetch(msgsUrl, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -2726,8 +2708,6 @@ const togglePin = async (docId, isPinnedNow) => {
           console.warn("handleOpenChat: messages fetch failed", { status: msgsRes.status });
         } else {
           const msgs = await msgsRes.json();
-          console.debug("handleOpenChat: raw messages response", { count: msgs.length, msgsSample: msgs.slice(0,3) });
-
           const formatted = msgs.map((m) => ({
             id: m._id,
             type: m.type || "text",
@@ -2738,14 +2718,9 @@ const togglePin = async (docId, isPinnedNow) => {
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
           }));
-
-          console.debug("handleOpenChat: formatted messages", { formattedSample: formatted.slice(0,3) });
-
           const filteredFormatted = filterDuplicateSystemMessages(formatted);
-
           setMessages((prev) => {
             const next = { ...prev, [normalizedChatId]: filteredFormatted };
-            console.debug("handleOpenChat: setMessages updated for chat", { normalizedChatId, newCount: formatted.length });
             try {
               // update recent/contact preview based on last message loaded from DB
               const last = formatted.length ? formatted[formatted.length - 1] : null;
@@ -2849,10 +2824,16 @@ const handleDeleteGroup = (groupId) => {
   }
 };
 
-const handleAcceptChat = async () => {
+// Accepts a chat request from a user (the contact is the user who sent the request)
+const handleAcceptChat = async (contact) => {
   try {
+    const token = localStorage.getItem("token");
+    if (!token || !contact || !contact.email) {
+      console.error("Missing token or contact info");
+      return;
+    }
     await fetch(`${API_BASE_URL}/api/user/request/accept`, {
-      method: "POST",
+      method: "PUT",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
@@ -2860,17 +2841,13 @@ const handleAcceptChat = async () => {
       body: JSON.stringify({ senderEmail: contact.email }),
     });
 
-    setChatStatus("accepted");
-    setShowInviteModal(false);
-
     // ✅ ONLY HERE
-    fetchAcceptedChats();   // populate Accepted
-    fetchRequests();        // remove from Received
+    fetchAcceptedChats && fetchAcceptedChats();   // populate Accepted
+    fetchRequests && fetchRequests();        // remove from Received
   } catch (err) {
-    console.error(err);
+    console.error("Error accepting chat request:", err);
   }
 };
-
 
 const handleRejectChat = async (email) => {
   try {
@@ -2893,11 +2870,6 @@ const handleRejectChat = async (email) => {
     console.error("Reject failed", err);
   }
 };
-
-
-
-
-
 
   // ✅ Run once when the component mounts (and on mobile view change if needed)
   // useEffect(() => {
@@ -3231,7 +3203,11 @@ const handleSendMessageFromInput = useCallback(
   (payload) => {
     if (!payload || !selectedContact) return;
 
+    // If this is a pending chat (opened from accepted request or chat icon), do not use id as chatId until chat is created
     const getChatId = (payload) => {
+      if (selectedContact?.isPendingChat && !selectedContact.chatId) {
+        return null;
+      }
       return (
         payload?.chat?._id ||
         payload?.chat ||
@@ -3311,7 +3287,8 @@ const handleSendMessageFromInput = useCallback(
         })
       );
     };
-    // Case 1: Server message object
+
+    // Case 1: Server message object (already sent from backend)
     if (typeof payload === 'object' && (payload._id || payload.id || payload.createdAt)) {
       // If this is a scheduled message (isScheduled true), do NOT append to UI immediately
       if (payload.isScheduled) {
@@ -3352,6 +3329,101 @@ const handleSendMessageFromInput = useCallback(
       }
     }
 
+    // Case 1b: Text message payload as object (from MessageInput)
+    if (typeof payload === 'object' && payload.type === 'text') {
+      (async () => {
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        let chatId = getChatId(payload);
+        let userId = payload.userId;
+
+        const localMessage = {
+          id: Date.now(),
+          type: 'text',
+          content: payload.content,
+          sender: 'me',
+          timestamp: Date.now(),
+          isRead: true,
+        };
+
+        if (!token) {
+          appendMessage(chatId, localMessage);
+          return;
+        }
+
+        // If this is a pending/accepted chat without a chatId, create the chat first
+        if ((selectedContact?.isPendingChat || selectedContact?.isAcceptedRequest) && !chatId && userId) {
+          try {
+            const createChatRes = await fetch(`${API_BASE_URL}/api/chat`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ userId }),
+            });
+
+            if (createChatRes.ok) {
+              const chatObj = await createChatRes.json();
+              chatId = String(chatObj._id || chatObj.id);
+              setSelectedContact(prev => ({
+                ...prev,
+                chatId: chatId,
+                id: chatId,
+                isPendingChat: false,
+                isAcceptedRequest: false,
+                participants: chatObj.users || chatObj.participants || [],
+              }));
+              console.log("Chat created for pending/accepted chat:", chatId);
+            } else {
+              console.error("Failed to create chat for pending/accepted chat");
+              return;
+            }
+          } catch (err) {
+            console.error("Error creating chat:", err);
+            return;
+          }
+        }
+
+        if (!chatId) {
+          appendMessage(chatId, localMessage);
+          return;
+        }
+
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/message`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ content: payload.content, chatId, userId }),
+          });
+
+          if (!res.ok) throw new Error('Failed to send text message');
+
+          const sent = await res.json();
+
+          const formatted = {
+            id: sent._id || sent.id || Date.now(),
+            type: 'text',
+            content: sent.content || sent.text || payload.content,
+            sender: sent.sender?._id || sent.sender || 'me',
+            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            isRead: true,
+          };
+
+          appendMessage(chatId, formatted);
+          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
+
+          updateRecentChat(chatId, payload.content, false);
+          updateContactPreview(chatId, payload.content, false);
+        } catch (err) {
+          console.error('Error sending text message:', err);
+        }
+      })();
+      return;
+    }
+
     // Case 2: Attachments message
     if (typeof payload === 'object' && payload.attachments) {
       (async () => {
@@ -3377,8 +3449,8 @@ const handleSendMessageFromInput = useCallback(
           return;
         }
 
-        // If this is an accepted request without a chat, create the chat first
-        if (selectedContact?.isAcceptedRequest && !chatId) {
+        // If this is a pending chat (opened from accepted request or chat icon), create the chat first
+        if (selectedContact?.isPendingChat && !chatId) {
           try {
             const userId = selectedContact.userId || selectedContact._id || selectedContact.email;
             const createChatRes = await fetch(`${API_BASE_URL}/api/chat`, {
@@ -3393,19 +3465,17 @@ const handleSendMessageFromInput = useCallback(
             if (createChatRes.ok) {
               const chatObj = await createChatRes.json();
               chatId = String(chatObj._id || chatObj.id);
-              
-              // Update the selected contact with the new chat ID
+              // Update the selected contact with the new chat ID and clear pending flag
               setSelectedContact(prev => ({
                 ...prev,
                 chatId: chatId,
                 id: chatId,
-                isAcceptedRequest: false,
+                isPendingChat: false,
                 participants: chatObj.users || chatObj.participants || [],
               }));
-
-              console.log("Chat created for accepted request:", chatId);
+              console.log("Chat created for pending chat:", chatId);
             } else {
-              console.error("Failed to create chat for accepted request");
+              console.error("Failed to create chat for pending chat");
               return;
             }
           } catch (err) {
@@ -4271,16 +4341,52 @@ const handleCreateGroup = useCallback(() => {
 
 
   const handleStartNewChat = useCallback(
-    (contact) => {
+    async (contact) => {
       setSelectedContact(contact);
       setShowNewChat(false);
 
-      // Initialize messages array if it doesn't exist
-      if (!messages[contact.id]) {
-        setMessages((prev) => ({
-          ...prev,
-          [contact.id]: [],
-        }));
+      // If contact has a chatId or id (existing chat), fetch messages
+      const chatId = contact.chatId || contact.id;
+      if (chatId && String(chatId).length === 24) {
+        // Only fetch if not already loaded
+        if (!messages[chatId] || messages[chatId].length === 0) {
+          try {
+            const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+            if (token) {
+              const msgsUrl = `${API_BASE_URL}/api/message/${chatId}`;
+              const msgsRes = await fetch(msgsUrl, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (msgsRes.ok) {
+                const msgs = await msgsRes.json();
+                const formatted = msgs.map((m) => ({
+                  id: m._id,
+                  type: m.type || 'text',
+                  content: m.content || m.text || '',
+                  sender: m.sender?._id || m.sender || 'unknown',
+                  timestamp: new Date(m.createdAt || m.timestamp || Date.now()).getTime(),
+                  isRead: m.isRead || false,
+                  attachments: Array.isArray(m.attachments) ? m.attachments : [],
+                  isSystemMessage: m.type === 'system',
+                }));
+                const filtered = filterDuplicateSystemMessages(formatted);
+                setMessages((prev) => ({ ...prev, [chatId]: filtered }));
+              } else {
+                setMessages((prev) => ({ ...prev, [chatId]: [] }));
+              }
+            }
+          } catch (err) {
+            setMessages((prev) => ({ ...prev, [chatId]: [] }));
+          }
+        }
+      } else {
+        // For new/pending chats, just initialize empty messages
+        if (!messages[contact.id]) {
+          setMessages((prev) => ({
+            ...prev,
+            [contact.id]: [],
+          }));
+        }
       }
     },
     [messages]
@@ -4292,43 +4398,43 @@ const handleCreateGroup = useCallback(() => {
 
   const [documentChats, setDocumentChats] = useState([]);
   // Filter accepted chats to exclude users already present in recentChats
+  // Only show chats that the user has sent and have been accepted (not received requests, not merged)
   const filteredAcceptedChats = React.useMemo(() => {
-  if (!Array.isArray(acceptedChats) || acceptedChats.length === 0) return [];
-  if (!Array.isArray(recentChats) || recentChats.length === 0) return acceptedChats;
+    if (!Array.isArray(acceptedChats) || acceptedChats.length === 0) return [];
+    if (!Array.isArray(recentChats) || recentChats.length === 0) return acceptedChats;
 
-  // Create sets for both emails and IDs for comprehensive filtering
-  const recentEmails = new Set(
-    recentChats
-      .map((r) => r.email || r.otherUser?.email)
-      .filter(Boolean)
-      .map((email) => email.toLowerCase())
-  );
+    // Create sets for both emails and IDs for comprehensive filtering
+    const recentEmails = new Set(
+      recentChats
+        .map((r) => r.email || r.otherUser?.email)
+        .filter(Boolean)
+        .map((email) => email.toLowerCase())
+    );
 
-  const recentChatIds = new Set(
-    recentChats
-      .map((r) => r.id || r._id || r.chatId)
-      .filter(Boolean)
-      .map((id) => String(id))
-  );
+    const recentChatIds = new Set(
+      recentChats
+        .map((r) => r.id || r._id || r.chatId)
+        .filter(Boolean)
+        .map((id) => String(id))
+    );
 
-  const recentUserIds = new Set(
-    recentChats
-      .map((r) => r.userId || r.otherUser?._id)
-      .filter(Boolean)
-      .map((id) => String(id))
-  );
+    const recentUserIds = new Set(
+      recentChats
+        .map((r) => r.userId || r.otherUser?._id)
+        .filter(Boolean)
+        .map((id) => String(id))
+    );
 
-  return acceptedChats.filter((a) => {
-    const email = (a.email || "").toLowerCase();
-    const chatId = String(a.id || a._id || a.chatId || "");
-    const userId = String(a.userId || a._id || "");
-    
-    // Filter out if email, chatId, or userId matches any in recent chats
-    return !recentEmails.has(email) && 
-           !recentChatIds.has(chatId) && 
-           !recentUserIds.has(userId);
-  });
-}, [acceptedChats, recentChats]);
+    // Only show acceptedChats (not received), and not in recent chats
+    return acceptedChats.filter((a) => {
+      const email = (a.email || "").toLowerCase();
+      const chatId = String(a.id || a._id || a.chatId || "");
+      const userId = String(a.userId || a._id || "");
+      return !recentEmails.has(email) && 
+             !recentChatIds.has(chatId) && 
+             !recentUserIds.has(userId);
+    });
+  }, [acceptedChats, recentChats]);
 
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -5365,7 +5471,7 @@ useEffect(() => {
 
   {/* Accept */}
   <button
-    onClick={() => handleAcceptChat(req.email)}
+    onClick={() => handleAcceptChat(req)}
     className="px-3 py-1 text-xs rounded-md
       bg-green-600 text-white
       hover:bg-green-700 transition"
@@ -5380,10 +5486,10 @@ useEffect(() => {
                           ) : (
                             <div
                               className={`w-full flex items-center px-4 py-3 rounded-lg ${
-                                effectiveTheme.searchBg
-                                  ? effectiveTheme.searchBg
-                                  : "bg-gray-100 dark:bg-gray-800"
-                              } text-gray-400`}
+                                effectiveTheme.mode === 'dark'
+                                  ? 'bg-[#232e3e] text-gray-400'
+                                  : 'bg-gray-100 text-gray-500'
+                              }`}
                             >
                               No new requests
                             </div>
@@ -5493,10 +5599,10 @@ useEffect(() => {
           ) : (
             <div
               className={`w-full flex items-center justify-center px-4 py-3 rounded-lg ${
-                effectiveTheme.searchBg
-                  ? effectiveTheme.searchBg
-                  : "bg-gray-100 dark:bg-gray-800"
-              } text-gray-400`}
+                effectiveTheme.mode === 'dark'
+                  ? 'bg-[#232e3e] text-gray-400'
+                  : 'bg-gray-100 text-gray-500'
+              }`}
             >
               No new accepted invites yet
             </div>
@@ -5829,7 +5935,7 @@ useEffect(() => {
                                               animate={{ opacity: 1, x: 0 }}
                                               transition={{ delay: 0.15 }}
                                               onClick={handleCreateGroup}
-                                              className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
+                                              className={`flex items-center space-x-3 ${effectiveTheme.mode === 'dark' ? effectiveTheme.secondary : 'bg-white'} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
                                             >
                                               <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
                                                 <Users className="w-5 h-5 text-white" />
@@ -5847,7 +5953,7 @@ useEffect(() => {
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.25 }}
                         onClick={handleNewChat}
-                        className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
+                        className={`flex items-center space-x-3 ${effectiveTheme.mode === 'dark' ? effectiveTheme.secondary : 'bg-white'} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
                       >
                         <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
                           <MessageSquare className="w-5 h-5 text-white" />
@@ -5865,7 +5971,7 @@ useEffect(() => {
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.35 }}
                         onClick={handleInviteUser}
-                        className={`flex items-center space-x-3 ${effectiveTheme.secondary} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
+                        className={`flex items-center space-x-3 ${effectiveTheme.mode === 'dark' ? effectiveTheme.secondary : 'bg-white'} px-4 py-3 rounded-lg shadow-lg border ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors group`}
                       >
                         <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
                           <UserPlus className="w-5 h-5 text-white" />
@@ -6176,15 +6282,9 @@ useEffect(() => {
     />
   </div>
 )}
-
-
-
-
   </>
 )}
-
-
-              
+         
               {/* Pinned Messages Bar */}
               <PinnedMessagesBar
                 pinnedMessages={pinnedMessagesData}
@@ -6240,7 +6340,33 @@ useEffect(() => {
                 />
               </div>
               <MessageInput
-                    onSendMessage={handleSendMessageFromInput}
+                onSendMessage={(payload) => {
+                  // Helper to get correct chatId and userId for message sending
+                  let chatId = selectedContact?.chatId || selectedContact?._id;
+                  let userId = null;
+                  // For new 1-on-1 chats, pass userId (other participant)
+                  if (!chatId && selectedContact && !selectedContact.isGroup) {
+                    // Prefer userId, then id, then fallback to _id (but not self)
+                    if (selectedContact.userId && selectedContact.userId !== currentUserId) {
+                      userId = selectedContact.userId;
+                    } else if (selectedContact.id && selectedContact.id !== currentUserId) {
+                      userId = selectedContact.id;
+                    } else if (selectedContact._id && selectedContact._id !== currentUserId) {
+                      userId = selectedContact._id;
+                    } else if (selectedContact.participants && Array.isArray(selectedContact.participants)) {
+                      // Fallback: find the participant that is not the current user
+                      const other = selectedContact.participants.find(pid => pid !== currentUserId);
+                      if (other) userId = other;
+                    }
+                  }
+                  // Log for debugging
+                  console.log('[MessageInput->onSendMessage] chatId:', chatId, 'userId:', userId, 'selectedContact:', selectedContact);
+                  handleSendMessageFromInput({
+                    ...payload,
+                    chatId,
+                    userId,
+                  });
+                }}
                 selectedContact={selectedContact}
                 effectiveTheme={effectiveTheme}
               />
