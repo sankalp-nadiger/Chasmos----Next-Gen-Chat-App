@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Search, Check, Send, Users, User } from 'lucide-react';
+import CosmosBackground from './CosmosBg';
 
 const ForwardMessageModal = ({ 
   isOpen, 
@@ -73,12 +74,18 @@ const ForwardMessageModal = ({
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
           onClick={onClose}
         >
+          {/* CosmosBg for day mode */}
+          {effectiveTheme.mode !== 'dark' && (
+            <div className="absolute inset-0 w-full h-full pointer-events-none select-none z-0">
+              <CosmosBackground />
+            </div>
+          )}
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
             onClick={(e) => e.stopPropagation()}
-            className={`${effectiveTheme.primary} rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[80vh]`}
+            className={`${effectiveTheme.primary} rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[80vh] relative z-10 ${effectiveTheme.mode !== 'dark' ? 'bg-white/90' : ''}`}
           >
             {/* Header */}
             <div className={`${effectiveTheme.secondary} p-4 flex items-center justify-between border-b ${effectiveTheme.border}`}>

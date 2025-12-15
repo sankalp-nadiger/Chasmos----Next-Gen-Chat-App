@@ -19,8 +19,10 @@ import archiveRoutes from "./routes/archive.routes.js";
 import blockRoutes from "./routes/block.routes.js";
 import userProfileRoutes from "./routes/userProfile.routes.js"; 
 import screenshotRoutes from "./routes/screenshot.routes.js";
+import groupRoutes from "./routes/group.route.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
 import cors from 'cors';
+import { setSocketIOInstance } from "./services/scheduledMessageCron.js";
 import { initScheduledMessageCron } from "./services/scheduledMessageCron.js";
 
 connectDB();
@@ -70,9 +72,6 @@ const server = app.listen(
   console.log(`Server running on PORT ${PORT}...`.yellow.bold)
 );
 
-// Initialize scheduled message cron job
-initScheduledMessageCron();
-
 const io = new Server(server, {
   pingTimeout: 60000,
   cors: {
@@ -80,6 +79,13 @@ const io = new Server(server, {
     methods: ["GET", "POST"]
   },
 });
+
+// Initialize scheduled message cron job
+// Pass io to cron job
+setSocketIOInstance(io);
+initScheduledMessageCron();
+
+
 
 io.on("connection", (socket) => {
   console.log("Connected to socket.io");

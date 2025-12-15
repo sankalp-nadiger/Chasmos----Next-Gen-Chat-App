@@ -26,97 +26,115 @@ const MessageInput = React.memo(({
     setMessageInput(e.target.value);
   }, []);
 
-  const handleSendClick = useCallback((isScheduled = false) => {
-    if (uploading) return;
+  const handleSendClick = useCallback(async (isScheduled = false) => {
+  if (uploading) return;
 
-    // If pending attachment exists, upload it with caption and let backend create message
-    if (pendingAttachment && selectedContact) {
-      (async () => {
-        try {
-          setUploading(true);
-          const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-          const form = new FormData();
-          form.append('file', pendingAttachment.file);
-          const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
-          if (chatId) form.append('chatId', chatId);
-          if (messageInput && messageInput.trim()) form.append('content', messageInput.trim());
-          
-          if (isScheduled && scheduledDate && scheduledTime) {
-            const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
-            form.append('scheduledFor', scheduledDateTime.toISOString());
-            form.append('isScheduled', 'true');
-          }
-
-          const uploadRes = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/upload`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            body: form,
-          });
-
-          if (!uploadRes.ok) throw new Error('Upload failed');
-          const data = await uploadRes.json();
-
-          if (data.message) {
-            // backend-created message returned
-            onSendMessage(data.message);
-          } else if (data.attachment) {
-            // fallback: instruct parent to create message with attachment id
-            const payload = { 
-              content: messageInput || '', 
-              attachments: [data.attachment._id], 
-              type: pendingAttachment.type === 'image' ? 'image' : 'file' 
-            };
-            
-            if (isScheduled && scheduledDate && scheduledTime) {
-              const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
-              payload.isScheduled = true;
-              payload.scheduledFor = scheduledDateTime.toISOString();
-            }
-            
-            onSendMessage(payload);
-          }
-        } catch (err) {
-          console.error('Upload + send error', err);
-        } finally {
-          setUploading(false);
-          setPendingAttachment(null);
-          setMessageInput('');
-          setScheduledDate('');
-          setScheduledTime('');
-          setShowScheduleModal(false);
-        }
-      })();
-
-      return;
-    }
-
-    // For plain text messages
-    if (messageInput.trim() && selectedContact) {
-      if (isScheduled && scheduledDate && scheduledTime) {
-        // For scheduled messages, send as object with all required fields
-        const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
-        const payload = {
-          content: messageInput.trim(),
-          type: 'text',
-          isScheduled: true,
-          scheduledFor: scheduledDateTime.toISOString()
-        };
-        console.log('Sending scheduled message:', payload);
-        onSendMessage(payload);
-      } else {
-        // For immediate messages, send as string (like the original)
-        console.log('Sending immediate message:', messageInput.trim());
-        onSendMessage(messageInput.trim());
-      }
+  // If pending attachment exists, upload it with caption and let backend create message
+  if (pendingAttachment && selectedContact) {
+    try {
+      setUploading(true);
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const form = new FormData();
+      form.append('file', pendingAttachment.file);
+      const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
+      if (chatId) form.append('chatId', chatId);
+      if (messageInput && messageInput.trim()) form.append('content', messageInput.trim());
       
-      setMessageInput("");
+      if (isScheduled && scheduledDate && scheduledTime) {
+        const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
+        form.append('scheduledFor', scheduledDateTime.toISOString());
+        form.append('isScheduled', 'true');
+      }
+
+      const uploadRes = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/upload`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: form,
+      });
+
+      if (!uploadRes.ok) throw new Error('Upload failed');
+      const data = await uploadRes.json();
+
+      if (data.message) {
+        // backend-created message returned
+        if (!isScheduled) onSendMessage(data.message);
+      } else if (data.attachment) {
+        // fallback: instruct parent to create message with attachment id
+        const payload = { 
+          content: messageInput || '', 
+          attachments: [data.attachment._id], 
+          type: pendingAttachment.type === 'image' ? 'image' : 'file' 
+        };
+        
+        if (isScheduled && scheduledDate && scheduledTime) {
+          const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
+          payload.isScheduled = true;
+          payload.scheduledFor = scheduledDateTime.toISOString();
+        }
+        if (!isScheduled) onSendMessage(payload);
+      }
+    } catch (err) {
+      console.error('Upload + send error', err);
+    } finally {
+      setUploading(false);
+      setPendingAttachment(null);
+      setMessageInput('');
       setScheduledDate('');
       setScheduledTime('');
       setShowScheduleModal(false);
     }
-  }, [messageInput, selectedContact, onSendMessage, pendingAttachment, uploading, scheduledDate, scheduledTime]);
+
+    return;
+  }
+
+  // For plain text messages
+  if (messageInput.trim() && selectedContact) {
+    const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+    const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
+    
+    if (isScheduled && scheduledDate && scheduledTime) {
+      // For scheduled messages, send as object with all required fields
+      const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
+      const payload = {
+        content: messageInput.trim(),
+        type: 'text',
+        isScheduled: true,
+        scheduledFor: scheduledDateTime.toISOString(),
+        chatId
+      };
+      console.log('Sending scheduled message:', payload);
+      
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/message`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        
+        if (!res.ok) throw new Error('Failed to send scheduled message');
+        // Do not call onSendMessage for scheduled messages
+        // const data = await res.json();
+        // onSendMessage(data);
+      } catch (err) {
+        console.error('Scheduled message send error', err);
+      }
+    } else {
+      // For immediate messages, send as string (like the original)
+      console.log('Sending immediate message:', messageInput.trim());
+      onSendMessage(messageInput.trim());
+    }
+    
+    setMessageInput("");
+    setScheduledDate('');
+    setScheduledTime('');
+    setShowScheduleModal(false);
+  }
+}, [messageInput, selectedContact, onSendMessage, pendingAttachment, uploading, scheduledDate, scheduledTime]);
 
   const handleScheduleClick = useCallback(() => {
     if (!messageInput.trim() && !pendingAttachment) {
@@ -229,13 +247,22 @@ const MessageInput = React.memo(({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.9 }}
                 transition={{ duration: 0.2 }}
-                className={`absolute -top-20 left-0 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50`}
+                className={`absolute -top-20 left-0 border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50 overflow-hidden`}
+                style={{
+                  background: effectiveTheme.mode === 'dark'
+                    ? effectiveTheme.secondary
+                    : '#fff',
+                  minWidth: '370px',
+                }}
               >
-                <div className="flex items-center space-x-4">
+                <div className="absolute inset-0 pointer-events-none opacity-30 z-0">
+                  <CosmosBg />
+                </div>
+                <div className="flex items-center space-x-4 relative z-10">
                   <motion.div
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
-                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-blue-500 hover:bg-opacity-10 transition-colors"
+                    className={`cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg transition-colors ${effectiveTheme.mode === 'dark' ? 'hover:bg-blue-500 hover:bg-opacity-10' : 'hover:bg-blue-100'}`}
                     onClick={() => handleFileUpload('document')}
                   >
                     <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
@@ -247,7 +274,7 @@ const MessageInput = React.memo(({
                   <motion.div
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
-                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-green-500 hover:bg-opacity-10 transition-colors"
+                    className={`cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg transition-colors ${effectiveTheme.mode === 'dark' ? 'hover:bg-green-500 hover:bg-opacity-10' : 'hover:bg-green-100'}`}
                     onClick={() => handleFileUpload('image')}
                   >
                     <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
@@ -259,7 +286,7 @@ const MessageInput = React.memo(({
                   <motion.div
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
-                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-yellow-500 hover:bg-opacity-10 transition-colors"
+                    className={`cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg transition-colors ${effectiveTheme.mode === 'dark' ? 'hover:bg-yellow-500 hover:bg-opacity-10' : 'hover:bg-yellow-100'}`}
                     onClick={() => handleFileUpload('video')}
                   >
                     <div className="w-10 h-10 bg-yellow-500 rounded-full flex items-center justify-center">
@@ -271,7 +298,7 @@ const MessageInput = React.memo(({
                   <motion.div
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
-                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-purple-500 hover:bg-opacity-10 transition-colors"
+                    className={`cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg transition-colors ${effectiveTheme.mode === 'dark' ? 'hover:bg-purple-500 hover:bg-opacity-10' : 'hover:bg-purple-100'}`}
                     onClick={() => {
                       imageInputRef.current?.click();
                       setShowAttachmentMenu(false);
@@ -286,7 +313,7 @@ const MessageInput = React.memo(({
                   <motion.div
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
-                    className="cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg hover:bg-red-500 hover:bg-opacity-10 transition-colors"
+                    className={`cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg transition-colors ${effectiveTheme.mode === 'dark' ? 'hover:bg-red-500 hover:bg-opacity-10' : 'hover:bg-red-100'}`}
                     onClick={() => {
                       setShowAttachmentMenu(false);
                     }}
@@ -305,26 +332,35 @@ const MessageInput = React.memo(({
         <div className={`flex-1 ${effectiveTheme.inputBg} rounded-lg px-4 py-2 flex items-center`}> 
           <div className="flex-1">
             {pendingAttachment && (
-              <div className="mb-2 flex items-start space-x-3">
-                {pendingAttachment.preview ? (
-                  pendingAttachment.type === 'image' ? (
-                    <img src={pendingAttachment.preview} alt="preview" className="w-20 h-20 object-cover rounded" />
-                  ) : pendingAttachment.type === 'video' ? (
-                    <video src={pendingAttachment.preview} className="w-32 h-20 object-cover rounded" controls />
+              <div className="mb-2 flex items-start space-x-3 relative">
+                <div className="relative">
+                  {pendingAttachment.preview ? (
+                    pendingAttachment.type === 'image' ? (
+                      <img src={pendingAttachment.preview} alt="preview" className="w-20 h-20 object-cover rounded" />
+                    ) : pendingAttachment.type === 'video' ? (
+                      <video src={pendingAttachment.preview} className="w-32 h-20 object-cover rounded" controls />
+                    ) : (
+                      <div className="w-20 h-20 bg-gray-100 rounded flex items-center justify-center text-sm">
+                        <FileText className="w-6 h-6" />
+                      </div>
+                    )
                   ) : (
                     <div className="w-20 h-20 bg-gray-100 rounded flex items-center justify-center text-sm">
                       <FileText className="w-6 h-6" />
                     </div>
-                  )
-                ) : (
-                  <div className="w-20 h-20 bg-gray-100 rounded flex items-center justify-center text-sm">
-                    <FileText className="w-6 h-6" />
-                  </div>
-                )}
+                  )}
+                  <button
+                    className="absolute top-1 right-1 z-20 bg-white bg-opacity-80 rounded-full p-1 hover:bg-opacity-100 shadow"
+                    style={{ lineHeight: 0 }}
+                    onClick={() => { setPendingAttachment(null); setMessageInput(''); }}
+                    tabIndex={0}
+                  >
+                    <X className="w-4 h-4 text-gray-500" />
+                  </button>
+                </div>
                 <div className="flex-1">
                   <div className="flex justify-between items-start">
                     <div className="text-sm font-medium text-gray-800">{pendingAttachment.name}</div>
-                    <button className="text-gray-500" onClick={() => { setPendingAttachment(null); setMessageInput(''); }}><X className="w-4 h-4" /></button>
                   </div>
                   <div className="text-xs text-gray-500">{(pendingAttachment.size / 1024).toFixed(1)} KB</div>
                 </div>
@@ -356,9 +392,12 @@ const MessageInput = React.memo(({
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => handleSendClick(false)}
-          className={`${effectiveTheme.accent} p-2 rounded-full text-white hover:opacity-90 transition-opacity`}
+          className={`${effectiveTheme.accent} p-2 rounded-full hover:opacity-90 transition-opacity`}
         >
-          <Send className="w-5 h-5" />
+          <Send
+            className="w-5 h-5"
+            style={{ color: effectiveTheme.mode === 'dark' ? '#fff' : '#1f2937' }}
+          />
         </motion.button>
       </div>
 
@@ -397,12 +436,16 @@ const MessageInput = React.memo(({
                 whileHover={{ scale: 1.1, rotate: 90 }}
                 whileTap={{ scale: 0.9 }}
                 onClick={() => setShowScheduleModal(false)}
-                className="absolute top-4 right-4 z-10 p-2 rounded-full transition-all duration-200"
+                className="absolute top-2 right-2 z-50 p-3 rounded-full transition-all duration-200 cursor-pointer"
                 style={{
                   background: effectiveTheme.mode === 'dark' 
-                    ? 'rgba(139, 92, 246, 0.2)' 
-                    : 'rgba(139, 92, 246, 0.1)',
+                    ? 'rgba(139, 92, 246, 0.25)' 
+                    : 'rgba(139, 92, 246, 0.13)',
+                  pointerEvents: 'auto',
+                  boxShadow: '0 2px 8px rgba(139, 92, 246, 0.12)',
                 }}
+                tabIndex={0}
+                aria-label="Close schedule modal"
               >
                 <X className="w-5 h-5" style={{ color: effectiveTheme.mode === 'dark' ? '#a78bfa' : '#8b5cf6' }} />
               </motion.button>

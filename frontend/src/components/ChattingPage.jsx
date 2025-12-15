@@ -84,6 +84,7 @@ import ForwardMessageModal from "./ForwardMessageModal";
 import PinnedMessagesBar from "./PinnedMessagesBar";
 import DeleteMessageModal from "./DeleteMessageModal";
 import UserProfileModal from "./UserProfileModal";
+import CosmosBackground from "./CosmosBg";
 
 const API_BASE_URL =
     import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
@@ -262,8 +263,11 @@ onClick={() => {
                 <MoreVertical className={`w-5 h-5 ${effectiveTheme.text}`} />
               </button>
               {menuOpen && (
-                <div className={`absolute right-0 top-10 w-44 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded shadow-lg z-50`}>
-                  <ul className="divide-y">
+                <div
+                  className={`absolute right-0 top-10 w-44 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded shadow-lg z-50 overflow-hidden`}
+                  style={effectiveTheme.mode !== 'dark' ? { background: '#fff' } : {}}
+                >
+                  <ul className="divide-y relative z-10">
                     <li>
                       {!isBlocked ? (
                         <button 
@@ -3309,6 +3313,11 @@ const handleSendMessageFromInput = useCallback(
     };
     // Case 1: Server message object
     if (typeof payload === 'object' && (payload._id || payload.id || payload.createdAt)) {
+      // If this is a scheduled message (isScheduled true), do NOT append to UI immediately
+      if (payload.isScheduled) {
+        // Do not append to UI, wait for backend to emit when sent
+        return;
+      }
       try {
         const chatId = getChatId(payload);
         const formatted = {
@@ -3601,7 +3610,8 @@ const handleSendMessageFromInput = useCallback(
               type: inferredType,
               content: newMessage.content || newMessage.text || '',
               sender: newMessage.sender?._id || newMessage.sender,
-              timestamp: new Date(newMessage.createdAt || Date.now()).getTime(),
+              // Use scheduledFor as timestamp if present (for scheduled messages)
+              timestamp: newMessage.scheduledFor ? new Date(newMessage.scheduledFor).getTime() : new Date(newMessage.createdAt || Date.now()).getTime(),
               isRead: false,
               attachments: attachments,
               isSystemMessage: newMessage.type === 'system',
@@ -4944,7 +4954,7 @@ useEffect(() => {
           </div>
         )}
 
-        {/* Vertical Navigation Bar */}
+       {/* Vertical Navigation Bar */}
         <div
           className={`w-16 z-50 ${effectiveTheme.secondary} border-r ${effectiveTheme.border} flex flex-col justify-between py-4`}
           style={{ borderRightWidth: "1px" }}
@@ -4958,8 +4968,12 @@ useEffect(() => {
               onClick={() => navigate('/chats')}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
                 activeNavItem === "chats"
-                  ? `${effectiveTheme.accent} text-white shadow-lg`
-                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+                  ? effectiveTheme.mode === 'dark'
+                    ? 'bg-blue-600 text-white shadow-lg'
+                    : 'bg-blue-500 text-white shadow-lg'
+                  : effectiveTheme.mode === 'dark'
+                    ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
+                    : 'hover:bg-gray-100 text-gray-600 hover:text-gray-900'
               }`}
               title="Chats"
             >
@@ -4973,8 +4987,12 @@ useEffect(() => {
               onClick={() => navigate('/groups')}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
                 activeNavItem === "groups"
-                  ? `${effectiveTheme.accent} text-white shadow-lg`
-                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+                  ? effectiveTheme.mode === 'dark'
+                    ? 'bg-blue-600 text-white shadow-lg'
+                    : 'bg-blue-500 text-white shadow-lg'
+                  : effectiveTheme.mode === 'dark'
+                    ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
+                    : 'hover:bg-gray-100 text-gray-600 hover:text-gray-900'
               }`}
               title="Groups"
             >
@@ -4988,8 +5006,12 @@ useEffect(() => {
               onClick={() => navigate('/documents')}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
                 activeNavItem === "documents"
-                  ? `${effectiveTheme.accent} text-white shadow-lg`
-                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+                  ? effectiveTheme.mode === 'dark'
+                    ? 'bg-blue-600 text-white shadow-lg'
+                    : 'bg-blue-500 text-white shadow-lg'
+                  : effectiveTheme.mode === 'dark'
+                    ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
+                    : 'hover:bg-gray-100 text-gray-600 hover:text-gray-900'
               }`}
               title="Documents"
             >
@@ -5006,8 +5028,12 @@ useEffect(() => {
               onClick={() => navigate('/profile')}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
                 activeNavItem === "profile"
-                  ? `${effectiveTheme.accent} text-white shadow-lg`
-                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+                  ? effectiveTheme.mode === 'dark'
+                    ? 'bg-blue-600 text-white shadow-lg'
+                    : 'bg-blue-500 text-white shadow-lg'
+                  : effectiveTheme.mode === 'dark'
+                    ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
+                    : 'hover:bg-gray-100 text-gray-600 hover:text-gray-900'
               }`}
               title="Profile"
             >
@@ -5021,8 +5047,12 @@ useEffect(() => {
               onClick={() => navigate('/settings')}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
                 activeNavItem === "settings"
-                  ? `${effectiveTheme.accent} text-white shadow-lg`
-                  : `${effectiveTheme.hover} ${effectiveTheme.textSecondary} hover:${effectiveTheme.text}`
+                  ? effectiveTheme.mode === 'dark'
+                    ? 'bg-blue-600 text-white shadow-lg'
+                    : 'bg-blue-500 text-white shadow-lg'
+                  : effectiveTheme.mode === 'dark'
+                    ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
+                    : 'hover:bg-gray-100 text-gray-600 hover:text-gray-900'
               }`}
               title="Settings"
             >
@@ -5034,7 +5064,11 @@ useEffect(() => {
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
               onClick={onLogout}
-              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 hover:bg-red-100 dark:hover:bg-red-900/20 text-red-500 hover:text-red-600`}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                effectiveTheme.mode === 'dark'
+                  ? 'hover:bg-red-900/30 text-red-400 hover:text-red-300'
+                  : 'hover:bg-red-50 text-red-500 hover:text-red-600'
+              }`}
               title="Logout"
             >
               <LogOut className="w-5 h-5" />
@@ -5136,7 +5170,8 @@ useEffect(() => {
                               initial={{ opacity: 0, scale: 0.95, y: -10 }}
                               animate={{ opacity: 1, scale: 1, y: 0 }}
                               exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                              className={`absolute right-0 mt-2 w-56 ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-xl z-50 overflow-hidden`}
+                              className={`absolute right-0 mt-2 w-56 border ${effectiveTheme.border} rounded-lg shadow-xl z-50 overflow-hidden`}
+                              style={effectiveTheme.mode !== 'dark' ? { backgroundColor: '#fff' } : {}}
                             >
                               <button
                                 onClick={() => {
@@ -5223,7 +5258,7 @@ useEffect(() => {
                           ? "Search conversations..."
                           : activeNavItem === "documents"
                             ? "Search documents..."
-                            : "Search..."
+                            : "Search groups..."
                       }
                       value={searchTerm}
                       onChange={handleSearchTermChange}
@@ -5585,7 +5620,7 @@ useEffect(() => {
               {/* 🗂️ NORMAL UNPINNED DOCUMENTS */}
               <div className="space-y-2 mt-4">
                 <h4 className={`text-sm font-semibold ${effectiveTheme.text}`}>
-                  📄 All Documents
+                  All Documents
                 </h4>
 
                 {documentChats

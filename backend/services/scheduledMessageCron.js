@@ -3,6 +3,12 @@ import Message from '../models/message.model.js';
 import Chat from '../models/chat.model.js';
 import User from '../models/user.model.js';
 
+// Socket.io instance holder
+let ioInstance = null;
+export const setSocketIOInstance = (io) => {
+  ioInstance = io;
+};
+
 // Function to send scheduled messages
 const sendScheduledMessages = async () => {
   try {
@@ -41,9 +47,22 @@ const sendScheduledMessages = async () => {
 
         console.log(`✅ [CRON] Sent scheduled message ${message._id} to chat ${message.chat._id}`);
 
-        // Here you would also emit a socket event to notify users
-        // This requires access to your socket.io instance
-        // You'll need to set this up in your main server file
+        // Emit socket event to all users in the chat room AND to each participant's userId room
+        if (ioInstance && message.chat && message.chat._id) {
+          // To chat room (for users who joined the chat)
+          ioInstance.to(message.chat._id.toString()).emit("message recieved", message);
+
+          // To each userId room (for users not in the chat room)
+          const users = (message.chat.users && message.chat.users.length)
+            ? message.chat.users
+            : (message.chat.participants || []);
+          if (Array.isArray(users)) {
+            users.forEach(user => {
+              const userId = user._id ? user._id.toString() : user.toString();
+              ioInstance.to(userId).emit("message recieved", message);
+            });
+          }
+        }
       } catch (error) {
         console.error(`❌ [CRON] Error sending scheduled message ${message._id}:`, error);
       }

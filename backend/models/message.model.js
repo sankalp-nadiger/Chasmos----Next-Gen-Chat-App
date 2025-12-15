@@ -18,13 +18,16 @@ const messageSchema = new Schema(
     isScheduled: { type: Boolean, default: false },
     scheduledFor: { type: Date },
     scheduledSent: { type: Boolean, default: false },
-    
+
+    // Reply to multiple messages
+    repliedTo: [{ type: Schema.Types.ObjectId, ref: "Message" }],
+
     // New starring feature
     starredBy: [{ 
       user: { type: Schema.Types.ObjectId, ref: "User" },
       starredAt: { type: Date, default: Date.now }
     }],
-    
+
     // Message reactions
     reactions: [{
       user: { type: Schema.Types.ObjectId, ref: "User" },

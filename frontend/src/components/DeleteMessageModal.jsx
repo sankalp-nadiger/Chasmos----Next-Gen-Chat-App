@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trash2, AlertTriangle } from 'lucide-react';
+import CosmosBackground from './CosmosBg';
 
 const DeleteMessageModal = ({ 
   isOpen, 
@@ -22,12 +23,18 @@ const DeleteMessageModal = ({
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
           onClick={onClose}
         >
+          {/* CosmosBg for day mode */}
+          {effectiveTheme.mode !== 'dark' && (
+            <div className="absolute inset-0 w-full h-full pointer-events-none select-none z-0">
+              <CosmosBackground/>
+            </div>
+          )}
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
             onClick={(e) => e.stopPropagation()}
-            className={`${effectiveTheme.primary} rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden border ${effectiveTheme.border}`}
+            className={`${effectiveTheme.primary} rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden border ${effectiveTheme.border} relative z-10 ${effectiveTheme.mode !== 'dark' ? 'bg-white/90' : ''}`}
           >
             {/* Header */}
             <div className={`${effectiveTheme.secondary} p-5 border-b ${effectiveTheme.border}`}>
