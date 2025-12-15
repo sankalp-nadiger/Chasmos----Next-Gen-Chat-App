@@ -84,7 +84,7 @@ import ForwardMessageModal from "./ForwardMessageModal";
 import PinnedMessagesBar from "./PinnedMessagesBar";
 import DeleteMessageModal from "./DeleteMessageModal";
 import UserProfileModal from "./UserProfileModal";
-import CosmosBackground from "./CosmosBg";
+import GroupInfoModal from "./GroupInfoModal";
 
 const API_BASE_URL =
     import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
@@ -151,14 +151,29 @@ const handleShowGroupInfo = (group) => {
         <div className="p-4 flex items-center justify-between">
           <div 
             className="flex items-center space-x-3 flex-1 cursor-pointer hover:bg-white/5 transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1"
-onClick={() => {
-  if (selectedContact.isDocument) return; // ignore documents
-  if (selectedContact.isGroup) {
-    handleShowGroupInfo(selectedContact); // open group modal
-  } else {
-    onOpenUserProfile(); // open user profile
-  }
-}}
+            onClick={() => {
+              if (selectedContact.isDocument) return;
+              const isGroup = selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat;
+              let sidebarActiveNav = null;
+              if (typeof window !== 'undefined' && window.activeNavItem) sidebarActiveNav = window.activeNavItem;
+              if (isGroup || sidebarActiveNav === 'groups') {
+                // Use prop if provided, otherwise fallback to local handler
+                if (typeof window !== 'undefined' && window.setShowGroupInfoModal && window.setCurrentGroup) {
+                  window.setCurrentGroup(selectedContact);
+                  window.setShowGroupInfoModal(true);
+                } else if (typeof window !== 'undefined' && window.dispatchEvent) {
+                  // Custom event for parent to handle
+                  window.dispatchEvent(new CustomEvent('open-group-info-modal', { detail: selectedContact }));
+                } else if (typeof setShowGroupInfoModal === 'function' && typeof setCurrentGroup === 'function') {
+                  setCurrentGroup(selectedContact);
+                  setShowGroupInfoModal(true);
+                } else if (typeof handleShowGroupInfo === 'function') {
+                  handleShowGroupInfo(selectedContact);
+                }
+              } else {
+                onOpenUserProfile();
+              }
+            }}
           >
             {isMobileView && (
               <button
@@ -201,23 +216,14 @@ onClick={() => {
         <div>
               <h2 className={`font-semibold ${effectiveTheme.text}`}>{selectedContact.name}</h2>
 
-             {selectedContact?.isGroup ? (
- <button
-  onClick={() => handleShowGroupInfo(selectedContact)}
-  className="px-2 py-1 text-sm text-blue-500 hover:underline"
->
-  Group Info
-</button>
 
-) : (
-  <p className={`text-sm ${effectiveTheme.textSecondary}`}>
-    {selectedContact?.isTyping
-      ? "Typing..."
-      : selectedContact?.isOnline
-      ? "Online"
-      : "Offline"}
-  </p>
-)}
+             <p className={`text-sm ${effectiveTheme.textSecondary}`}>
+               {selectedContact?.isTyping
+                 ? "Typing..."
+                 : selectedContact?.isOnline
+                 ? "Online"
+                 : "Offline"}
+             </p>
 
             </div>
           </div>
@@ -2983,7 +2989,9 @@ const handleRejectChat = async (email) => {
           // }
           
           const displayName =
-            otherUser?.name || otherUser?.username || otherUser?.email || "Unknown";
+            chat.isGroupChat && chat.chatName
+              ? chat.chatName
+              : otherUser?.name || otherUser?.username || otherUser?.email || "Unknown";
 
           // Backend may send a preview string that includes a paperclip emoji when attachments exist
           const rawLast = chat.lastMessage || "";
@@ -3010,6 +3018,8 @@ const handleRejectChat = async (email) => {
                 : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
             hasAttachment,
             attachmentFileName,
+            chatName: chat.chatName || chat.name || null,
+            isGroupChat: chat.isGroupChat === true || chat.isGroupChat === 'true',
           };
         })
         .filter(Boolean); // Remove null entries
@@ -4554,10 +4564,12 @@ const handleCreateGroup = useCallback(() => {
             }
 
             const displayName =
-              otherUser?.username ||
-              otherUser?.name ||
-              (otherUser?.email ? otherUser.email.split("@")[0] : null) ||
-              "Unknown";
+              chat.isGroupChat && chat.chatName
+                ? chat.chatName
+                : otherUser?.username ||
+                  otherUser?.name ||
+                  (otherUser?.email ? otherUser.email.split("@")[0] : null) ||
+                  "Unknown";
 
             // Determine if lastMessage indicates attachments and extract preview text
             let preview = "";
@@ -4599,6 +4611,7 @@ const handleCreateGroup = useCallback(() => {
               attachmentMime,
               timestamp: chat.timestamp || chat.updatedAt,
               isOnline: otherUser?.isOnline || false,
+              isGroupChat: chat.isGroupChat === true || chat.isGroupChat === 'true',
               unreadCount:
                 typeof chat.unreadCount === "number"
                   ? chat.unreadCount
@@ -4606,7 +4619,7 @@ const handleCreateGroup = useCallback(() => {
             };
           })
           .filter(Boolean); // Remove null entries
-
+          console.log("Fetched recent chats:", formatted);
         // Deduplicate by chatId (keep the most recent one)
         const seen = new Map();
         formatted.forEach(chat => {
@@ -5883,46 +5896,41 @@ useEffect(() => {
         </>
       ) : (
         <>
-          {/* Recent Chats */}
+          {/* Filtered Chats/Groups List */}
           {loading || (!minLoadingComplete && recentChats.length === 0) ? (
-  <div className="flex flex-col items-center justify-center py-10">
-    <svg className="animate-spin h-8 w-8 text-blue-500 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-    </svg>
-    <span className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>Loading chats...</span>
-  </div>
-) : recentChats.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}> 
-                Recent Chats
-              </h4>
-              {recentChats.map((chat) => (
-                <ContactItem
-                  key={chat.id}
-                  contact={chat}
-                  effectiveTheme={effectiveTheme}
-                  onSelect={(c) => handleOpenChat(c)}
-                />
-              ))}
+            <div className="flex flex-col items-center justify-center py-10">
+              <svg className="animate-spin h-8 w-8 text-blue-500 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+              </svg>
+              <span className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>Loading chats...</span>
             </div>
-          ) : null}
-
-          {/* All Contacts */}
-          {contacts.length > 0 && (
-            <div className="flex flex-col gap-2 mt-4">
-              <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-                Contacts
-              </h4>
-              {contacts.map((contact) => (
-                <ContactItem
-                  key={contact.id}
-                  contact={contact}
-                  effectiveTheme={effectiveTheme}
-                  onSelect={(c) => handleOpenChat(c)}
-                />
-              ))}
-            </div>
+          ) : (
+            (() => {
+              let filtered = [];
+              if (activeNavItem === 'chats') {
+                filtered = recentChats.filter(c => c.isGroupChat === false);
+              } else if (activeNavItem === 'groups') {
+                filtered = recentChats.filter(c => c.isGroupChat === true);
+              } else {
+                filtered = recentChats;
+              }
+              return filtered.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                    {activeNavItem === 'groups' ? 'Groups' : 'Recent Chats'}
+                  </h4>
+                  {filtered.map((chat) => (
+                    <ContactItem
+                      key={chat.chatId || chat.id}
+                      contact={chat}
+                      effectiveTheme={effectiveTheme}
+                      onSelect={(c) => handleOpenChat(c)}
+                    />
+                  ))}
+                </div>
+              ) : null;
+            })()
           )}
         </>
       )}
