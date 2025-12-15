@@ -37,7 +37,7 @@ const ArchiveManager = ({ onClose, effectiveTheme, onOpenChat, onUnarchive }) =>
           // Determine display name (skip "sender" as it's a placeholder)
           let displayName = 'Chat';
           if (item.isGroupChat) {
-            displayName = item.chatName || item.groupName || 'Group Chat';
+            displayName = item.chatName || 'Group Chat';
           } else {
             // For 1-on-1 chats, use other user's name (ignore "sender" placeholder)
             displayName = otherUser?.name || otherUser?.username || otherUser?.email || 'Chat';

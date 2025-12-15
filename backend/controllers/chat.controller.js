@@ -2,6 +2,7 @@ import asyncHandler from "express-async-handler";
 import Chat from "../models/chat.model.js";
 import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
+import Group from "../models/group.model.js";
 import Attachment from "../models/attachment.model.js";
 import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
 import path from "path";
@@ -371,7 +372,7 @@ export const getRecentChats = async (req, res) => {
       .lean();
 
     const formattedChats = chats.map((chat) => {
-      const otherUser =
+       const otherUser =
         (Array.isArray(chat.participants) &&
           chat.participants.find((p) => String(p._id) !== String(userId))) ||
         (Array.isArray(chat.participants) ? chat.participants[0] : null);
@@ -386,32 +387,28 @@ export const getRecentChats = async (req, res) => {
       let lastMessageText = "";
       if (chat.lastMessage) {
         const msg = chat.lastMessage;
-        
         // Skip system messages for chat preview
         if (msg.type === 'system') {
           lastMessageText = "";
         } else {
           const text = (msg.content || msg.text || "").toString().trim();
-
           const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
-
-        if (text && text.length > 0) {
-          const preview = text.split(/\s+/).slice(0, 8).join(" ");
-          lastMessageText = hasAttachments ? `${preview} 📎` : preview;
-        } else if (hasAttachments) {
-          const att = msg.attachments[0];
-          let filename = att.fileName || att.file_name || att.filename || "";
-          if (!filename && att.fileUrl) {
-            try {
-              filename = path.basename(new URL(att.fileUrl).pathname);
-            } catch (e) {
-              filename = path.basename(att.fileUrl || "");
+          if (text && text.length > 0) {
+            const preview = text.split(/\s+/).slice(0, 8).join(" ");
+            lastMessageText = hasAttachments ? `${preview} 📎` : preview;
+          } else if (hasAttachments) {
+            const att = msg.attachments[0];
+            let filename = att.fileName || att.file_name || att.filename || "";
+            if (!filename && att.fileUrl) {
+              try {
+                filename = path.basename(new URL(att.fileUrl).pathname);
+              } catch (e) {
+                filename = path.basename(att.fileUrl || "");
+              }
             }
+            filename = filename.replace(/^[\d\-:.]+_/, "");
+            lastMessageText = filename || "Attachment";
           }
-
-          filename = filename.replace(/^[\d\-:.]+_/, "");
-          lastMessageText = filename || "Attachment";
-        }
         }
       }
 
@@ -421,6 +418,8 @@ export const getRecentChats = async (req, res) => {
         lastMessage: lastMessageText || "Say hi!",
         timestamp: chat.updatedAt || chat.timestamp,
         unreadCount: unread,
+        isGroupChat: !!chat.isGroupChat,
+        chatName: chat.chatName,
         otherUser: {
           id: otherUser?._id ? String(otherUser._id) : null,
           username: otherUser?.name || otherUser?.email || null,
