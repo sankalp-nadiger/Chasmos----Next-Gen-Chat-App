@@ -386,9 +386,14 @@ export const getRecentChats = async (req, res) => {
       let lastMessageText = "";
       if (chat.lastMessage) {
         const msg = chat.lastMessage;
-        const text = (msg.content || msg.text || "").toString().trim();
+        
+        // Skip system messages for chat preview
+        if (msg.type === 'system') {
+          lastMessageText = "";
+        } else {
+          const text = (msg.content || msg.text || "").toString().trim();
 
-        const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+          const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
 
         if (text && text.length > 0) {
           const preview = text.split(/\s+/).slice(0, 8).join(" ");
@@ -407,6 +412,7 @@ export const getRecentChats = async (req, res) => {
           filename = filename.replace(/^[\d\-:.]+_/, "");
           lastMessageText = filename || "Attachment";
         }
+        }
       }
 
       return {
@@ -424,7 +430,7 @@ export const getRecentChats = async (req, res) => {
         },
       };
     });
-    
+    console.log("Recent chats fetched:", formattedChats);
     res.status(200).json(formattedChats);
   } catch (err) {
     console.error(err);
@@ -438,14 +444,16 @@ export const deleteChat = asyncHandler(async (req, res) => {
   const userId = req.user._id;
 
   const chat = await Chat.findById(chatId);
-  
+  console.log("Chat found:", chat);
   if (!chat) {
     res.status(404);
     throw new Error("Chat not found");
   }
 
   if (chat.isGroupChat) {
-    if (!chat.admins.includes(userId)) {
+    // Compare ObjectIds as strings to avoid type mismatch
+    if (!chat.admins.map(String).includes(String(userId))) {
+      console.log("User is not admin, cannot delete group chat");
       res.status(403);
       throw new Error("Only admins can delete group chats");
     }
@@ -483,7 +491,7 @@ export const deleteChat = asyncHandler(async (req, res) => {
     
     await Message.deleteMany({ chat: chatId });
     await Chat.findByIdAndDelete(chatId);
-    
+    console.log("Group chat deleted successfully");
     res.status(200).json({
       message: "Group chat deleted successfully",
       chatId: chatId
@@ -527,7 +535,7 @@ export const deleteChat = asyncHandler(async (req, res) => {
 
     await Message.deleteMany({ chat: chatId });
     await Chat.findByIdAndDelete(chatId);
-    
+    console.log("Chat deleted successfully");
     res.status(200).json({
       message: "Chat deleted successfully",
       chatId: chatId

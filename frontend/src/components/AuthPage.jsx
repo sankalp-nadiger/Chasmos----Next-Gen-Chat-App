@@ -260,7 +260,9 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
           return;
         }
 
-        localStorage.setItem('userInfo', JSON.stringify(data.user || data));
+        const userData = data.user || data;
+        localStorage.setItem('userInfo', JSON.stringify(userData));
+        localStorage.setItem('chasmos_user_data', JSON.stringify(userData));
         localStorage.setItem('token', data.token || data.accessToken || "");
         onLogin?.(data);
       } catch (err) {
@@ -297,6 +299,7 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
         }
 
         localStorage.setItem("userInfo", JSON.stringify(data));
+        localStorage.setItem("chasmos_user_data", JSON.stringify(data));
         localStorage.setItem("token", data.token);
         onLogin?.(data);
       } catch (err) {
@@ -473,6 +476,7 @@ const SignupForm = ({ currentTheme, onSignup }) => {
         }
 
         localStorage.setItem("userInfo", JSON.stringify(data));
+        localStorage.setItem("chasmos_user_data", JSON.stringify(data));
         localStorage.setItem("token", data.token);
         onSignup?.(data);
       } catch (err) {
@@ -695,6 +699,7 @@ const AuthPage = ({ onAuthenticated }) => {
       } else {
         // For existing users, proceed with login
         localStorage.setItem('userInfo', JSON.stringify(data));
+        localStorage.setItem('chasmos_user_data', JSON.stringify(data));
         localStorage.setItem('token', data.token);
         onAuthenticated?.(true, data);
       }

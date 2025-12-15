@@ -387,6 +387,7 @@ export const acceptChatRequest = asyncHandler(async (req, res) => {
     throw new Error("Sender or receiver not found");
   }
 
+
   // ---------------- REMOVE PENDING REQUESTS ----------------
   receiver.receivedChatRequests = receiver.receivedChatRequests.filter(
     (r) => r?.email?.toLowerCase() !== sender.email.toLowerCase()
@@ -396,11 +397,7 @@ export const acceptChatRequest = asyncHandler(async (req, res) => {
     (r) => r?.email?.toLowerCase() !== receiver.email.toLowerCase()
   );
 
-  // ---------------- ADD ACCEPTED FOR BOTH USERS ----------------
-  if (!receiver.acceptedChatRequests.includes(sender.email)) {
-    receiver.acceptedChatRequests.push(sender.email);
-  }
-
+  // ---------------- ADD ACCEPTED ONLY FOR SENDER (who sent the invite) ----------------
   if (!sender.acceptedChatRequests.includes(receiver.email)) {
     sender.acceptedChatRequests.push(receiver.email);
   }

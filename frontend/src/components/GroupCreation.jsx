@@ -1,3 +1,4 @@
+import CosmosBackground from "./CosmosBg";
 /* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
@@ -274,7 +275,12 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
       exit={{ x: "100%" }}
       transition={{ duration: 0.25 }}
       className={`fixed inset-0 ${effectiveTheme.primary} flex flex-col h-screen w-screen z-[99999]`}
+      style={{ position: 'fixed', inset: 0, minHeight: '100vh', minWidth: '100vw', overflow: 'hidden' }}
     >
+      {/* Solid white background in day/light mode */}
+      {(!effectiveTheme.mode || effectiveTheme.mode === 'light') && (
+        <div style={{ position: 'absolute', inset: 0, background: '#fff', zIndex: 0 }} />
+      )}
       {/* HEADER */}
       <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-4`}>
         <div className="flex items-center justify-between relative">
@@ -320,12 +326,12 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
                   .map((c) => (
                     <div
                       key={`pill-${getContactId(c)}`}
-                      className="flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-600 text-white"
+                      className={`flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-600 ${effectiveTheme.textOnPrimary || 'text-white'}`}
                     >
-                      <span className="w-6 h-6 rounded-full bg-blue-800 flex items-center justify-center text-xs font-bold">
+                      <span className={`w-6 h-6 rounded-full bg-blue-800 flex items-center justify-center text-xs font-bold ${effectiveTheme.textOnPrimary || 'text-white'}`}>
                         {(c.name || c.username || "?")[0]}
                       </span>
-                      <span className="text-sm">{c.name || c.username}</span>
+                      <span className={`text-sm ${effectiveTheme.textOnPrimary || 'text-white'}`}>{c.name || c.username}</span>
                       {c.isGoogleContact && (
                         <span className="ml-1 text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full">
                           Google
