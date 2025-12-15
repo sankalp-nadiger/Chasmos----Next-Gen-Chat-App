@@ -1379,20 +1379,6 @@ const MessagesArea = ({
   );
 };
 
-function LoadingChatsIndicator() {
-  const [show, setShow] = React.useState(true);
-  React.useEffect(() => {
-    const timer = setTimeout(() => setShow(false), 800); // Show for 800ms
-    return () => clearTimeout(timer);
-  }, []);
-  if (!show) return null;
-  return (
-    <div className="text-center py-4 text-gray-400 dark:text-gray-500 animate-pulse">
-      Loading chats...
-    </div>
-  );
-}
-
 const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const { currentTheme, setTheme, theme } = useTheme();
   const navigate = useNavigate();
@@ -1730,7 +1716,8 @@ const togglePin = async (docId, isPinnedNow) => {
 
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+const [error, setError] = useState(null);
+const [minLoadingComplete, setMinLoadingComplete] = useState(false);
 
   // Ref for chat search container (click-outside functionality)
   const chatSearchRef = useRef(null);
@@ -2755,8 +2742,6 @@ const handleOpenGroupInfo = (group) => {
   setShowGroupInfoModal(true);
 };
 
-
-
 const handleCloseGroupInfo = () => {
   setShowGroupInfoModal(false);
   setCurrentGroup(null);
@@ -2772,7 +2757,6 @@ const handleDeleteGroup = (groupId) => {
   setChats(prev => prev.filter(c => c.id !== groupId));
   handleCloseGroupInfo();
 };
-
 
   //handle on clicking accept button
   // ✅ Accept Chat Request
@@ -2973,61 +2957,63 @@ const handleRejectChat = async (email) => {
       if (!res.ok) throw new Error("Failed to fetch recent chats");
 
       const data = await res.json();
+      console.log("[RecentChats] Server response:", data);
 
-        const localUser = JSON.parse(
-          localStorage.getItem("chasmos_user_data") || "{}"
-        );
-        const loggedInUserId = localUser._id || localUser.id || null;
+      const localUser = JSON.parse(
+        localStorage.getItem("chasmos_user_data") || "{}"
+      );
+      const loggedInUserId = localUser._id || localUser.id || null;
 
-        const formatted = (Array.isArray(data) ? data : [])
-          .map((chat) => {
-            // Backend may already provide an `otherUser` helper; prefer that.
-            const otherUser =
-              chat.otherUser ||
-              (chat.participants &&
-                chat.participants.find(
-                  (p) => String(p._id) !== String(loggedInUserId)
-                )) ||
-              (Array.isArray(chat.participants) ? chat.participants[0] : null);
+      const formatted = (Array.isArray(data) ? data : [])
+        .map((chat) => {
+          // Backend may already provide an `otherUser` helper; prefer that.
+          const otherUser =
+            chat.otherUser ||
+            (chat.participants &&
+              chat.participants.find(
+                (p) => String(p._id) !== String(loggedInUserId)
+              )) ||
+            (Array.isArray(chat.participants) ? chat.participants[0] : null);
 
-            const otherId = otherUser?._id || otherUser?.id || null;
-            
-            // Skip if no other user found or if chatting with yourself
-            if (!otherId || String(otherId) === String(loggedInUserId)) {
-              return null;
-            }
-            
-            const displayName =
-              otherUser?.name || otherUser?.username || otherUser?.email || "Unknown";
+          const otherId = otherUser?._id || otherUser?.id || null;
+          
+          // Skip if no other user found or if chatting with yourself
+          // if (!otherId || String(otherId) === String(loggedInUserId)) {
+          //   return null;
+          // }
+          
+          const displayName =
+            otherUser?.name || otherUser?.username || otherUser?.email || "Unknown";
 
-            // Backend may send a preview string that includes a paperclip emoji when attachments exist
-            const rawLast = chat.lastMessage || "";
-            const hasAttachmentFromMarker = typeof rawLast === 'string' && /📎/.test(rawLast);
-            const looksLikeAttachmentOnly = rawLast === 'Attachment' || rawLast === 'Attachment' || /\.(png|jpe?g|gif|webp|bmp|mp4|pdf)$/i.test(rawLast);
-            const hasAttachment = Boolean(chat.hasAttachment || hasAttachmentFromMarker || looksLikeAttachmentOnly || (chat.lastMessage && chat.lastMessage.attachments && chat.lastMessage.attachments.length));
-            // If backend returned filename (e.g., "doc.pdf"), use it as attachmentFileName
-            const attachmentFileName = hasAttachment && typeof rawLast === 'string' ? (rawLast.replace(/📎/g, '').trim() || '') : '';
+          // Backend may send a preview string that includes a paperclip emoji when attachments exist
+          const rawLast = chat.lastMessage || "";
+          const hasAttachmentFromMarker = typeof rawLast === 'string' && /📎/.test(rawLast);
+          const looksLikeAttachmentOnly = rawLast === 'Attachment' || rawLast === 'Attachment' || /\.(png|jpe?g|gif|webp|bmp|mp4|pdf)$/i.test(rawLast);
+          const hasAttachment = Boolean(chat.hasAttachment || hasAttachmentFromMarker || looksLikeAttachmentOnly || (chat.lastMessage && chat.lastMessage.attachments && chat.lastMessage.attachments.length));
+          // If backend returned filename (e.g., "doc.pdf"), use it as attachmentFileName
+          const attachmentFileName = hasAttachment && typeof rawLast === 'string' ? (rawLast.replace(/📎/g, '').trim() || '') : '';
 
-            const chatIdValue = chat.chatId || chat._id;
-            
-            return {
-              id: chatIdValue, // Use chatId as the primary ID
-              chatId: chatIdValue,
-              userId: otherId, // Store the other user's ID separately
-              name: displayName,
-              avatar: otherUser?.avatar || otherUser?.pic || null,
-              lastMessage: rawLast || "",
-              timestamp: chat.timestamp || chat.updatedAt,
-              isOnline: otherUser?.isOnline || false,
-              unreadCount:
-                typeof chat.unreadCount === "number"
-                  ? chat.unreadCount
-                  : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
-              hasAttachment,
-              attachmentFileName,
-            };
-          })
-          .filter(Boolean); // Remove null entries
+          const chatIdValue = chat.chatId || chat._id;
+          
+          return {
+            id: chatIdValue, // Use chatId as the primary ID
+            chatId: chatIdValue,
+            userId: otherId, // Store the other user's ID separately
+            name: displayName,
+            avatar: otherUser?.avatar || otherUser?.pic || null,
+            lastMessage: rawLast || "",
+            timestamp: chat.timestamp || chat.updatedAt,
+            isOnline: otherUser?.isOnline || false,
+            unreadCount:
+              typeof chat.unreadCount === "number"
+                ? chat.unreadCount
+                : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
+            hasAttachment,
+            attachmentFileName,
+          };
+        })
+        .filter(Boolean); // Remove null entries
+      console.log("[RecentChats] After formatting:", formatted);
 
       // Deduplicate by chatId (keep the most recent one)
       const seen = new Map();
@@ -3038,24 +3024,57 @@ const handleRejectChat = async (email) => {
           seen.set(chatIdKey, chat);
         }
       });
-      
       const deduplicated = Array.from(seen.values());
+      console.log("[RecentChats] After deduplication:", deduplicated);
 
       // Filter out archived chats using the chatId
       const filtered = deduplicated.filter(c => {
         const chatIdToCheck = String(c.chatId || '');
         return !archivedChatIdsSet.has(chatIdToCheck);
       });
+      console.log("[RecentChats] After filtering archived:", filtered);
       setRecentChats(filtered);
+      console.log("[RecentChats] State set to:", filtered);
     } catch (err) {
       setError(err.message);
     }
   }, [API_BASE_URL]);
 
-  // Fetch recent chats on mount
-  useEffect(() => {
-    refreshRecentChats();
-  }, [refreshRecentChats]);
+// Fetch recent chats on mount
+// Improved loading logic: hide spinner after both fetch and min time
+useEffect(() => {
+  let mounted = true;
+  setLoading(true);
+  setMinLoadingComplete(false);
+
+  let minLoadingDone = false;
+  let chatsFetched = false;
+
+  // Helper to hide loader if both are done
+  const maybeHideLoader = () => {
+    if (minLoadingDone && chatsFetched && mounted) {
+      setLoading(false);
+    }
+  };
+
+  // Minimum loading timer
+  const minLoadingTimer = setTimeout(() => {
+    minLoadingDone = true;
+    setMinLoadingComplete(true);
+    maybeHideLoader();
+  }, 1000);
+
+  // Fetch recent chats
+  refreshRecentChats().finally(() => {
+    chatsFetched = true;
+    maybeHideLoader();
+  });
+
+  return () => {
+    mounted = false;
+    clearTimeout(minLoadingTimer);
+  };
+}, [refreshRecentChats]);
 
   // Handle responsive design
   useEffect(() => {
@@ -3131,6 +3150,7 @@ const handleRejectChat = async (email) => {
   const filteredContacts = useMemo(() => {
     // Start with recentChats as the base
     let filtered = [...recentChats];
+    console.log("[RecentChats] filteredContacts - initial recentChats:", recentChats);
 
     // Apply search term filter
     if (searchTerm.trim()) {
@@ -3138,7 +3158,9 @@ const handleRejectChat = async (email) => {
       filtered = filtered.filter(contact => {
         const name = (contact.name || '').toLowerCase();
         const lastMsg = (contact.lastMessage || '').toLowerCase();
-        return name.includes(lowerSearch) || lastMsg.includes(lowerSearch);
+        const match = name.includes(lowerSearch) || lastMsg.includes(lowerSearch);
+        console.log(`[RecentChats] Filtering contact:`, contact, "Match:", match);
+        return match;
       });
     }
 
@@ -3146,21 +3168,33 @@ const handleRejectChat = async (email) => {
     switch (activeNavItem) {
       case "chats":
         filtered = filtered.filter(
-          (contact) =>
-            !contact.isGroup && !contact.isDocument && !contact.isCommunity
+          (contact) => {
+            const result = !contact.isGroup && !contact.isDocument && !contact.isCommunity;
+            console.log(`[RecentChats] Nav filter (chats):`, contact, "Result:", result);
+            return result;
+          }
         );
         break;
       case "groups":
-        filtered = filtered.filter((contact) => contact.isGroup);
+        filtered = filtered.filter((contact) => {
+          const result = contact.isGroup;
+          console.log(`[RecentChats] Nav filter (groups):`, contact, "Result:", result);
+          return result;
+        });
         break;
       case "documents":
-        filtered = filtered.filter((contact) => contact.isDocument);
+        filtered = filtered.filter((contact) => {
+          const result = contact.isDocument;
+          console.log(`[RecentChats] Nav filter (documents):`, contact, "Result:", result);
+          return result;
+        });
         break;
       default:
         // Show all for default case
         break;
     }
 
+    console.log("[RecentChats] filteredContacts - final:", filtered);
     return filtered;
   }, [recentChats, searchTerm, activeNavItem]);
 
@@ -4502,24 +4536,26 @@ const handleCreateGroup = useCallback(() => {
 
         const formatted = (Array.isArray(data) ? data : [])
           .map((chat) => {
-            const otherUser =
-              chat.otherUser ||
-              (chat.participants &&
-                chat.participants.find(
-                  (p) => String(p._id) !== String(loggedInUserId)
-                )) ||
-              (Array.isArray(chat.participants) ? chat.participants[0] : null);
+            const participants = chat.participants || [];
+            // Prefer chat.otherUser if present and not self, else find first non-self participant
+            let otherUser = null;
+            if (chat.otherUser) {
+              otherUser = chat.otherUser;
+            } else {
+              otherUser = participants.find((p) => String(p._id || p.id) !== String(loggedInUserId));
+            }
 
-            const otherId = otherUser?._id || otherUser?.id || null;
-            
-            // Skip if no other user found or if chatting with yourself
-            if (!otherId || String(otherId) === String(loggedInUserId)) {
+            // Only skip if all participants are the current user (true self-chat)
+            const allAreSelf =
+              participants.length > 0 &&
+              participants.every((p) => String(p._id || p.id) === String(loggedInUserId));
+            if (allAreSelf) {
               return null;
             }
-            
+
             const displayName =
-              otherUser?.name ||
               otherUser?.username ||
+              otherUser?.name ||
               (otherUser?.email ? otherUser.email.split("@")[0] : null) ||
               "Unknown";
 
@@ -5277,7 +5313,11 @@ useEffect(() => {
                               animate={{ opacity: 1, scale: 1, y: 0 }}
                               exit={{ opacity: 0, scale: 0.95, y: -10 }}
                               className={`absolute right-0 mt-2 w-56 border ${effectiveTheme.border} rounded-lg shadow-xl z-50 overflow-hidden`}
-                              style={effectiveTheme.mode !== 'dark' ? { backgroundColor: '#fff' } : {}}
+                              style={
+                                effectiveTheme.mode === 'dark'
+                                  ? { backgroundColor: '#232b36', boxShadow: '0 4px 32px 0 rgba(0,0,0,0.25)', backdropFilter: 'none', WebkitBackdropFilter: 'none' }
+                                  : { backgroundColor: '#fff' }
+                              }
                             >
                               <button
                                 onClick={() => {
@@ -5844,11 +5884,17 @@ useEffect(() => {
       ) : (
         <>
           {/* Recent Chats */}
-          {loading ? (
-            <LoadingChatsIndicator />
-          ) : recentChats.length > 0 ? (
+          {loading || (!minLoadingComplete && recentChats.length === 0) ? (
+  <div className="flex flex-col items-center justify-center py-10">
+    <svg className="animate-spin h-8 w-8 text-blue-500 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+    </svg>
+    <span className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>Loading chats...</span>
+  </div>
+) : recentChats.length > 0 ? (
             <div className="flex flex-col gap-2">
-              <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+              <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}> 
                 Recent Chats
               </h4>
               {recentChats.map((chat) => (
@@ -5881,8 +5927,8 @@ useEffect(() => {
         </>
       )}
 
-      {/* Empty State */}
-      {!searchTerm.trim() && recentChats.length === 0 && contacts.length === 0 && (
+      {/* Empty State: Only show if loading is false and there are no chats or contacts */}
+      {(!loading && !searchTerm.trim() && recentChats.length === 0 && contacts.length === 0) ? (
         <div className="text-center space-y-4 mt-10">
           <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
             Start chatting with Chasmos!
@@ -5891,10 +5937,10 @@ useEffect(() => {
             onClick={() => setShowNewChat(true)}
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
           >
-            New Chat
+            Start a New Chat
           </button>
         </div>
-      )}
+      ) : null}
     </>
   )}
 </div>
