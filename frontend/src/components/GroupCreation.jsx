@@ -279,43 +279,62 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
     >
       {/* Solid white background in day/light mode */}
       {(!effectiveTheme.mode || effectiveTheme.mode === 'light') && (
-        <div style={{ position: 'absolute', inset: 0, background: '#fff', zIndex: 0 }} />
+        <div style={{ position: 'absolute', inset: 0, background: '#ffffff', zIndex: 0 }} />
       )}
-      {/* HEADER */}
-      <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-4`}>
-        <div className="flex items-center justify-between relative">
-          <div className="flex items-center gap-2">
-            <Logo size="sm" textClassName={effectiveTheme.text} />
-          </div>
-
-          <h2 className={`absolute left-1/2 -translate-x-1/2 text-lg font-semibold ${effectiveTheme.text}`}>
-            {step === 2 ? "Add Members" : "Group Details"}
-          </h2>
-
-          <button onClick={goBack} className="p-2 rounded-full hover:bg-gray-200 transition-colors ml-auto">
-            <ChevronLeft className={`w-5 h-5 ${effectiveTheme.text}`} />
-          </button>
-        </div>
+      {/* Cosmos Background */}
+      <div className="absolute inset-0 overflow-hidden z-[2]">
+        <CosmosBackground effectiveTheme={effectiveTheme} />
       </div>
 
-      {/* BODY */}
-      <div className="flex-1 overflow-y-auto">
-        {/* STEP 2 */}
-        {step === 2 && (
+      {/* Content wrapper - relative positioning */}
+      <div className="relative z-10 flex flex-col h-full">
+        {/* HEADER */}
+        <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-4`}>
+          <div className="flex items-center justify-between gap-6 relative">
+            <button 
+              onClick={onClose} 
+              title="Close"
+              className={`p-2 rounded-full hover:bg-red-500 transition-colors`}
+            >
+              <X className={`w-5 h-5 ${effectiveTheme.text}`} />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <Logo size="sm" textClassName={effectiveTheme.text} />
+            </div>
+
+            <h2 className={`absolute left-1/2 -translate-x-1/2 text-lg font-semibold ${effectiveTheme.text}`}>
+              {step === 2 ? "Add Members" : "Group Details"}
+            </h2>
+
+            <button 
+              onClick={goBack} 
+              title={step === 2 ? "Close" : "Go Back"}
+              className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ml-auto`}
+            >
+              <ChevronLeft className={`w-5 h-5 ${effectiveTheme.text}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* BODY */}
+        <div className="flex-1 overflow-y-auto">
+          {/* STEP 2 */}
+          {step === 2 && (
           <>
             <div className="p-4">
-              <div className={`relative ${effectiveTheme.searchBg} rounded-lg`}>
+              <div className={`relative ${effectiveTheme.searchBg} rounded-lg border ${effectiveTheme.border}`}>
                 <Search className={`absolute left-3 top-3 w-4 h-4 ${effectiveTheme.textSecondary}`} />
                 <input
                   type="text"
                   placeholder="Search contacts..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className={`w-full pl-10 pr-4 py-3 bg-transparent ${effectiveTheme.text} rounded-lg`}
+                  className={`w-full pl-10 pr-4 py-3 bg-transparent ${effectiveTheme.text} rounded-lg ${effectiveTheme.mode === 'dark' ? 'placeholder-gray-500' : 'placeholder-gray-400'}`}
                 />
               </div>
               {loadingContacts && <p className={`mt-2 text-sm ${effectiveTheme.textSecondary}`}>Loading contacts...</p>}
-              {contactsError && <p className="mt-2 text-sm text-red-500">Failed to load contacts: {contactsError}</p>}
+              {contactsError && <p className={`mt-2 text-sm ${effectiveTheme.mode === 'dark' ? 'text-red-400' : 'text-red-600'}`}>Failed to load contacts: {contactsError}</p>}
             </div>
 
             {selectedContacts.length > 0 && (
@@ -350,7 +369,7 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
 
             <div className="flex-1 overflow-y-auto px-4 space-y-2">
               {filteredContacts.length === 0 ? (
-                <p className={`text-center mt-10 ${effectiveTheme.textSecondary}`}>No contacts found</p>
+                <p className={`text-center mt-10 ${effectiveTheme.text} opacity-70`}>No contacts found</p>
               ) : (
                 filteredContacts.map((c) => {
                   const cid = getContactId(c);
@@ -425,7 +444,7 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
         value={groupName}
         onChange={(e) => setGroupName(e.target.value)}
         placeholder="Enter group name"
-        className={`w-full px-4 py-3 rounded-xl border ${effectiveTheme.border} ${effectiveTheme.inputBg} ${effectiveTheme.text} shadow-sm`}
+        className={`w-full px-4 py-3 rounded-xl border ${effectiveTheme.border} ${effectiveTheme.inputBg} ${effectiveTheme.text} shadow-sm ${effectiveTheme.mode === 'dark' ? 'placeholder-gray-500' : 'placeholder-gray-400'}`}
       />
     </div>
 
@@ -437,7 +456,7 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
         onChange={(e) => setGroupDescription(e.target.value)}
         placeholder="Write a short description"
         rows={3}
-        className={`w-full px-4 py-3 rounded-xl border ${effectiveTheme.border} ${effectiveTheme.inputBg} ${effectiveTheme.text} shadow-sm`}
+        className={`w-full px-4 py-3 rounded-xl border ${effectiveTheme.border} ${effectiveTheme.inputBg} ${effectiveTheme.text} shadow-sm ${effectiveTheme.mode === 'dark' ? 'placeholder-gray-500' : 'placeholder-gray-400'}`}
       />
     </div>
 
@@ -473,7 +492,7 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
             readOnly
             value={inviteLink || ""}
             placeholder="Invite link"
-            className={`flex-1 px-4 py-2 rounded-xl border ${effectiveTheme.border} ${effectiveTheme.inputBg} ${effectiveTheme.text}`}
+            className={`flex-1 px-4 py-2 rounded-xl border ${effectiveTheme.border} ${effectiveTheme.inputBg} ${effectiveTheme.text} ${effectiveTheme.mode === 'dark' ? 'placeholder-gray-500' : 'placeholder-gray-400'}`}
           />
 
           <button
@@ -606,11 +625,11 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
 
   </div>
 )}
-      </div>
+        </div>
 
       {/* FOOTER */}
       <div className={`p-4 border-t ${effectiveTheme.border} ${effectiveTheme.secondary} flex items-center justify-between`}>
-        <span className={effectiveTheme.textSecondary}>
+        <span className={effectiveTheme.text}>
           {step === 2 ? `${selectedContacts.length} selected` : `${selectedContacts.length} members • ${groupType}`}
         </span>
 
@@ -633,6 +652,7 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
             Create Group
           </button>
         )}
+      </div>
       </div>
     </motion.div>
   );

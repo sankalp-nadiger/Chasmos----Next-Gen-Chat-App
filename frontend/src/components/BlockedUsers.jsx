@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
 import blockService from '../utils/blockService';
 import Logo from './Logo';
+import CosmosBackground from './CosmosBg';
 
 const BlockedUsers = ({ onClose, effectiveTheme, onUnblock, selectedContact }) => {
   const [blocked, setBlocked] = useState([]);
@@ -47,8 +48,20 @@ const BlockedUsers = ({ onClose, effectiveTheme, onUnblock, selectedContact }) =
 
   return (
     <div className={`fixed inset-0 ${effectiveTheme.primary} flex flex-col h-screen w-screen z-50`}>
-      {/* Header */}
-      <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-6`}>
+      {/* Solid white background in day/light mode */}
+      {(!effectiveTheme.mode || effectiveTheme.mode === 'light') && (
+        <div style={{ position: 'absolute', inset: 0, background: '#ffffff', zIndex: 0 }} />
+      )}
+
+ {/* Cosmos Background */}
+      <div className="absolute inset-0 overflow-hidden z-[2]">
+        <CosmosBackground effectiveTheme={effectiveTheme} />
+      </div>
+
+      {/* Content wrapper - relative positioning */}
+      <div className="relative z-10 flex flex-col h-full w-full">
+        {/* Header */}
+        <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-6`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <button
@@ -117,6 +130,7 @@ const BlockedUsers = ({ onClose, effectiveTheme, onUnblock, selectedContact }) =
             </ul>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

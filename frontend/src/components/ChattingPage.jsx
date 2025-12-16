@@ -112,6 +112,7 @@ const ChatHeader = React.memo(
     isBlocked,
     isArchived,
     onOpenUserProfile,
+    onOpenGroupInfo,
     setShowDeleteChatModal,
     setChatToDelete,
   }) => {
@@ -132,45 +133,26 @@ const ChatHeader = React.memo(
       Boolean
     ).length;
 
-    const [activeGroup, setActiveGroup] = useState(null);
-const [showGroupInfoModal, setShowGroupInfoModal] = useState(false);
-const [currentGroup, setCurrentGroup] = useState(null);
-const [chats, setChats] = useState([]); // your chat/group list
-
-const handleShowGroupInfo = (group) => {
-  // Make sure group exists
-  if (!group) return;
-
-  setCurrentGroup(group);          // Set the group to view
-  setShowGroupInfoModal(true);     // Open modal
-};
-
-
     return (
       <div className={`${effectiveTheme.secondary} relative`}>
         <div className="p-4 flex items-center justify-between">
           <div 
             className="flex items-center space-x-3 flex-1 cursor-pointer hover:bg-white/5 transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1"
             onClick={() => {
+              console.log('❌ Header clicked - selectedContact:', selectedContact);
+              console.log('🔍 isDocument:', selectedContact.isDocument);
+              console.log('🔍 isGroup:', selectedContact.isGroup);
+              console.log('🔍 isGroupChat:', selectedContact.isGroupChat);
+              console.log('🔍 isgroupchat:', selectedContact.isgroupchat);
+              
               if (selectedContact.isDocument) return;
               const isGroup = selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat;
-              let sidebarActiveNav = null;
-              if (typeof window !== 'undefined' && window.activeNavItem) sidebarActiveNav = window.activeNavItem;
-              if (isGroup || sidebarActiveNav === 'groups') {
-                // Use prop if provided, otherwise fallback to local handler
-                if (typeof window !== 'undefined' && window.setShowGroupInfoModal && window.setCurrentGroup) {
-                  window.setCurrentGroup(selectedContact);
-                  window.setShowGroupInfoModal(true);
-                } else if (typeof window !== 'undefined' && window.dispatchEvent) {
-                  // Custom event for parent to handle
-                  window.dispatchEvent(new CustomEvent('open-group-info-modal', { detail: selectedContact }));
-                } else if (typeof setShowGroupInfoModal === 'function' && typeof setCurrentGroup === 'function') {
-                  setCurrentGroup(selectedContact);
-                  setShowGroupInfoModal(true);
-                } else if (typeof handleShowGroupInfo === 'function') {
-                  handleShowGroupInfo(selectedContact);
-                }
+              console.log('✅ isGroup calculated as:', isGroup);
+              if (isGroup) {
+                console.log('📋 Opening GroupInfoModal');
+                onOpenGroupInfo(selectedContact);
               } else {
+                console.log('👤 Opening UserProfileModal');
                 onOpenUserProfile();
               }
             }}
@@ -524,7 +506,11 @@ const MessageBubble = React.memo(
 
           {/* Forwarded indicator */}
           {message.isForwarded && (
-            <div className={`flex items-center space-x-1 mb-2 text-xs ${effectiveTheme.textSecondary} italic`}>
+            <div className={`flex items-center space-x-1 mb-2 text-xs italic ${
+              effectiveTheme.mode === 'dark' 
+                ? 'text-gray-400' 
+                : 'text-gray-600'
+            }`}>
               <Share2 className="w-3 h-3" />
               <span>Forwarded</span>
             </div>
@@ -2191,6 +2177,10 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             isRead: true,
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
+            isForwarded: m.isForwarded || false,
+            isEdited: m.isEdited || false,
+            reactions: m.reactions || [],
+            starredBy: m.starredBy || [],
           }));
           
           // Filter duplicate consecutive system messages
@@ -2237,6 +2227,10 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             isRead: true,
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
+            isForwarded: m.isForwarded || false,
+            isEdited: m.isEdited || false,
+            reactions: m.reactions || [],
+            starredBy: m.starredBy || [],
           }));
           
           // Filter duplicate consecutive system messages
@@ -2332,6 +2326,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
           isGroup: chat.isGroupChat || false,
         };
 
+        console.log('📝 Created contactForUI from archive:', contactForUI, 'from chat:', chat);
         setSelectedContact(contactForUI);
 
         // Join socket room for real-time updates
@@ -2355,6 +2350,10 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               isRead: true,
               attachments: Array.isArray(m.attachments) ? m.attachments : [],
               isSystemMessage: m.type === 'system',
+              isForwarded: m.isForwarded || false,
+              isEdited: m.isEdited || false,
+              reactions: m.reactions || [],
+              starredBy: m.starredBy || [],
             }));
 
             const filteredMessages = filterDuplicateSystemMessages(formatted);
@@ -2556,6 +2555,13 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
 
   //After chatting with accepted chats
   const handleOpenChat = (chat) => {
+    console.log('🎯 handleOpenChat called with chat:', chat);
+    console.log('🔎 Checking fields:');
+    console.log('   - chat.isGroup:', chat.isGroup);
+    console.log('   - chat.isGroupChat:', chat.isGroupChat);
+    console.log('   - chat.isgroupchat:', chat.isgroupchat);
+    console.log('   - chat.name:', chat.name);
+    console.log('   - chat.chatId:', chat.chatId);
     // When opening a chat with a contact from accepted requests,
     // DO NOT create a chat automatically - just show the UI
     // Chat will be created when they send first message
@@ -2582,9 +2588,10 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             name: chat.name,
             avatar: chat.avatar,
             participants: chat.participants || [],
-            isGroup: chat.isGroup || false,
+            isGroup: chat.isGroup || chat.isGroupChat || false,
           };
 
+          console.log('📝 Created contactForUI from existing chat:', contactForUI, 'from chat:', chat);
           setSelectedContact(contactForUI);
 
           // Join socket room
@@ -2608,6 +2615,10 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               timestamp: new Date(m.createdAt || Date.now()).getTime(),
               isRead: m.isRead || false,
               attachments: m.attachments || [],
+              isForwarded: m.isForwarded || false,
+              isEdited: m.isEdited || false,
+              reactions: m.reactions || [],
+              starredBy: m.starredBy || [],
             }));
             
             setMessages((prev) => {
@@ -2710,6 +2721,10 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             isRead: true,
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
+            isForwarded: m.isForwarded || false,
+            isEdited: m.isEdited || false,
+            reactions: m.reactions || [],
+            starredBy: m.starredBy || [],
           }));
           const filteredFormatted = filterDuplicateSystemMessages(formatted);
           setMessages((prev) => {
@@ -2742,10 +2757,26 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
   const [currentGroup, setCurrentGroup] = useState(null);
 
 const handleOpenGroupInfo = (group) => {
-  if (!group || !group.isGroup) return;
+  if (!group || (!group.isGroup && !group.isGroupChat)) return;
 
-  setCurrentGroup(group);
-  setShowGroupInfoModal(true);
+  // Fetch full group details with all members
+  const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+  if (!token) return;
+
+  fetch(`${API_BASE_URL}/api/chat/group/${group.chatId || group.id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+    .then(res => res.json())
+    .then(fullGroupData => {
+      setCurrentGroup(fullGroupData);
+      setShowGroupInfoModal(true);
+    })
+    .catch(err => {
+      console.error('Failed to fetch group details:', err);
+      // Fallback: use the data we have
+      setCurrentGroup(group);
+      setShowGroupInfoModal(true);
+    });
 };
 
 const handleCloseGroupInfo = () => {
@@ -3020,6 +3051,11 @@ const handleRejectChat = async (email) => {
             attachmentFileName,
             chatName: chat.chatName || chat.name || null,
             isGroupChat: chat.isGroupChat === true || chat.isGroupChat === 'true',
+            // Group chat specific fields
+            users: chat.isGroupChat ? (chat.users || chat.participants || []) : null,
+            admins: chat.isGroupChat ? (chat.admins || []) : null,
+            groupAdmin: chat.isGroupChat ? (chat.groupAdmin || null) : null,
+            groupSettings: chat.isGroupChat ? (chat.groupSettings || {}) : null,
           };
         })
         .filter(Boolean); // Remove null entries
@@ -4412,6 +4448,10 @@ const handleCreateGroup = useCallback(() => {
                   isRead: m.isRead || false,
                   attachments: Array.isArray(m.attachments) ? m.attachments : [],
                   isSystemMessage: m.type === 'system',
+                  isForwarded: m.isForwarded || false,
+                  isEdited: m.isEdited || false,
+                  reactions: m.reactions || [],
+                  starredBy: m.starredBy || [],
                 }));
                 const filtered = filterDuplicateSystemMessages(formatted);
                 setMessages((prev) => ({ ...prev, [chatId]: filtered }));
@@ -6280,13 +6320,9 @@ useEffect(() => {
                 isArchived={isArchivedState}
                 setShowDeleteChatModal={setShowDeleteChatModal}
                 setChatToDelete={setChatToDelete}
+                onOpenGroupInfo={handleOpenGroupInfo}
                 onOpenUserProfile={() => {
-                  // For group chats or documents, we can't show a single user profile
-                  if (selectedContact.isGroup || selectedContact.isDocument) {
-                    console.log('Cannot show user profile for group chats or documents');
-                    return;
-                  }
-                  
+                  console.log('🔔 onOpenUserProfile called with selectedContact:', selectedContact);
                   // Get current user from localStorage
                   const currentUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
                   const currentUserId = currentUser._id || currentUser.id;
@@ -6302,17 +6338,11 @@ useEffect(() => {
                     userIdToShow = otherUser?._id || otherUser?.id;
                   }
                   
-                  console.log('Opening user profile:', {
-                    currentUserId,
-                    otherUserId: userIdToShow,
-                    selectedContact
-                  });
+                  console.log('👤 Opening user profile with userId:', userIdToShow);
                   
                   if (userIdToShow) {
                     setProfileUserId(userIdToShow);
                     setShowUserProfileModal(true);
-                  } else {
-                    console.error('Could not determine user ID to show profile');
                   }
                 }}
               />
@@ -6333,6 +6363,7 @@ useEffect(() => {
         setShowGroupInfoModal(false);
         setCurrentGroup(null);
       }}
+      effectiveTheme={effectiveTheme}
     />
   </div>
 )}
