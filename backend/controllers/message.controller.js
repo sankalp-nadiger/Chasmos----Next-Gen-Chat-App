@@ -1,4 +1,5 @@
 import asyncHandler from "express-async-handler";
+import mongoose from "mongoose";
 import Message from "../models/message.model.js";
 import Chat from "../models/chat.model.js";
 import User from "../models/user.model.js";
@@ -10,9 +11,30 @@ export const allMessages = asyncHandler(async (req, res) => {
     const messages = await Message.find({ chat: req.params.chatId })
       .populate("sender", "name avatar email")
       .populate("attachments")
+      .populate({
+        path: "repliedTo",
+        populate: [
+          { path: "sender", select: "name avatar" },
+          { path: "attachments" }
+        ]
+      })
+      .populate({
+        path: "poll",
+        populate: [
+          {
+            path: "createdBy",
+            select: "name avatar"
+          },
+          {
+            path: "options.votes.user",
+            select: "name avatar"
+          }
+        ]
+      })
       .populate("starredBy.user", "name avatar")
       .populate("reactions.user", "name avatar")
       .sort({ createdAt: 1 });
+      
     res.json(messages);
   } catch (error) {
     res.status(400);
@@ -21,9 +43,9 @@ export const allMessages = asyncHandler(async (req, res) => {
 });
 
 export const sendMessage = asyncHandler(async (req, res) => {
-  const { content, chatId, attachments, type = "text", isScheduled = false, scheduledFor, userId } = req.body;
-  console.log("➡️ [SEND MESSAGE] Request received", { chatId, userId, content, attachments, type, isScheduled, scheduledFor });
-  if (!content && (!attachments || attachments.length === 0)) {
+  const { content, chatId, attachments, type = "text", isScheduled = false, scheduledFor, userId, poll, repliedTo } = req.body;
+  console.log("➡️ [SEND MESSAGE] Request received", { chatId, userId, content, attachments, type, isScheduled, scheduledFor, poll, repliedTo });
+  if (!content && (!attachments || attachments.length === 0) && !poll) {
     console.log("Invalid data passed into request");
     return res.sendStatus(400);
   }
@@ -96,15 +118,30 @@ export const sendMessage = asyncHandler(async (req, res) => {
     }
   }
 
+  // Normalize and validate repliedTo ids
+  let normalizedRepliedTo = Array.isArray(repliedTo) ? repliedTo : repliedTo ? [repliedTo] : [];
+  const invalidRepliedTo = [];
+  normalizedRepliedTo = normalizedRepliedTo.filter((id) => {
+    if (mongoose.Types.ObjectId.isValid(String(id))) return true;
+    invalidRepliedTo.push(id);
+    return false;
+  });
+  if (invalidRepliedTo.length) {
+    console.warn('[sendMessage] Ignoring invalid repliedTo ids:', invalidRepliedTo);
+  }
+
   var newMessage = {
     sender: req.user._id,
     content: content,
     chat: chat._id,
     type: type,
     attachments: attachments || [],
+    // allow replying to one or multiple messages (only valid ObjectIds)
+    repliedTo: normalizedRepliedTo,
     isScheduled: isScheduled,
     scheduledFor: isScheduled ? new Date(scheduledFor) : null,
     scheduledSent: false,
+    poll: poll || null,
   };
 
   try {
@@ -113,6 +150,27 @@ export const sendMessage = asyncHandler(async (req, res) => {
 
     message = await message.populate("sender", "name avatar");
     message = await message.populate("attachments");
+    // populate replied messages
+    message = await message.populate({
+      path: "repliedTo",
+      populate: [
+        { path: "sender", select: "name avatar" },
+        { path: "attachments" }
+      ]
+    });
+    message = await message.populate({
+      path: "poll",
+      populate: [
+        {
+          path: "createdBy",
+          select: "name avatar"
+        },
+        {
+          path: "options.votes.user",
+          select: "name avatar"
+        }
+      ]
+    });
     message = await message.populate("chat");
     message = await User.populate(message, {
       path: "chat.users",
@@ -395,7 +453,7 @@ export const forwardMessage = asyncHandler(async (req, res) => {
   console.log("📥 Body:", req.body);
   console.log("👤 User:", req.user?._id);
 
-  const { content, chatId, attachments, type = "text", isForwarded = true } = req.body;
+  const { content, chatId, attachments, type = "text", isForwarded = true, repliedTo } = req.body;
 
   // Validate basic input
   if (!content && (!attachments || attachments.length === 0)) {
@@ -450,6 +508,18 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     }
   }
 
+  // Normalize and validate repliedTo ids for forwarded messages
+  let normalizedForwardRepliedTo = Array.isArray(repliedTo) ? repliedTo : repliedTo ? [repliedTo] : [];
+  const invalidForwardRepliedTo = [];
+  normalizedForwardRepliedTo = normalizedForwardRepliedTo.filter((id) => {
+    if (mongoose.Types.ObjectId.isValid(String(id))) return true;
+    invalidForwardRepliedTo.push(id);
+    return false;
+  });
+  if (invalidForwardRepliedTo.length) {
+    console.warn('[forwardMessage] Ignoring invalid repliedTo ids:', invalidForwardRepliedTo);
+  }
+
   const newMessage = {
     sender: req.user._id,
     content: content,
@@ -457,6 +527,7 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     type: type,
     attachments: attachments || [],
     isForwarded: isForwarded,
+    repliedTo: normalizedForwardRepliedTo,
   };
 
   console.log("📝 Creating message:", newMessage);
@@ -470,6 +541,16 @@ export const forwardMessage = asyncHandler(async (req, res) => {
 
     message = await message.populate("attachments");
     console.log("📎 Populated attachments");
+
+    // populate replied messages if any
+    message = await message.populate({
+      path: "repliedTo",
+      populate: [
+        { path: "sender", select: "name avatar" },
+        { path: "attachments" }
+      ]
+    });
+    console.log("📎 Populated repliedTo messages");
 
     message = await message.populate("chat");
     console.log("💬 Populated chat");

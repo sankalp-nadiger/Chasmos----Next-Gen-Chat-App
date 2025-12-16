@@ -470,7 +470,8 @@ export const generateTypingIndicator = () => {
 
 // Avatar fallback generator
 export const generateAvatarFallback = (name) => {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase();
+  if (!name || typeof name !== 'string') return '?';
+  return name.split(' ').map(n => n[0]).join('').toUpperCase() || '?';
 };
 
 // Returns the hover label for a message date.

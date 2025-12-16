@@ -3,7 +3,8 @@ import express from "express";
 import { Server } from "socket.io";
 import connectDB from "./config/db.js";
 import Chat from "./models/chat.model.js";
-import User from "./models/user.model.js"; 
+import User from "./models/user.model.js";
+import Message from "./models/message.model.js";
 import colors from "colors";
 import userRoutes from "./routes/user.routes.js";
 import authRoutes from "./routes/auth.routes.js";
@@ -20,6 +21,7 @@ import blockRoutes from "./routes/block.routes.js";
 import userProfileRoutes from "./routes/userProfile.routes.js"; 
 import screenshotRoutes from "./routes/screenshot.routes.js";
 import groupRoutes from "./routes/group.route.js";
+import pollRoutes from "./routes/poll.routes.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
 import cors from 'cors';
 import { setSocketIOInstance } from "./services/scheduledMessageCron.js";
@@ -61,6 +63,7 @@ app.use("/api/archive", archiveRoutes);
 app.use("/api/block", blockRoutes);
 app.use("/api/users", userProfileRoutes); 
 app.use("/api/screenshot", screenshotRoutes);
+app.use("/api/poll", pollRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
@@ -80,6 +83,9 @@ const io = new Server(server, {
   },
 });
 
+// Track online users (userId -> connection count)
+const onlineUserConnections = new Map();
+
 // Initialize scheduled message cron job
 // Pass io to cron job
 setSocketIOInstance(io);
@@ -91,8 +97,28 @@ io.on("connection", (socket) => {
   console.log("Connected to socket.io");
   
   socket.on("setup", (userData) => {
-    socket.join(userData._id);
-    socket.userId = userData._id;
+    const uid = userData?._id || userData?.id || userData;
+    if (!uid) {
+      socket.emit('connected');
+      return;
+    }
+    socket.join(uid);
+    socket.userId = String(uid);
+
+    // increment connection count for this user
+    const prev = onlineUserConnections.get(socket.userId) || 0;
+    onlineUserConnections.set(socket.userId, prev + 1);
+
+    // emit to others that this user is online only when first connection
+    if (prev === 0) {
+      try { io.emit('user online', { userId: socket.userId }); } catch (e) {}
+    }
+
+    // send current online users list to the connecting socket
+    try {
+      socket.emit('online users', Array.from(onlineUserConnections.keys()));
+    } catch (e) {}
+
     socket.emit("connected");
   });
 
@@ -155,6 +181,63 @@ io.on("connection", (socket) => {
           return console.log("chat has no participants to notify");
         }
 
+        // Try to fetch populated message from DB so repliedTo and sender fields are present for all clients
+        let payload = newMessageRecieved;
+        try {
+          const messageId = newMessageRecieved._id || newMessageRecieved.id;
+          if (messageId) {
+            const populated = await Message.findById(messageId)
+              .populate('sender', 'name avatar _id')
+              .populate({
+                path: 'repliedTo',
+                populate: { path: 'sender', select: 'name avatar _id' }
+              })
+              .lean();
+            if (populated) payload = populated;
+          } else if (newMessageRecieved.repliedTo && newMessageRecieved.repliedTo.length) {
+            // If message has no ID yet (not saved or not returned), try to fetch the repliedTo messages
+            const ids = (newMessageRecieved.repliedTo || []).map(r => r._id || r.id || r).filter(Boolean);
+            if (ids.length) {
+              try {
+                const repliedDocs = await Message.find({ _id: { $in: ids } })
+                  .populate('sender', 'name avatar _id')
+                  .lean();
+                const map = {};
+                repliedDocs.forEach(d => { map[String(d._id)] = d; });
+                payload = {
+                  ...newMessageRecieved,
+                  repliedTo: ids.map(id => map[String(id)] || { _id: id })
+                };
+              } catch (e2) {
+                console.warn('Could not fetch repliedTo messages for broadcast', e2);
+              }
+            }
+          }
+
+          // Ensure top-level sender is populated if possible (best-effort)
+          if (payload && payload.sender && (typeof payload.sender === 'string' || !payload.sender.name)) {
+            try {
+              const u = await User.findById(payload.sender).select('name avatar _id').lean();
+              if (u) payload.sender = u;
+            } catch (e3) {
+              // ignore
+            }
+          }
+        } catch (e) {
+          console.warn('Could not populate message before broadcast', e);
+        }
+
+        // Broadcast to the chat room (connected sockets in the chat)
+        try {
+          const roomId = chat._id ? String(chat._id) : (typeof chat === 'string' ? chat : null);
+          if (roomId) {
+            socket.to(roomId).emit('message recieved', payload);
+          }
+        } catch (e) {
+          console.warn('Error emitting to chat room', e);
+        }
+
+        // Also emit to each user's personal room (fallback for users not joined to chat room)
         users.forEach((user) => {
           const userId = user._id ? String(user._id) : String(user);
           const senderId = newMessageRecieved.sender?._id
@@ -163,7 +246,11 @@ io.on("connection", (socket) => {
 
           if (userId === senderId) return;
 
-          socket.in(userId).emit("message recieved", newMessageRecieved);
+          try {
+            io.to(userId).emit('message recieved', payload);
+          } catch (e) {
+            console.warn(`Failed to emit to user room ${userId}`, e);
+          }
         });
       } catch (err) {
         console.error("Error in socket 'new message' handler:", err);
@@ -605,9 +692,140 @@ socket.on("remove reaction", async (data) => {
     }
   });
 
+  // Poll socket events
+  socket.on("poll voted", async (data) => {
+    try {
+      const { pollId, poll, chatId } = data;
+      
+      if (!pollId || !poll) {
+        socket.emit("poll error", { message: "Missing poll data" });
+        return;
+      }
+
+      // Get the chat ID if not provided
+      const actualChatId = chatId || poll.chat;
+      
+      if (actualChatId) {
+        // Broadcast the updated poll to all users in the chat (except sender)
+        socket.to(actualChatId).emit("poll voted", { 
+          pollId, 
+          poll,
+          chatId: actualChatId 
+        });
+        // Also emit directly to each user's personal room (fallback for users not joined to chat room)
+        try {
+          const chatDoc = await Chat.findById(actualChatId).select('users participants').lean();
+          const users = (chatDoc && (chatDoc.users || chatDoc.participants)) || [];
+          users.forEach(user => {
+            const uid = user._id ? String(user._id) : String(user);
+            if (uid === socket.userId) return; // skip sender
+            io.to(uid).emit('poll voted', { pollId, poll, chatId: actualChatId });
+          });
+        } catch (e) {
+          console.error('Error broadcasting poll voted to user rooms', e);
+        }
+        console.log(`📊 Poll vote broadcast for poll ${pollId} in chat ${actualChatId}`);
+      }
+    } catch (error) {
+      console.error("Error in poll voted socket event:", error);
+      socket.emit("poll error", { message: error.message });
+    }
+  });
+
+  socket.on("poll remove vote", async (data) => {
+    try {
+      const { pollId, poll, chatId } = data;
+      
+      if (!pollId || !poll) {
+        socket.emit("poll error", { message: "Missing poll data" });
+        return;
+      }
+
+      // Get the chat ID if not provided
+      const actualChatId = chatId || poll.chat;
+      
+      if (actualChatId) {
+        // Broadcast the updated poll to all users in the chat (except sender)
+        socket.to(actualChatId).emit("poll remove vote", { 
+          pollId, 
+          poll,
+          chatId: actualChatId 
+        });
+        try {
+          const chatDoc = await Chat.findById(actualChatId).select('users participants').lean();
+          const users = (chatDoc && (chatDoc.users || chatDoc.participants)) || [];
+          users.forEach(user => {
+            const uid = user._id ? String(user._id) : String(user);
+            if (uid === socket.userId) return;
+            io.to(uid).emit('poll remove vote', { pollId, poll, chatId: actualChatId });
+          });
+        } catch (e) {
+          console.error('Error broadcasting poll remove vote to user rooms', e);
+        }
+        console.log(`📊 Poll vote removed broadcast for poll ${pollId} in chat ${actualChatId}`);
+      }
+    } catch (error) {
+      console.error("Error in poll remove vote socket event:", error);
+      socket.emit("poll error", { message: error.message });
+    }
+  });
+
+  socket.on("poll closed", async (data) => {
+    try {
+      const { pollId, poll, chatId } = data;
+      
+      if (!pollId || !poll) {
+        socket.emit("poll error", { message: "Missing poll data" });
+        return;
+      }
+
+      // Get the chat ID if not provided
+      const actualChatId = chatId || poll.chat;
+      
+      if (actualChatId) {
+        // Broadcast the closed poll to all users in the chat
+        socket.to(actualChatId).emit("poll closed", { 
+          pollId, 
+          poll,
+          chatId: actualChatId 
+        });
+        try {
+          const chatDoc = await Chat.findById(actualChatId).select('users participants').lean();
+          const users = (chatDoc && (chatDoc.users || chatDoc.participants)) || [];
+          users.forEach(user => {
+            const uid = user._id ? String(user._id) : String(user);
+            if (uid === socket.userId) return;
+            io.to(uid).emit('poll closed', { pollId, poll, chatId: actualChatId });
+          });
+        } catch (e) {
+          console.error('Error broadcasting poll closed to user rooms', e);
+        }
+        console.log(`📊 Poll closed broadcast for poll ${pollId} in chat ${actualChatId}`);
+      }
+    } catch (error) {
+      console.error("Error in poll closed socket event:", error);
+      socket.emit("poll error", { message: error.message });
+    }
+  });
+
   //group-socket-events
   socket.on("disconnect", () => {
     console.log("USER DISCONNECTED", socket.id);
+    try {
+      const uid = socket.userId;
+      if (uid) {
+        const prev = onlineUserConnections.get(uid) || 0;
+        const next = Math.max(0, prev - 1);
+        if (next <= 0) {
+          onlineUserConnections.delete(uid);
+          try { io.emit('user offline', { userId: uid }); } catch (e) {}
+        } else {
+          onlineUserConnections.set(uid, next);
+        }
+      }
+    } catch (e) {
+      console.error('Error handling disconnect online map', e);
+    }
   });
 
   socket.on("join-group", ({ groupId }) => {

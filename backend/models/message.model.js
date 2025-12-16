@@ -33,7 +33,10 @@ const messageSchema = new Schema(
       user: { type: Schema.Types.ObjectId, ref: "User" },
       emoji: { type: String, required: true },
       reactedAt: { type: Date, default: Date.now }
-    }]
+    }],
+
+    // Poll reference
+    poll: { type: Schema.Types.ObjectId, ref: "Poll" }
   },
   { timestamps: true }
 );
@@ -43,5 +46,7 @@ messageSchema.index({ chat: 1, createdAt: -1 });
 messageSchema.index({ "starredBy.user": 1 });
 messageSchema.index({ "reactions.user": 1 });
 messageSchema.index({ isScheduled: 1, scheduledFor: 1, scheduledSent: 1 });
+// Index repliedTo for faster lookups when fetching referenced messages
+messageSchema.index({ repliedTo: 1 });
 
 export default mongoose.model("Message", messageSchema);
