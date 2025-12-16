@@ -10,8 +10,6 @@ import React, {
 } from "react";
 import { toast } from "react-hot-toast";
 import { createPortal } from 'react-dom';
-
-
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from "socket.io-client";
 import { useScreenshotDetection } from '../hooks/useScreenshotDetection';
@@ -62,7 +60,6 @@ import MediaLinksDocsViewer from "./MediaLinksDocsViewer";
 import { useTheme } from "../context/ThemeContext";
 import MessageInput from "./MessageInput";
 import ContactItem from "./ContactItem";
-//import GroupCreation from "./GroupCreation";
 import NewChat from "./NewChat";
 import Profile from "./Profile";
 import SettingsPage from "./Settings";
@@ -78,6 +75,7 @@ import {
 import DocumentChat from "./DocumentChat";
 import NewDocumentUploader from "./NewDocumentUploader";
 import DocumentChatWrapper from "./DocumentChat";
+import PollMessage from "./PollMessage";
 import GroupCreation from "./GroupCreation";
 import DateTag from "./DateTag";
 import ForwardMessageModal from "./ForwardMessageModal";
@@ -87,7 +85,7 @@ import UserProfileModal from "./UserProfileModal";
 import GroupInfoModal from "./GroupInfoModal";
 
 const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
 // Memoized Chat Header Component
 const ChatHeader = React.memo(
@@ -115,6 +113,9 @@ const ChatHeader = React.memo(
     onOpenGroupInfo,
     setShowDeleteChatModal,
     setChatToDelete,
+    // New props passed from parent
+    isOnline,
+    groupOnlineCount,
   }) => {
     const [menuOpen, setMenuOpen] = React.useState(false);
     const menuRef = React.useRef(null);
@@ -190,7 +191,7 @@ const ChatHeader = React.memo(
                 </div>
               )}
 
-              {selectedContact.isOnline && !selectedContact.isDocument && (
+              {isOnline && !selectedContact.isDocument && (
                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
               )}
             </div>
@@ -202,7 +203,9 @@ const ChatHeader = React.memo(
              <p className={`text-sm ${effectiveTheme.textSecondary}`}>
                {selectedContact?.isTyping
                  ? "Typing..."
-                 : selectedContact?.isOnline
+                 : (selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat)
+                 ? `${groupOnlineCount || 0} online`
+                 : isOnline
                  ? "Online"
                  : "Offline"}
              </p>
@@ -373,14 +376,16 @@ const ChatHeader = React.memo(
       JSON.stringify(prevProps.pinnedMessages) ===
         JSON.stringify(nextProps.pinnedMessages) &&
       prevProps.isBlocked === nextProps.isBlocked &&
-      prevProps.isArchived === nextProps.isArchived
+      prevProps.isArchived === nextProps.isArchived &&
+      prevProps.isOnline === nextProps.isOnline &&
+      prevProps.groupOnlineCount === nextProps.groupOnlineCount
     );
   }
 );
 
 // MessageBubble component definition
 const MessageBubble = React.memo(
-  ({ message, isPinned, onPinToggle, onDeleteMessage, onForwardMessage, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange }) => {
+  ({ message, isPinned, onPinToggle, onDeleteMessage, onForwardMessage, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange, onPollVote, onPollRemoveVote, onPollClose, replySelectionActive, selectedReplies, onStartReplySelection, onToggleSelectReply, allMessages }) => {
     const sender = message.sender;
     const isOwnMessage = (() => {
       if (!sender) return false;
@@ -430,6 +435,44 @@ const MessageBubble = React.memo(
     const hasAttachments = message.attachments && message.attachments.length > 0;
     const isShortMessage = messageText.length < 30 && !hasAttachments;
 
+    const bubblePaddingClass = isShortMessage
+      ? 'py-2'
+      : isOwnMessage
+      ? `pt-2 ${hasAttachments ? 'pb-12' : 'pb-10'} pr-6`
+      : (hasAttachments ? 'py-3' : 'py-2');
+
+    // Replies-to-this (other messages that replied to this message)
+    const [showReplies, setShowReplies] = useState(false);
+    const [repliesPage, setRepliesPage] = useState(0);
+    const REPLIES_PER_PAGE = 1;
+
+    const repliesToThis = useMemo(() => {
+      const thisId = message._id || message.id;
+      if (!thisId || !Array.isArray(allMessages)) return [];
+      return allMessages.filter((m) => {
+        if (!Array.isArray(m.repliedTo)) return false;
+        return m.repliedTo.some((rt) => {
+          const refId = rt && (rt._id || rt.id || rt);
+          return String(refId) === String(thisId);
+        });
+      });
+    }, [allMessages, message]);
+    const repliesTotal = repliesToThis.length;
+    const repliesTotalPages = Math.max(1, Math.ceil(repliesTotal / REPLIES_PER_PAGE));
+
+    const getReplyAuthorLabel = (ref) => {
+      if (!ref) return 'Unknown';
+      const s = ref.sender;
+      if (!s) return 'Unknown';
+      // sender may be an object or a string id
+      if (typeof s === 'string') {
+        return String(s) === String(currentUserId) ? 'You' : (ref.senderName || 'Unknown');
+      }
+      const sid = s._id || s.id || s;
+      if (String(sid) === String(currentUserId)) return 'You';
+      return s.name || s.displayName || 'Unknown';
+    };
+
     return (
       <motion.div
         id={`message-${message._id || message.id}`}
@@ -458,17 +501,21 @@ const MessageBubble = React.memo(
         } group relative`}
       >
         <div className={`flex items-center gap-2 ${isOwnMessage ? "flex-row-reverse" : ""}`}>
+          {/* Reply selection checkbox */}
+          {replySelectionActive && (
+            <div className={`flex items-center ${isOwnMessage ? 'ml-2' : 'mr-2'}`}>
+              <input
+                type="checkbox"
+                checked={selectedReplies?.includes(message._id || message.id)}
+                onChange={() => onToggleSelectReply && onToggleSelectReply(message._id || message.id)}
+                aria-label="Select message to reply"
+              />
+            </div>
+          )}
           <motion.div
           className={`${
             isShortMessage ? 'inline-flex flex-col' : 'max-w-xs lg:max-w-md'
-          } px-4 ${
-            // ✅ FIX: More padding for ticks - different for short/long messages
-            isShortMessage 
-              ? 'py-2' 
-              : isOwnMessage 
-                ? 'pt-2 pb-10 pr-6' 
-                : 'py-2'
-          } rounded-lg relative ${
+          } px-4 ${bubblePaddingClass} rounded-lg relative ${
           isOwnMessage
   ? `backdrop-blur-md bg-gradient-to-br from-purple-400/20 to-blue-400/20 border border-white/30 shadow-lg shadow-purple-500/10 text-white`
   : effectiveTheme.mode === 'dark'
@@ -516,11 +563,124 @@ const MessageBubble = React.memo(
             </div>
           )}
 
+          {/* Replied-to preview(s) */}
+          {message.repliedTo && message.repliedTo.length > 0 && (
+            <div className="mb-1 p-2 rounded border-l-4 border-gray-300 bg-opacity-20" style={{ background: effectiveTheme.mode === 'dark' ? 'rgba(255,255,255,0.02)' : '#fafafa' }}>
+              {(message.repliedTo || []).slice(0,3).map((ref) => (
+                <div
+                  key={ref._id || ref.id}
+                  className="text-xs mb-1 cursor-pointer truncate"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const el = document.getElementById(`message-${ref._id || ref.id}`);
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }}
+                >
+                  <div className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-800'} text-[12px]`}>
+                    {getReplyAuthorLabel(ref)}
+                  </div>
+                  <div className={`text-[11px] opacity-80 truncate ${effectiveTheme.mode === 'dark' ? 'text-gray-200' : 'text-gray-600'}`}>
+                    {ref.content ? (ref.content.length > 80 ? ref.content.substring(0, 77) + '...' : ref.content) : (ref.attachments && ref.attachments.length ? 'Attachment' : '')}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Replies-to-this preview (other messages that replied to this message) */}
+          {repliesTotal > 0 && (
+            <div className={hasAttachments ? 'mb-2' : 'mt-0 mb-1'}>
+              <div className="relative inline-flex items-center">
+                <svg
+                  className="pointer-events-none absolute left-0 top-1/2 transform -translate-y-1/2 opacity-60 w-4 h-4 z-0 text-blue-500"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <path d="M9 14L4 9l5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                  <path d="M20 20v-7a4 4 0 0 0-4-4H4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </svg>
+                <button
+                  className="text-xs text-blue-500 cursor-pointer select-none relative z-10 flex items-center gap-2 pl-5"
+                  onClick={(e) => { e.stopPropagation(); setShowReplies((s) => !s); setRepliesPage(0); }}
+                  role="button"
+                  aria-expanded={showReplies}
+                >
+                  {showReplies ? `Hide ${repliesTotal} repl${repliesTotal > 1 ? 'ies' : 'y'}` : `View ${repliesTotal} repl${repliesTotal > 1 ? 'ies' : 'y'}`}
+                </button>
+              </div>
+
+              {showReplies && (
+                <div className={`mt-2 p-2 rounded border ${effectiveTheme.border} bg-opacity-10`} style={{ background: effectiveTheme.mode === 'dark' ? 'rgba(255,255,255,0.02)' : '#ffffff' }}>
+                  {(repliesToThis || []).slice(repliesPage * REPLIES_PER_PAGE, (repliesPage + 1) * REPLIES_PER_PAGE).map((r) => (
+                    <div
+                      key={r._id || r.id}
+                      className="text-xs mb-2 cursor-pointer truncate"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        const el = document.getElementById(`message-${r._id || r.id}`);
+                        if (el) {
+                          try {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            const prev = el.style.boxShadow;
+                            el.style.boxShadow = '0 0 0 3px rgba(250,204,21,0.6)';
+                            setTimeout(() => { el.style.boxShadow = prev; }, 2000);
+                          } catch (e) {
+                            // ignore
+                          }
+                        }
+                      }}
+                    >
+                      <div className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-800'} text-[12px]`}>
+                        {getReplyAuthorLabel(r)}
+                      </div>
+                      <div className={`text-[11px] opacity-80 truncate ${effectiveTheme.mode === 'dark' ? 'text-gray-200' : 'text-gray-600'}`}>
+                        {r.content ? (r.content.length > 80 ? r.content.substring(0, 77) + '...' : r.content) : (r.attachments && r.attachments.length ? 'Attachment' : '')}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Pagination controls */}
+                  {repliesTotalPages > 1 && (
+                    <div className="flex items-center justify-between mt-2">
+                      <button
+                        className={`px-2 py-1 rounded ${effectiveTheme.mode === 'dark' ? 'bg-white/6 text-white/90' : 'bg-gray-200 text-gray-800'}`}
+                        onClick={(e) => { e.stopPropagation(); setRepliesPage((p) => Math.max(0, p - 1)); }}
+                        disabled={repliesPage <= 0}
+                      >
+                        ‹
+                      </button>
+                      <div className="text-xs opacity-80">{repliesPage + 1} / {repliesTotalPages}</div>
+                      <button
+                        className={`px-2 py-1 rounded ${effectiveTheme.mode === 'dark' ? 'bg-white/6 text-white/90' : 'bg-gray-200 text-gray-800'}`}
+                        onClick={(e) => { e.stopPropagation(); setRepliesPage((p) => Math.min(repliesTotalPages - 1, p + 1)); }}
+                        disabled={repliesPage >= repliesTotalPages - 1}
+                      >
+                        ›
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {hasAttachments ? (
             <AttachmentRenderer
               message={message}
               isOwnMessage={isOwnMessage}
               effectiveTheme={effectiveTheme}
+            />
+          ) : message.type === 'poll' && message.poll ? (
+            <PollMessage
+              poll={message.poll}
+              isOwnMessage={isOwnMessage}
+              effectiveTheme={effectiveTheme}
+              currentUserId={currentUserId}
+              onVote={onPollVote}
+              onRemoveVote={onPollRemoveVote}
+              onClosePoll={onPollClose}
             />
           ) : (
            <motion.div
@@ -690,6 +850,16 @@ const MessageBubble = React.memo(
                 <Trash2 className="w-3 h-3" />
               </motion.button>
             )}
+
+            {/* Reply button - start multi-select reply (available to everyone) */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              className="p-1 rounded-full bg-white shadow-lg text-blue-600"
+              onClick={() => onStartReplySelection && onStartReplySelection(message._id || message.id)}
+              title="Reply to message"
+            >
+              <MessageSquare className="w-3 h-3" />
+            </motion.button>
 
             {/* Edit button - only for own text messages */}
             {isOwnMessage && !hasAttachments && message.content && (
@@ -1073,6 +1243,15 @@ const MessagesArea = ({
   onEditMessage,
   onHoverDateChange,
   manualScrollInProgress,
+  onPollVote,
+  onPollRemoveVote,
+  onPollClose,
+  // Reply props
+  replySelectionActive,
+  selectedReplies,
+  onStartReplySelection,
+  onToggleSelectReply,
+  onClearReplySelection,
 }) => {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -1261,6 +1440,16 @@ const MessagesArea = ({
                     effectiveTheme={effectiveTheme}
                     currentUserId={currentUserId}
                     onHoverDateChange={onHoverDateChange}
+                    onPollVote={onPollVote}
+                    onPollRemoveVote={onPollRemoveVote}
+                    onPollClose={onPollClose}
+                    // Reply props
+                    allMessages={filteredMessages}
+                    replySelectionActive={replySelectionActive}
+                    selectedReplies={selectedReplies}
+                    onStartReplySelection={onStartReplySelection}
+                    onToggleSelectReply={onToggleSelectReply}
+                    onClearReplySelection={onClearReplySelection}
                   />
                 );
               }
@@ -1372,7 +1561,7 @@ const MessagesArea = ({
 };
 
 const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
-  const { currentTheme, setTheme, theme } = useTheme();
+  const { currentTheme, theme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -1384,6 +1573,44 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [googleContacts, setGoogleContacts] = useState([]);
   const [activeGroup, setActiveGroup] = useState(null); // current group for modal
   const [showGroupInfoModal, setShowGroupInfoModal] = useState(false);
+  // Reply selection state (allow multi-select replies)
+  const [replySelectionActive, setReplySelectionActive] = useState(false);
+  const [selectedReplies, setSelectedReplies] = useState([]);
+  const [replySelectionHint, setReplySelectionHint] = useState(null);
+  const replyHintTimerRef = useRef(null);
+
+  const onStartReplySelection = useCallback((initialId) => {
+    setReplySelectionActive(true);
+    if (initialId) setSelectedReplies([initialId]);
+  }, []);
+
+  const onToggleSelectReply = useCallback((id) => {
+    const MAX_REPLY_SELECTION = 3;
+    setSelectedReplies((prev) => {
+      const current = Array.isArray(prev) ? prev : [];
+      if (current.includes(id)) return current.filter((x) => x !== id);
+      if (current.length >= MAX_REPLY_SELECTION) {
+        // show inline hint instead of alert
+        setReplySelectionHint(`You can only select up to ${MAX_REPLY_SELECTION} messages to reply to.`);
+        // clear previous timer
+        if (replyHintTimerRef.current) clearTimeout(replyHintTimerRef.current);
+        replyHintTimerRef.current = setTimeout(() => setReplySelectionHint(null), 3500);
+        return current;
+      }
+      return [...current, id];
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (replyHintTimerRef.current) clearTimeout(replyHintTimerRef.current);
+    };
+  }, []);
+
+  const onClearReplySelection = useCallback(() => {
+    setReplySelectionActive(false);
+    setSelectedReplies([]);
+  }, []);
 
   // Clear any stale contacts on mount (helps when user account was deleted and re-created)
   useEffect(() => {
@@ -1998,6 +2225,164 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
     }
   };
 
+  // Poll voting handlers
+  const handlePollVote = useCallback(async (pollId, optionId) => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      if (!token) {
+        console.error('No token found');
+        return;
+      }
+
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/poll/vote`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ pollId, optionId }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || 'Failed to vote on poll');
+      }
+      
+      const data = await res.json();
+      
+      // Update local messages state
+      const chatKey = selectedContact?.chatId || selectedContact?.id;
+      if (chatKey && data.poll) {
+        setMessages((prev) => {
+          const chatMessages = prev[chatKey] || [];
+          return {
+            ...prev,
+            [chatKey]: chatMessages.map((msg) => 
+              msg.poll?._id === pollId || msg.poll === pollId
+                ? { ...msg, poll: data.poll }
+                : msg
+            ),
+          };
+        });
+      }
+      
+      // Emit socket event for real-time poll update
+      if (socketRef.current?.emit) {
+        socketRef.current.emit('poll voted', { 
+          pollId, 
+          poll: data.poll,
+          chatId: selectedContact?.chatId || selectedContact?.id
+        });
+      }
+    } catch (err) {
+      console.error('Poll vote failed:', err);
+      alert(err.message || 'Failed to vote on poll');
+    }
+  }, [selectedContact?.chatId, selectedContact?.id]);
+
+  const handlePollRemoveVote = useCallback(async (pollId, optionId) => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      if (!token) {
+        console.error('No token found');
+        return;
+      }
+
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/poll/remove-vote`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ pollId, optionId }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || 'Failed to remove vote');
+      }
+      
+      const data = await res.json();
+
+      // Update local messages state
+      const chatKey = selectedContact?.chatId || selectedContact?.id;
+      if (chatKey && data.poll) {
+        setMessages((prev) => {
+          const chatMessages = prev[chatKey] || [];
+          return {
+            ...prev,
+            [chatKey]: chatMessages.map((msg) => 
+              msg.poll?._id === pollId || msg.poll === pollId
+                ? { ...msg, poll: data.poll }
+                : msg
+            ),
+          };
+        });
+      }
+
+      // Emit socket event for real-time poll update
+      if (socketRef.current?.emit) {
+        socketRef.current.emit('poll remove vote', { 
+          pollId, 
+          poll: data.poll,
+          chatId: selectedContact?.chatId || selectedContact?.id
+        });
+      }
+    } catch (err) {
+      console.error('Poll remove vote failed:', err);
+      alert(err.message || 'Failed to remove vote');
+    }
+  }, [selectedContact?.chatId, selectedContact?.id]);
+
+  const handlePollClose = useCallback(async (pollId) => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      if (!token) {
+        console.error('No token found');
+        return;
+      }
+
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/poll/${pollId}/close`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || 'Failed to close poll');
+      }
+      
+      const data = await res.json();
+
+      // Update local messages state
+      const chatKey = selectedContact?.chatId || selectedContact?.id;
+      if (chatKey && data.poll) {
+        setMessages((prev) => {
+          const chatMessages = prev[chatKey] || [];
+          return {
+            ...prev,
+            [chatKey]: chatMessages.map((msg) => 
+              msg.poll?._id === pollId || msg.poll === pollId
+                ? { ...msg, poll: data.poll }
+                : msg
+            ),
+          };
+        });
+      }
+
+      // Emit socket event for real-time poll update
+      if (socketRef.current?.emit) {
+        socketRef.current.emit('poll closed', { pollId, poll: data.poll, chatId: selectedContact?.chatId || selectedContact?.id });
+      }
+    } catch (err) {
+      console.error('Poll close failed:', err);
+      alert(err.message || 'Failed to close poll');
+    }
+  }, [selectedContact?.chatId, selectedContact?.id]);
+
   // Helper function to filter duplicate consecutive system messages
   const filterDuplicateSystemMessages = useCallback((messages) => {
     if (!Array.isArray(messages) || messages.length === 0) return messages;
@@ -2034,9 +2419,64 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
   // Socket reference
   const socketRef = useRef(null);
   const [socketConnected, setSocketConnected] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState(new Set());
+  const [groupOnlineCounts, setGroupOnlineCounts] = useState({});
   // Current user id (used for message alignment)
   const _localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
   const currentUserId = _localUser._id || _localUser.id || null;
+
+  // Keep recentChats and contacts in sync with presence info
+  useEffect(() => {
+    try {
+      // update recentChats
+      setRecentChats(prev => {
+        return (prev || []).map(c => {
+          const copy = { ...c };
+          const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
+          if (isGroup) {
+            const members = copy.users || copy.participants || [];
+            const count = (members || []).filter(m => {
+              const uid = m && (m._id || m.id || m);
+              if (!uid) return false;
+              if (String(uid) === String(currentUserId)) return false;
+              return onlineUsers.has(String(uid));
+            }).length;
+            copy.__computedGroupOnlineCount = count;
+            copy.isOnline = count > 0;
+          } else {
+            const uid = copy.userId || copy._id || copy.id || copy.participantId || (copy.participants && copy.participants[0]?._id);
+            copy.isOnline = uid ? onlineUsers.has(String(uid)) : Boolean(copy.isOnline);
+          }
+          return copy;
+        });
+      });
+
+      // update contacts list similarly
+      setContacts(prev => {
+        return (prev || []).map(c => {
+          const copy = { ...c };
+          const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
+          if (isGroup) {
+            const members = copy.users || copy.participants || [];
+            const count = (members || []).filter(m => {
+              const uid = m && (m._id || m.id || m);
+              if (!uid) return false;
+              if (String(uid) === String(currentUserId)) return false;
+              return onlineUsers.has(String(uid));
+            }).length;
+            copy.__computedGroupOnlineCount = count;
+            copy.isOnline = count > 0;
+          } else {
+            const uid = copy.userId || copy._id || copy.id || copy.participantId || (copy.participants && copy.participants[0]?._id);
+            copy.isOnline = uid ? onlineUsers.has(String(uid)) : Boolean(copy.isOnline);
+          }
+          return copy;
+        });
+      });
+    } catch (e) {
+      // ignore
+    }
+  }, [onlineUsers, currentUserId]);
 
   // When selected contact changes, refresh block/archive status for that chat/user
   useEffect(() => {
@@ -2172,7 +2612,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             id: m._id,
             type: m.type || "text",
             content: m.content || m.text || "",
-            sender: m.sender?._id || m.sender,
+            sender: m.sender,
             timestamp: new Date(m.createdAt || m.timestamp || Date.now()).getTime(),
             isRead: true,
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
@@ -2181,6 +2621,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             isEdited: m.isEdited || false,
             reactions: m.reactions || [],
             starredBy: m.starredBy || [],
+            poll: m.poll || null,
           }));
           
           // Filter duplicate consecutive system messages
@@ -2222,7 +2663,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             id: m._id,
             type: m.type || "text",
             content: m.content || m.text || "",
-            sender: m.sender?._id || m.sender,
+            sender: m.sender,
             timestamp: new Date(m.createdAt || m.timestamp || Date.now()).getTime(),
             isRead: true,
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
@@ -2231,6 +2672,17 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             isEdited: m.isEdited || false,
             reactions: m.reactions || [],
             starredBy: m.starredBy || [],
+            // preserve repliedTo details (backend may populate objects)
+              repliedTo: Array.isArray(m.repliedTo)
+              ? m.repliedTo.map((rt) => ({
+                  _id: rt._id || rt.id,
+                  id: rt._id || rt.id,
+                  content: rt.content || rt.text || '',
+                  // preserve the full sender object when backend populated it
+                  sender: rt.sender,
+                  attachments: Array.isArray(rt.attachments) ? rt.attachments : [],
+                }))
+              : [],
           }));
           
           // Filter duplicate consecutive system messages
@@ -2345,7 +2797,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               id: m._id,
               type: m.type || 'text',
               content: m.content || m.text || '',
-              sender: m.sender?._id || m.sender,
+              sender: m.sender,
               timestamp: new Date(m.createdAt || m.timestamp || Date.now()).getTime(),
               isRead: true,
               attachments: Array.isArray(m.attachments) ? m.attachments : [],
@@ -2354,6 +2806,16 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               isEdited: m.isEdited || false,
               reactions: m.reactions || [],
               starredBy: m.starredBy || [],
+              poll: m.poll || null,
+              repliedTo: Array.isArray(m.repliedTo)
+                ? m.repliedTo.map((rt) => ({
+                    _id: rt._id || rt.id,
+                    id: rt._id || rt.id,
+                    content: rt.content || rt.text || '',
+                    sender: rt.sender,
+                    attachments: Array.isArray(rt.attachments) ? rt.attachments : [],
+                  }))
+                : [],
             }));
 
             const filteredMessages = filterDuplicateSystemMessages(formatted);
@@ -2611,7 +3073,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               id: m._id,
               type: m.type || 'text',
               content: m.content || m.text || '',
-              sender: m.sender?._id || m.sender || 'unknown',
+              sender: m.sender,
               timestamp: new Date(m.createdAt || Date.now()).getTime(),
               isRead: m.isRead || false,
               attachments: m.attachments || [],
@@ -2619,6 +3081,16 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               isEdited: m.isEdited || false,
               reactions: m.reactions || [],
               starredBy: m.starredBy || [],
+              poll: m.poll || null,
+              repliedTo: Array.isArray(m.repliedTo)
+              ? m.repliedTo.map((rt) => ({
+                  _id: rt._id || rt.id,
+                  id: rt._id || rt.id,
+                  content: rt.content || rt.text || '',
+                  sender: rt.sender,
+                  attachments: Array.isArray(rt.attachments) ? rt.attachments : [],
+                }))
+              : [],
             }));
             
             setMessages((prev) => {
@@ -2716,7 +3188,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             id: m._id,
             type: m.type || "text",
             content: m.content || m.text || "",
-            sender: m.sender?._id || m.sender,
+            sender: m.sender,
             timestamp: new Date(m.createdAt || m.createdAt || m.timestamp || Date.now()).getTime(),
             isRead: true,
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
@@ -2725,6 +3197,16 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             isEdited: m.isEdited || false,
             reactions: m.reactions || [],
             starredBy: m.starredBy || [],
+            poll: m.poll || null,
+            repliedTo: Array.isArray(m.repliedTo)
+              ? m.repliedTo.map((rt) => ({
+                  _id: rt._id || rt.id,
+                  id: rt._id || rt.id,
+                  content: rt.content || rt.text || '',
+                  sender: rt.sender,
+                  attachments: Array.isArray(rt.attachments) ? rt.attachments : [],
+                }))
+              : [],
           }));
           const filteredFormatted = filterDuplicateSystemMessages(formatted);
           setMessages((prev) => {
@@ -2965,126 +3447,120 @@ const handleRejectChat = async (email) => {
   }, [selectedContact, API_BASE_URL]);
 
   // Function to refresh recent chats (can be called from anywhere)
-  const refreshRecentChats = useCallback(async () => {
+const refreshRecentChats = useCallback(async () => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) throw new Error("No token found.");
+
+    // Fetch archived chats to exclude them from the recent list
+    let archived = [];
+    let archivedChatIdsSet = new Set();
     try {
-      const token = localStorage.getItem("token");
-      if (!token) throw new Error("No token found.");
-
-      // Fetch archived chats to exclude them from the recent list
-      let archived = [];
-      let archivedChatIdsSet = new Set();
-      try {
-        archived = await archiveService.getArchivedChats();
-        // Build set of archived chat IDs for filtering
-        archived.forEach(archivedChat => {
-          const chatId = archivedChat._id || archivedChat.id || (archivedChat.chat && archivedChat.chat._id);
-          if (chatId) {
-            archivedChatIdsSet.add(String(chatId));
-          }
-        });
-        setArchivedChatIds(archivedChatIdsSet);
-      } catch (e) {
-        archived = [];
-      }
-
-      const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
-        headers: { Authorization: `Bearer ${token}` },
+      archived = await archiveService.getArchivedChats();
+      archived.forEach(archivedChat => {
+        const chatId = archivedChat._id || archivedChat.id || (archivedChat.chat && archivedChat.chat._id);
+        if (chatId) archivedChatIdsSet.add(String(chatId));
       });
-
-      if (!res.ok) throw new Error("Failed to fetch recent chats");
-
-      const data = await res.json();
-      console.log("[RecentChats] Server response:", data);
-
-      const localUser = JSON.parse(
-        localStorage.getItem("chasmos_user_data") || "{}"
-      );
-      const loggedInUserId = localUser._id || localUser.id || null;
-
-      const formatted = (Array.isArray(data) ? data : [])
-        .map((chat) => {
-          // Backend may already provide an `otherUser` helper; prefer that.
-          const otherUser =
-            chat.otherUser ||
-            (chat.participants &&
-              chat.participants.find(
-                (p) => String(p._id) !== String(loggedInUserId)
-              )) ||
-            (Array.isArray(chat.participants) ? chat.participants[0] : null);
-
-          const otherId = otherUser?._id || otherUser?.id || null;
-          
-          // Skip if no other user found or if chatting with yourself
-          // if (!otherId || String(otherId) === String(loggedInUserId)) {
-          //   return null;
-          // }
-          
-          const displayName =
-            chat.isGroupChat && chat.chatName
-              ? chat.chatName
-              : otherUser?.name || otherUser?.username || otherUser?.email || "Unknown";
-
-          // Backend may send a preview string that includes a paperclip emoji when attachments exist
-          const rawLast = chat.lastMessage || "";
-          const hasAttachmentFromMarker = typeof rawLast === 'string' && /📎/.test(rawLast);
-          const looksLikeAttachmentOnly = rawLast === 'Attachment' || rawLast === 'Attachment' || /\.(png|jpe?g|gif|webp|bmp|mp4|pdf)$/i.test(rawLast);
-          const hasAttachment = Boolean(chat.hasAttachment || hasAttachmentFromMarker || looksLikeAttachmentOnly || (chat.lastMessage && chat.lastMessage.attachments && chat.lastMessage.attachments.length));
-          // If backend returned filename (e.g., "doc.pdf"), use it as attachmentFileName
-          const attachmentFileName = hasAttachment && typeof rawLast === 'string' ? (rawLast.replace(/📎/g, '').trim() || '') : '';
-
-          const chatIdValue = chat.chatId || chat._id;
-          
-          return {
-            id: chatIdValue, // Use chatId as the primary ID
-            chatId: chatIdValue,
-            userId: otherId, // Store the other user's ID separately
-            name: displayName,
-            avatar: otherUser?.avatar || otherUser?.pic || null,
-            lastMessage: rawLast || "",
-            timestamp: chat.timestamp || chat.updatedAt,
-            isOnline: otherUser?.isOnline || false,
-            unreadCount:
-              typeof chat.unreadCount === "number"
-                ? chat.unreadCount
-                : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
-            hasAttachment,
-            attachmentFileName,
-            chatName: chat.chatName || chat.name || null,
-            isGroupChat: chat.isGroupChat === true || chat.isGroupChat === 'true',
-            // Group chat specific fields
-            users: chat.isGroupChat ? (chat.users || chat.participants || []) : null,
-            admins: chat.isGroupChat ? (chat.admins || []) : null,
-            groupAdmin: chat.isGroupChat ? (chat.groupAdmin || null) : null,
-            groupSettings: chat.isGroupChat ? (chat.groupSettings || {}) : null,
-          };
-        })
-        .filter(Boolean); // Remove null entries
-      console.log("[RecentChats] After formatting:", formatted);
-
-      // Deduplicate by chatId (keep the most recent one)
-      const seen = new Map();
-      formatted.forEach(chat => {
-        const chatIdKey = String(chat.chatId);
-        if (!seen.has(chatIdKey) || 
-            new Date(chat.timestamp) > new Date(seen.get(chatIdKey).timestamp)) {
-          seen.set(chatIdKey, chat);
-        }
-      });
-      const deduplicated = Array.from(seen.values());
-      console.log("[RecentChats] After deduplication:", deduplicated);
-
-      // Filter out archived chats using the chatId
-      const filtered = deduplicated.filter(c => {
-        const chatIdToCheck = String(c.chatId || '');
-        return !archivedChatIdsSet.has(chatIdToCheck);
-      });
-      console.log("[RecentChats] After filtering archived:", filtered);
-      setRecentChats(filtered);
-      console.log("[RecentChats] State set to:", filtered);
-    } catch (err) {
-      setError(err.message);
+      setArchivedChatIds(archivedChatIdsSet);
+    } catch (e) {
+      archived = [];
     }
-  }, [API_BASE_URL]);
+
+    const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) throw new Error("Failed to fetch recent chats");
+
+    const data = await res.json();
+    console.log("[RecentChats] Server response:", data);
+
+    const localUser = JSON.parse(localStorage.getItem("chasmos_user_data") || "{}");
+    const loggedInUserId = localUser._id || localUser.id || null;
+
+    const formatted = (Array.isArray(data) ? data : [])
+      .map((chat) => {
+        const otherUser =
+          chat.otherUser ||
+          (chat.participants && chat.participants.find(p => String(p._id) !== String(loggedInUserId))) ||
+          (Array.isArray(chat.participants) ? chat.participants[0] : null);
+
+        const otherId = otherUser?._id || otherUser?.id || null;
+        const displayName =
+          chat.isGroupChat && chat.chatName
+            ? chat.chatName
+            : otherUser?.name || otherUser?.username || otherUser?.email || "Unknown";
+
+        const rawLast = chat.lastMessage || "";
+        const hasAttachmentFromMarker = typeof rawLast === 'string' && /📎/.test(rawLast);
+        const looksLikeAttachmentOnly = rawLast === 'Attachment' || /\.(png|jpe?g|gif|webp|bmp|mp4|pdf)$/i.test(rawLast);
+        const hasAttachment = Boolean(chat.hasAttachment || hasAttachmentFromMarker || looksLikeAttachmentOnly || (chat.lastMessage && chat.lastMessage.attachments?.length));
+        const attachmentFileName = hasAttachment && typeof rawLast === 'string' ? rawLast.replace(/📎/g, '').trim() || '' : '';
+
+        const chatIdValue = chat.chatId || chat._id;
+
+        return {
+          id: chatIdValue,
+          chatId: chatIdValue,
+          userId: otherId,
+          name: displayName,
+          avatar: otherUser?.avatar || otherUser?.pic || null,
+          lastMessage: rawLast || "",
+          timestamp: chat.timestamp || chat.updatedAt,
+          isOnline: otherUser?.isOnline || false,
+          unreadCount: typeof chat.unreadCount === "number" ? chat.unreadCount : (chat.unreadCount?.[loggedInUserId] || 0),
+          hasAttachment,
+          attachmentFileName,
+          chatName: chat.chatName || chat.name || null,
+          isGroupChat: chat.isGroupChat === true || chat.isGroupChat === 'true',
+          users: chat.isGroupChat ? (chat.users || chat.participants || []) : null,
+          admins: chat.isGroupChat ? (chat.admins || []) : null,
+          groupAdmin: chat.isGroupChat ? (chat.groupAdmin || null) : null,
+          groupSettings: chat.isGroupChat ? (chat.groupSettings || {}) : null,
+        };
+      })
+      .filter(Boolean);
+
+    // Deduplicate by chatId
+    const seen = new Map();
+    formatted.forEach(chat => {
+      const chatIdKey = String(chat.chatId);
+      if (!seen.has(chatIdKey) || new Date(chat.timestamp) > new Date(seen.get(chatIdKey).timestamp)) {
+        seen.set(chatIdKey, chat);
+      }
+    });
+    const deduplicated = Array.from(seen.values());
+
+    // Filter out archived chats
+    const filtered = deduplicated.filter(c => !archivedChatIdsSet.has(String(c.chatId)));
+
+    // --- MERGE WITH EXISTING STATE ---
+    setRecentChats(prevChats => {
+      const prevMap = new Map(prevChats.map(c => [String(c.chatId), c]));
+
+      const merged = filtered.map(chat => {
+        const existing = prevMap.get(String(chat.chatId));
+        return {
+          ...chat,
+          // Preserve existing avatar if backend returns null
+          avatar: chat.avatar || existing?.avatar,
+          unreadCount: chat.unreadCount ?? existing?.unreadCount ?? 0,
+          isOnline: chat.isOnline ?? existing?.isOnline ?? false,
+        };
+      });
+
+      // Sort by timestamp descending
+      merged.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      return merged;
+    });
+
+    console.log("[RecentChats] Merged state set:", filtered);
+
+  } catch (err) {
+    setError(err.message);
+  }
+}, [API_BASE_URL]);
+
 
 // Fetch recent chats on mount
 // Improved loading logic: hide spinner after both fetch and min time
@@ -3385,6 +3861,7 @@ const handleSendMessageFromInput = useCallback(
           timestamp: new Date(payload.createdAt || Date.now()).getTime(),
           isRead: true,
           attachments: payload.attachments || payload.files || [],
+          repliedTo: payload.repliedTo || [],
         };
 
         appendMessage(chatId, formatted);
@@ -3476,7 +3953,7 @@ const handleSendMessageFromInput = useCallback(
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({ content: payload.content, chatId, userId }),
+            body: JSON.stringify({ content: payload.content, chatId, userId, repliedTo: selectedReplies || [] }),
           });
 
           if (!res.ok) throw new Error('Failed to send text message');
@@ -3490,9 +3967,11 @@ const handleSendMessageFromInput = useCallback(
             sender: sent.sender?._id || sent.sender || 'me',
             timestamp: new Date(sent.createdAt || Date.now()).getTime(),
             isRead: true,
+            repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
           };
 
           appendMessage(chatId, formatted);
+          onClearReplySelection && onClearReplySelection();
           if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
 
           updateRecentChat(chatId, payload.content, false);
@@ -3585,6 +4064,7 @@ const handleSendMessageFromInput = useCallback(
               chatId,
               attachments: payload.attachments,
               type: payload.type,
+              repliedTo: selectedReplies || [],
             }),
           });
 
@@ -3600,9 +4080,11 @@ const handleSendMessageFromInput = useCallback(
             timestamp: new Date(sent.createdAt || Date.now()).getTime(),
             isRead: true,
             attachments: sent.attachments || payload.attachments,
+            repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
           };
 
           appendMessage(chatId, formatted);
+          onClearReplySelection && onClearReplySelection();
 
           if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
 
@@ -3695,7 +4177,7 @@ const handleSendMessageFromInput = useCallback(
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({ content: messageText, chatId }),
+            body: JSON.stringify({ content: messageText, chatId, repliedTo: selectedReplies || [] }),
           });
 
           if (!res.ok) throw new Error('Failed to send message');
@@ -3709,9 +4191,11 @@ const handleSendMessageFromInput = useCallback(
             sender: sent.sender?._id || sent.sender || 'me',
             timestamp: new Date(sent.createdAt || Date.now()).getTime(),
             isRead: true,
+            repliedTo: sent.repliedTo || selectedReplies || [],
           };
 
           appendMessage(chatId, formatted);
+          onClearReplySelection && onClearReplySelection();
           if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
 
           updateRecentChat(chatId, messageText, false);
@@ -3721,140 +4205,382 @@ const handleSendMessageFromInput = useCallback(
         }
       })();
     }
+
+    // Case 4: Poll message
+    if (typeof payload === 'object' && payload.type === 'poll' && payload.pollId) {
+      (async () => {
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        let chatId = getChatId(payload);
+
+        const localMessage = {
+          id: Date.now(),
+          type: 'poll',
+          content: payload.content || '📊 Poll',
+          sender: 'me',
+          timestamp: Date.now(),
+          isRead: true,
+          poll: null, // Will be populated from server
+        };
+
+        if (!token) {
+          appendMessage(chatId, localMessage);
+          return;
+        }
+
+        if (!chatId) {
+          appendMessage(chatId, localMessage);
+          return;
+        }
+
+        try {
+          // Create a message with poll reference
+          const res = await fetch(`${API_BASE_URL}/api/message`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              content: payload.content || '📊 Poll',
+              chatId,
+              type: 'poll',
+              poll: payload.pollId,
+            }),
+          });
+
+          if (!res.ok) throw new Error('Failed to send poll message');
+
+          const sent = await res.json();
+
+          // Fetch full poll details
+          const pollRes = await fetch(`${API_BASE_URL}/api/poll/${payload.pollId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          let fullPoll = null;
+          if (pollRes.ok) {
+            fullPoll = await pollRes.json();
+          }
+
+          const formatted = {
+            id: sent._id || sent.id || Date.now(),
+            type: 'poll',
+            content: sent.content || payload.content || '📊 Poll',
+            sender: sent.sender?._id || sent.sender || 'me',
+            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            isRead: true,
+            poll: fullPoll,
+            repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
+          };
+
+          appendMessage(chatId, formatted);
+
+          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
+
+          updateRecentChat(chatId, payload.content || '📊 Poll', false);
+          updateContactPreview(chatId, payload.content || '📊 Poll', false);
+        } catch (err) {
+          console.error('Error sending poll message:', err);
+        }
+      })();
+
+      return;
+    }
   },
-  [selectedContact]
+  [selectedContact, selectedReplies, onClearReplySelection, archivedChatIds]
 );
 
   // Initialize socket connection once
   useEffect(() => {
-    const initSocket = () => {
+    // Always disconnect previous socket to avoid duplicate listeners
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
+    const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+    const socket = io(API_BASE_URL, {
+      transports: ['websocket'],
+      withCredentials: true,
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      socket.emit('setup', userData);
+      setSocketConnected(true);
+      console.log('[SOCKET] Connected to server');
+    });
+
+    socket.on('connected', () => setSocketConnected(true));
+
+    // initial online users list
+    socket.on('online users', (arr) => {
       try {
-        const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
-        socketRef.current = io(API_BASE_URL, {
-          transports: ['websocket'],
-          withCredentials: true,
+        const s = new Set((arr || []).map(a => String(a)));
+        setOnlineUsers(s);
+      } catch (e) {}
+    });
+
+    socket.on('user online', ({ userId }) => {
+      try {
+        setOnlineUsers(prev => {
+          const s = new Set(prev);
+          s.add(String(userId));
+          return s;
         });
+      } catch (e) {}
+    });
 
-        socketRef.current.on('connect', () => {
-          socketRef.current.emit('setup', userData);
-          setSocketConnected(true);
+    socket.on('user offline', ({ userId }) => {
+      try {
+        setOnlineUsers(prev => {
+          const s = new Set(prev);
+          s.delete(String(userId));
+          return s;
         });
+      } catch (e) {}
+    });
 
-        socketRef.current.on('connected', () => setSocketConnected(true));
-
-        socketRef.current.on('message recieved', (newMessage) => {
-          try {
-            const chatId = newMessage.chat?._id || newMessage.chat;
-            const senderId = newMessage.sender?._id || newMessage.sender;
-            const key = chatId || senderId;
-
-            const attachments = Array.isArray(newMessage.attachments) ? newMessage.attachments : [];
-
-            const inferredType = newMessage.type || (attachments.length ? (
-              (attachments[0].mimeType && attachments[0].mimeType.startsWith('image/')) ? 'image' :
-              (attachments[0].mimeType && attachments[0].mimeType.startsWith('video/')) ? 'video' : 'file'
-            ) : 'text');
-
-            const formatted = {
-              id: newMessage._id || newMessage.id || Date.now(),
-              type: inferredType,
-              content: newMessage.content || newMessage.text || '',
-              sender: newMessage.sender?._id || newMessage.sender,
-              // Use scheduledFor as timestamp if present (for scheduled messages)
-              timestamp: newMessage.scheduledFor ? new Date(newMessage.scheduledFor).getTime() : new Date(newMessage.createdAt || Date.now()).getTime(),
-              isRead: false,
-              attachments: attachments,
-              isSystemMessage: newMessage.type === 'system',
-            };
-
-            setMessages((prev) => {
-              const updatedMessages = [...(prev[key] || []), formatted];
-              const filtered = filterDuplicateSystemMessages(updatedMessages);
-              return {
-                ...prev,
-                [key]: filtered,
-              };
-            });
-
-            // update recentChats/unread when not currently selected
-            const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
-            const hasAttachment = Boolean(formatted.attachments && formatted.attachments.length);
-            updateRecentChat(key, preview, hasAttachment, {
-              attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
-              attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
-            });
-            // increment unread count
-            setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
-
-            // keep contact sidebar in sync (attachment flag + filename/mime)
-            updateContactPreview(key, preview, hasAttachment, {
-              attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
-              attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
-            });
-
-            // keep contact sidebar in sync (attachment flag + filename/mime)
-            try {
-              updateContactPreview && updateContactPreview(key, preview, Boolean(formatted.attachments && formatted.attachments.length), {
-                attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
-                attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
-              });
-            } catch (e) {
-              // ignore if updateContactPreview not available
-            }
-          } catch (err) {
-            console.error('Error processing incoming socket message', err);
-          }
-        });
-
-        // Listen for pin/unpin events
-        socketRef.current.on('pin message', ({ chatId, pinnedMessages: updatedPinnedMessages }) => {
-          try {
-            const currentChatId = selectedContact?.id || selectedContact?._id;
-            if (String(chatId) === String(currentChatId)) {
-              setPinnedMessagesData(updatedPinnedMessages || []);
-              
-              // Update pinnedMessages state
-              const pinnedMap = {};
-              (updatedPinnedMessages || []).forEach(pinned => {
-                if (pinned.message) {
-                  const msgId = pinned.message._id || pinned.message.id || pinned.message;
-                  pinnedMap[msgId] = true;
-                }
-              });
-              setPinnedMessages(pinnedMap);
-            }
-          } catch (err) {
-            console.error('Error processing pin message event', err);
-          }
-        });
-
-        socketRef.current.on('unpin message', ({ chatId, pinnedMessages: updatedPinnedMessages }) => {
-          try {
-            const currentChatId = selectedContact?.id || selectedContact?._id;
-            if (String(chatId) === String(currentChatId)) {
-              setPinnedMessagesData(updatedPinnedMessages || []);
-              
-              // Update pinnedMessages state
-              const pinnedMap = {};
-              (updatedPinnedMessages || []).forEach(pinned => {
-                if (pinned.message) {
-                  const msgId = pinned.message._id || pinned.message.id || pinned.message;
-                  pinnedMap[msgId] = true;
-                }
-              });
-              setPinnedMessages(pinnedMap);
-            }
-          } catch (err) {
-            console.error('Error processing unpin message event', err);
-          }
-        });
-
-      } catch (err) {
-        console.error('Socket init error', err);
+    // Per-chat online counts emitted by server
+    socket.on('group online count', ({ chatId, onlineCount }) => {
+      try {
+        if (!chatId) return;
+        setGroupOnlineCounts(prev => ({ ...(prev || {}), [String(chatId)]: Number(onlineCount || 0) }));
+      } catch (e) {
+        console.error('Error handling group online count', e);
       }
-    };
+    });
 
-    initSocket();
+    socket.on('message recieved', (newMessage) => {
+      try {
+        const chatId = newMessage.chat?._id || newMessage.chat;
+        const senderId = newMessage.sender?._id || newMessage.sender;
+        const key = chatId || senderId;
+        const attachments = Array.isArray(newMessage.attachments) ? newMessage.attachments : [];
+        const inferredType = newMessage.type || (attachments.length ? (
+          (attachments[0].mimeType && attachments[0].mimeType.startsWith('image/')) ? 'image' :
+          (attachments[0].mimeType && attachments[0].mimeType.startsWith('video/')) ? 'video' : 'file'
+        ) : 'text');
+        const normalizeSender = (s) => {
+          if (!s) return s;
+          if (typeof s === 'object') return s;
+          return s; // leave string id as-is
+        };
+
+        const normalizedRepliedTo = (newMessage.repliedTo || []).map((r) => {
+          if (!r) return r;
+          // if replied item already has populated sender object, keep it
+          if (r.sender && typeof r.sender === 'object') return r;
+          // otherwise keep the item as-is (server should populate when possible)
+          return r;
+        });
+
+        const formatted = {
+          id: newMessage._id || newMessage.id || Date.now(),
+          type: inferredType,
+          content: newMessage.content || newMessage.text || '',
+          // preserve populated sender object when present (don't collapse to id)
+          sender: (newMessage.sender && typeof newMessage.sender === 'object') ? newMessage.sender : (newMessage.sender?._id || newMessage.sender),
+          timestamp: newMessage.scheduledFor ? new Date(newMessage.scheduledFor).getTime() : new Date(newMessage.createdAt || Date.now()).getTime(),
+          isRead: false,
+          attachments: attachments,
+          isSystemMessage: newMessage.type === 'system',
+          poll: newMessage.poll || null,
+          repliedTo: normalizedRepliedTo,
+        };
+
+        const populateRepliedFromServer = async (chatId, repliedArray) => {
+          try {
+            const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+            if (!token) return repliedArray;
+            const res = await fetch(`${API_BASE_URL}/api/message/${chatId}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) return repliedArray;
+            const msgs = await res.json();
+            const map = {};
+            (msgs || []).forEach(m => { map[String(m._id || m.id)] = m; });
+            return repliedArray.map(r => {
+              const id = r && (r._id || r.id || r);
+              const found = id ? map[String(id)] : null;
+              if (found) {
+                return {
+                  _id: found._id || found.id,
+                  id: found._id || found.id,
+                  content: found.content || found.text || '',
+                  sender: found.sender || found.sender?._id ? found.sender : found.sender,
+                  attachments: Array.isArray(found.attachments) ? found.attachments : [],
+                };
+              }
+              return r;
+            });
+          } catch (e) {
+            return repliedArray;
+          }
+        };
+
+        // If any repliedTo item lacks populated sender object, try to backfill from server
+        (async () => {
+          let finalReplied = formatted.repliedTo || [];
+          const needsFetch = finalReplied.some(rt => rt && (!rt.sender || typeof rt.sender === 'string'));
+          const chatIdForFetch = chatId || (newMessage.chat?._id || newMessage.chat);
+          if (needsFetch && chatIdForFetch) {
+            const backfilled = await populateRepliedFromServer(chatIdForFetch, finalReplied);
+            finalReplied = backfilled;
+            // update formatted and then append
+            formatted.repliedTo = finalReplied;
+          }
+
+          setMessages((prev) => {
+            const updatedMessages = [...(prev[key] || []), formatted];
+            const filtered = filterDuplicateSystemMessages(updatedMessages);
+            return {
+              ...prev,
+              [key]: filtered,
+            };
+          });
+        })();
+        // end async population
+
+        // continue without awaiting: setMessages will be called by async above
+        
+        
+        const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
+        const hasAttachment = Boolean(formatted.attachments && formatted.attachments.length);
+        updateRecentChat(key, preview, hasAttachment, {
+          attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+          attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+        });
+        setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
+        updateContactPreview(key, preview, hasAttachment, {
+          attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+          attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+        });
+        try {
+          updateContactPreview && updateContactPreview(key, preview, Boolean(formatted.attachments && formatted.attachments.length), {
+            attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
+            attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+          });
+        } catch (e) {}
+      } catch (err) {
+        console.error('Error processing incoming socket message', err);
+      }
+    });
+
+    socket.on('pin message', ({ chatId, pinnedMessages: updatedPinnedMessages }) => {
+      try {
+        const currentChatId = selectedContact?.id || selectedContact?._id;
+        if (String(chatId) === String(currentChatId)) {
+          setPinnedMessagesData(updatedPinnedMessages || []);
+          const pinnedMap = {};
+          (updatedPinnedMessages || []).forEach(pinned => {
+            if (pinned.message) {
+              const msgId = pinned.message._id || pinned.message.id || pinned.message;
+              pinnedMap[msgId] = true;
+            }
+          });
+          setPinnedMessages(pinnedMap);
+        }
+      } catch (err) {
+        console.error('Error processing pin message event', err);
+      }
+    });
+
+    socket.on('unpin message', ({ chatId, pinnedMessages: updatedPinnedMessages }) => {
+      try {
+        const currentChatId = selectedContact?.id || selectedContact?._id;
+        if (String(chatId) === String(currentChatId)) {
+          setPinnedMessagesData(updatedPinnedMessages || []);
+          const pinnedMap = {};
+          (updatedPinnedMessages || []).forEach(pinned => {
+            if (pinned.message) {
+              const msgId = pinned.message._id || pinned.message.id || pinned.message;
+              pinnedMap[msgId] = true;
+            }
+          });
+          setPinnedMessages(pinnedMap);
+        }
+      } catch (err) {
+        console.error('Error processing unpin message event', err);
+      }
+    });
+
+    socket.on('poll voted', ({ pollId, poll: updatedPoll, chatId }) => {
+      console.log('[SOCKET] poll voted event received:', { pollId, chatId, updatedPoll });
+      try {
+        if (!chatId || !updatedPoll) return;
+        const pollIdStr = String(pollId);
+        setMessages((prev) => {
+          const chatMessages = prev[chatId] || [];
+          const updated = chatMessages.map((msg) => {
+            if (!msg.poll) return msg;
+            const msgPollId = String(msg.poll?._id || msg.poll);
+            if (msgPollId === pollIdStr) {
+              console.log('📊 Updating poll in message:', pollIdStr);
+              return { ...msg, poll: updatedPoll };
+            }
+            return msg;
+          });
+          return {
+            ...prev,
+            [chatId]: updated,
+          };
+        });
+      } catch (err) {
+        console.error('Error processing poll voted event', err);
+      }
+    });
+
+    socket.on('poll remove vote', ({ pollId, poll: updatedPoll, chatId }) => {
+      console.log('[SOCKET] poll remove vote event received:', { pollId, chatId, updatedPoll });
+      try {
+        if (!chatId || !updatedPoll) return;
+        const pollIdStr = String(pollId);
+        setMessages((prev) => {
+          const chatMessages = prev[chatId] || [];
+          const updated = chatMessages.map((msg) => {
+            if (!msg.poll) return msg;
+            const msgPollId = String(msg.poll?._id || msg.poll);
+            if (msgPollId === pollIdStr) {
+              console.log('📊 Updating poll vote removal in message:', pollIdStr);
+              return { ...msg, poll: updatedPoll };
+            }
+            return msg;
+          });
+          return {
+            ...prev,
+            [chatId]: updated,
+          };
+        });
+      } catch (err) {
+        console.error('Error processing poll remove vote event', err);
+      }
+    });
+
+    socket.on('poll closed', ({ pollId, poll: updatedPoll, chatId }) => {
+      console.log('[SOCKET] poll closed event received:', { pollId, chatId, updatedPoll });
+      try {
+        if (!chatId || !updatedPoll) return;
+        const pollIdStr = String(pollId);
+        setMessages((prev) => {
+          const chatMessages = prev[chatId] || [];
+          const updated = chatMessages.map((msg) => {
+            if (!msg.poll) return msg;
+            const msgPollId = String(msg.poll?._id || msg.poll);
+            if (msgPollId === pollIdStr) {
+              console.log('📊 Updating poll closed status:', pollIdStr);
+              return { ...msg, poll: updatedPoll };
+            }
+            return msg;
+          });
+          return {
+            ...prev,
+            [chatId]: updated,
+          };
+        });
+      } catch (err) {
+        console.error('Error processing poll closed event', err);
+      }
+    });
 
     return () => {
       try {
@@ -4443,7 +5169,7 @@ const handleCreateGroup = useCallback(() => {
                   id: m._id,
                   type: m.type || 'text',
                   content: m.content || m.text || '',
-                  sender: m.sender?._id || m.sender || 'unknown',
+                  sender: m.sender,
                   timestamp: new Date(m.createdAt || m.timestamp || Date.now()).getTime(),
                   isRead: m.isRead || false,
                   attachments: Array.isArray(m.attachments) ? m.attachments : [],
@@ -4564,130 +5290,445 @@ const handleCreateGroup = useCallback(() => {
     fetchDocumentHistory();
   }, []);
   
-  // Fetch recent chats
-  useEffect(() => {
-    const fetchRecentChats = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        if (!token) throw new Error("No token found.");
+//   // Fetch recent chats
+//   useEffect(() => {
+//   const fetchRecentChats = async () => {
+//     try {
+//       const token = localStorage.getItem("token");
+//       if (!token) throw new Error("No token found.");
 
-        const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+//       const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
+//         headers: { Authorization: `Bearer ${token}` },
+//       });
 
-        if (!res.ok) throw new Error("Failed to fetch recent chats");
+//       if (!res.ok) throw new Error("Failed to fetch recent chats");
 
-        const data = await res.json();
+//       const data = await res.json();
 
-        const localUser = JSON.parse(
-          localStorage.getItem("chasmos_user_data") || "{}"
-        );
-        const loggedInUserId = localUser._id || localUser.id || null;
+//       const localUser = JSON.parse(
+//         localStorage.getItem("chasmos_user_data") || "{}"
+//       );
+//       const loggedInUserId = localUser._id || localUser.id || null;
 
-        const formatted = (Array.isArray(data) ? data : [])
-          .map((chat) => {
-            const participants = chat.participants || [];
-            // Prefer chat.otherUser if present and not self, else find first non-self participant
-            let otherUser = null;
-            if (chat.otherUser) {
-              otherUser = chat.otherUser;
-            } else {
-              otherUser = participants.find((p) => String(p._id || p.id) !== String(loggedInUserId));
-            }
+//       const formatted = (Array.isArray(data) ? data : [])
+//         .map((chat) => {
+//           const participants = chat.participants || [];
 
-            // Only skip if all participants are the current user (true self-chat)
-            const allAreSelf =
-              participants.length > 0 &&
-              participants.every((p) => String(p._id || p.id) === String(loggedInUserId));
-            if (allAreSelf) {
-              return null;
-            }
+//           const isGroup = chat.isGroupChat === true || chat.isGroupChat === "true";
 
-            const displayName =
-              chat.isGroupChat && chat.chatName
-                ? chat.chatName
-                : otherUser?.username ||
-                  otherUser?.name ||
-                  (otherUser?.email ? otherUser.email.split("@")[0] : null) ||
-                  "Unknown";
+//           // 👤 find other user ONLY for 1–1 chat
+//           let otherUser = null;
+//           if (!isGroup) {
+//             otherUser =
+//               chat.otherUser ||
+//               participants.find(
+//                 (p) =>
+//                   String(p._id || p.id) !== String(loggedInUserId)
+//               );
+//           }
 
-            // Determine if lastMessage indicates attachments and extract preview text
-            let preview = "";
-            let hasAttachment = false;
-            let attachmentMime = null;
+//           // 🚫 skip true self-chat
+//           const allAreSelf =
+//             !isGroup &&
+//             participants.length > 0 &&
+//             participants.every(
+//               (p) =>
+//                 String(p._id || p.id) === String(loggedInUserId)
+//             );
+//           if (allAreSelf) return null;
 
-            if (chat.lastMessage) {
-              if (typeof chat.lastMessage === "string") {
-                // backend may append a paperclip emoji for attachments
-                hasAttachment = chat.lastMessage.includes("📎");
-                preview = chat.lastMessage.replace(/📎/g, "").trim();
-              } else if (typeof chat.lastMessage === "object") {
-                const lm = chat.lastMessage;
-                const text = (lm.content || lm.text || "").toString().trim();
-                const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
-                hasAttachment = atts.length > 0;
-                if (text) {
-                  preview = text.split(/\s+/).slice(0, 8).join(" ") + (hasAttachment ? " 📎" : "");
-                } else if (hasAttachment) {
-                  const first = atts[0] || {};
-                  preview = first.fileName || first.file_name || first.filename || (first.fileUrl ? first.fileUrl.split('/').pop() : "Attachment");
-                  // strip paperclip or timestamp if present
-                  preview = preview.replace(/^[\d\-:.]+_/, "");
-                  attachmentMime = first.mimeType || first.type || null;
-                }
+//           /* ---------- DISPLAY NAME ---------- */
+//           const displayName = isGroup
+//             ? chat.chatName || "Unnamed Group"
+//             : otherUser?.username ||
+//               otherUser?.name ||
+//               (otherUser?.email
+//                 ? otherUser.email.split("@")[0]
+//                 : "Unknown");
+
+//           /* ---------- AVATAR (FIXED) ---------- */
+//           const avatar = isGroup
+//             ? chat.groupSettings?.avatar || null
+//             : otherUser?.avatar || otherUser?.pic || null;
+
+//           /* ---------- LAST MESSAGE ---------- */
+//           let preview = "";
+//           let hasAttachment = false;
+//           let attachmentMime = null;
+
+//           if (chat.lastMessage) {
+//             if (typeof chat.lastMessage === "string") {
+//               hasAttachment = chat.lastMessage.includes("📎");
+//               preview = chat.lastMessage.replace(/📎/g, "").trim();
+//             } else if (typeof chat.lastMessage === "object") {
+//               const lm = chat.lastMessage;
+//               const text = (lm.content || lm.text || "").trim();
+//               const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
+//               hasAttachment = atts.length > 0;
+
+//               if (text) {
+//                 preview =
+//                   text.split(/\s+/).slice(0, 8).join(" ") +
+//                   (hasAttachment ? " 📎" : "");
+//               } else if (hasAttachment) {
+//                 const first = atts[0] || {};
+//                 preview =
+//                   first.fileName ||
+//                   first.name ||
+//                   (first.fileUrl
+//                     ? first.fileUrl.split("/").pop()
+//                     : "Attachment");
+//                 attachmentMime = first.mimeType || first.type || null;
+//               }
+//             }
+//           }
+
+//           const chatIdValue = chat.chatId || chat._id;
+
+//           return {
+//             id: chatIdValue,
+//             chatId: chatIdValue,
+
+//             // ✅ FIXED: correct userId
+//             userId: isGroup ? null : (otherUser?._id || otherUser?.id || null),
+
+//             name: displayName,
+//             avatar,
+
+//             lastMessage: preview || "",
+//             hasAttachment,
+//             attachmentMime,
+
+//             timestamp: chat.updatedAt || chat.timestamp,
+//             isOnline: !isGroup && otherUser?.isOnline === true,
+
+//             isGroupChat: isGroup,
+
+//             unreadCount:
+//               typeof chat.unreadCount === "number"
+//                 ? chat.unreadCount
+//                 : chat.unreadCount?.[loggedInUserId] || 0,
+//           };
+//         })
+//         .filter(Boolean);
+
+//       // 🧠 Deduplicate by chatId
+//       const seen = new Map();
+//       formatted.forEach((chat) => {
+//         const key = String(chat.chatId);
+//         if (
+//           !seen.has(key) ||
+//           new Date(chat.timestamp) >
+//             new Date(seen.get(key).timestamp)
+//         ) {
+//           seen.set(key, chat);
+//         }
+//       });
+
+//       setRecentChats(Array.from(seen.values()));
+//     } catch (err) {
+//       setError(err.message);
+//     } finally {
+//       setLoading(false);
+//     }
+//   };
+
+//   fetchRecentChats();
+// }, []);
+
+useEffect(() => {
+  const fetchRecentChats = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) throw new Error("No token found.");
+
+      const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) throw new Error("Failed to fetch recent chats");
+
+      const data = await res.json();
+
+      const localUser = JSON.parse(
+        localStorage.getItem("chasmos_user_data") || "{}"
+      );
+      const loggedInUserId = localUser._id || localUser.id || null;
+
+      const formatted = (Array.isArray(data) ? data : [])
+        .map((chat) => {
+          const participants = chat.participants || [];
+
+          let otherUser = chat.otherUser;
+          if (!otherUser) {
+            otherUser = participants.find(
+              (p) => String(p._id || p.id) !== String(loggedInUserId)
+            );
+          }
+
+          const allAreSelf =
+            participants.length > 0 &&
+            participants.every(
+              (p) => String(p._id || p.id) === String(loggedInUserId)
+            );
+          if (allAreSelf) return null;
+
+          const displayName =
+            chat.isGroupChat && chat.chatName
+              ? chat.chatName
+              : otherUser?.username ||
+                otherUser?.name ||
+                (otherUser?.email
+                  ? otherUser.email.split("@")[0]
+                  : "Unknown");
+
+          let preview = "";
+          let hasAttachment = false;
+          let attachmentMime = null;
+
+          if (chat.lastMessage) {
+            if (typeof chat.lastMessage === "string") {
+              hasAttachment = chat.lastMessage.includes("📎");
+              preview = chat.lastMessage.replace(/📎/g, "").trim();
+            } else if (typeof chat.lastMessage === "object") {
+              const lm = chat.lastMessage;
+              const text = (lm.content || lm.text || "").toString().trim();
+              const atts = Array.isArray(lm.attachments)
+                ? lm.attachments
+                : [];
+
+              hasAttachment = atts.length > 0;
+
+              if (text) {
+                preview =
+                  text.split(/\s+/).slice(0, 8).join(" ") +
+                  (hasAttachment ? " 📎" : "");
+              } else if (hasAttachment) {
+                const first = atts[0] || {};
+                preview =
+                  first.fileName ||
+                  first.file_name ||
+                  first.filename ||
+                  (first.fileUrl
+                    ? first.fileUrl.split("/").pop()
+                    : "Attachment");
+
+                preview = preview.replace(/^[\d\-:.]+_/, "");
+                attachmentMime = first.mimeType || first.type || null;
               }
             }
-
-            const chatIdValue = chat.chatId || chat._id;
-            
-            return {
-              id: chatIdValue, // Use chatId as the primary ID
-              chatId: chatIdValue,
-              userId: otherId, // Store the other user's ID separately
-              name: displayName,
-              avatar: otherUser?.avatar || otherUser?.pic || null,
-              lastMessage: preview || "",
-              hasAttachment,
-              attachmentMime,
-              timestamp: chat.timestamp || chat.updatedAt,
-              isOnline: otherUser?.isOnline || false,
-              isGroupChat: chat.isGroupChat === true || chat.isGroupChat === 'true',
-              unreadCount:
-                typeof chat.unreadCount === "number"
-                  ? chat.unreadCount
-                  : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
-            };
-          })
-          .filter(Boolean); // Remove null entries
-          console.log("Fetched recent chats:", formatted);
-        // Deduplicate by chatId (keep the most recent one)
-        const seen = new Map();
-        formatted.forEach(chat => {
-          const chatIdKey = String(chat.chatId);
-          if (!seen.has(chatIdKey) || 
-              new Date(chat.timestamp) > new Date(seen.get(chatIdKey).timestamp)) {
-            seen.set(chatIdKey, chat);
           }
-        });
-        
-        const deduplicated = Array.from(seen.values());
 
-        // Filter using archivedChatIds state in case it's already loaded
-        if (archivedChatIds && archivedChatIds.size > 0) {
-          const filtered = deduplicated.filter(c => !archivedChatIds.has(String(c.chatId || '')));
-          setRecentChats(filtered);
-        } else {
-          setRecentChats(deduplicated);
+          const chatIdValue = chat.chatId || chat._id;
+
+          // ✅🔥 FINAL AVATAR FIX (GROUP + DM)
+          let avatar = null;
+
+          if (chat.isGroupChat && chat.groupSettings?.avatar) {
+            avatar = chat.groupSettings.avatar.startsWith("http")
+              ? chat.groupSettings.avatar
+              : `${API_BASE_URL}${chat.groupSettings.avatar}`;
+          } else if (!chat.isGroupChat && otherUser?.avatar) {
+            avatar = otherUser.avatar.startsWith("http")
+              ? otherUser.avatar
+              : `${API_BASE_URL}${otherUser.avatar}`;
+          }
+
+          return {
+            id: chatIdValue,
+            chatId: chatIdValue,
+            userId: otherUser?._id || otherUser?.id || null,
+            name: displayName,
+            avatar, // 🔥 GUARANTEED VALUE OR NULL
+            lastMessage: preview || "",
+            hasAttachment,
+            attachmentMime,
+            timestamp: chat.timestamp || chat.updatedAt,
+            isOnline: otherUser?.isOnline || false,
+            isGroupChat:
+              chat.isGroupChat === true || chat.isGroupChat === "true",
+            unreadCount:
+              typeof chat.unreadCount === "number"
+                ? chat.unreadCount
+                : (chat.unreadCount &&
+                    chat.unreadCount[loggedInUserId]) ||
+                  0,
+          };
+        })
+        .filter(Boolean);
+
+      console.table(
+        formatted.map((c) => ({
+          name: c.name,
+          avatar: c.avatar,
+          isGroup: c.isGroupChat,
+        }))
+      );
+
+      const seen = new Map();
+      formatted.forEach((chat) => {
+        const key = String(chat.chatId);
+        if (
+          !seen.has(key) ||
+          new Date(chat.timestamp) >
+            new Date(seen.get(key).timestamp)
+        ) {
+          seen.set(key, chat);
         }
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
+      });
 
-    fetchRecentChats();
-  }, []);
+      const deduplicated = Array.from(seen.values());
+
+      if (archivedChatIds && archivedChatIds.size > 0) {
+        setRecentChats(
+          deduplicated.filter(
+            (c) => !archivedChatIds.has(String(c.chatId))
+          )
+        );
+      } else {
+        setRecentChats(deduplicated);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchRecentChats();
+}, []);
+
+
+// useEffect(() => {
+//   const fetchRecentChats = async () => {
+//     try {
+//       const token = localStorage.getItem("token");
+//       if (!token) throw new Error("No token found.");
+
+//       const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
+//         headers: { Authorization: `Bearer ${token}` },
+//       });
+
+//       if (!res.ok) throw new Error("Failed to fetch recent chats");
+
+//       const data = await res.json();
+
+//       const localUser = JSON.parse(
+//         localStorage.getItem("chasmos_user_data") || "{}"
+//       );
+//       const loggedInUserId = localUser._id || localUser.id || null;
+
+//       const formatted = (Array.isArray(data) ? data : [])
+//         .map((chat) => {
+//           const participants = chat.participants || [];
+
+//           let otherUser = chat.otherUser;
+//           if (!otherUser) {
+//             otherUser = participants.find(
+//               (p) => String(p._id || p.id) !== String(loggedInUserId)
+//             );
+//           }
+
+//           const allAreSelf =
+//             participants.length > 0 &&
+//             participants.every(
+//               (p) => String(p._id || p.id) === String(loggedInUserId)
+//             );
+//           if (allAreSelf) return null;
+
+//           const displayName =
+//             chat.isGroupChat && chat.chatName
+//               ? chat.chatName
+//               : otherUser?.username ||
+//                 otherUser?.name ||
+//                 (otherUser?.email ? otherUser.email.split("@")[0] : "Unknown");
+
+//           let preview = "";
+//           let hasAttachment = false;
+//           let attachmentMime = null;
+
+//           if (chat.lastMessage) {
+//             if (typeof chat.lastMessage === "string") {
+//               hasAttachment = chat.lastMessage.includes("📎");
+//               preview = chat.lastMessage.replace(/📎/g, "").trim();
+//             } else if (typeof chat.lastMessage === "object") {
+//               const lm = chat.lastMessage;
+//               const text = (lm.content || lm.text || "").toString().trim();
+//               const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
+//               hasAttachment = atts.length > 0;
+
+//               if (text) {
+//                 preview =
+//                   text.split(/\s+/).slice(0, 8).join(" ") +
+//                   (hasAttachment ? " 📎" : "");
+//               } else if (hasAttachment) {
+//                 const first = atts[0] || {};
+//                 preview =
+//                   first.fileName ||
+//                   first.file_name ||
+//                   first.filename ||
+//                   (first.fileUrl ? first.fileUrl.split("/").pop() : "Attachment");
+//                 preview = preview.replace(/^[\d\-:.]+_/, "");
+//                 attachmentMime = first.mimeType || first.type || null;
+//               }
+//             }
+//           }
+
+//           const chatIdValue = chat.chatId || chat._id;
+
+//           return {
+//             id: chatIdValue,
+//             chatId: chatIdValue,
+//             userId: otherUser?._id || otherUser?.id || null, // fixed here
+//             name: displayName,
+//             avatar: otherUser?.avatar || otherUser?.pic || null,
+//             lastMessage: preview || "",
+//             hasAttachment,
+//             attachmentMime,
+//             timestamp: chat.timestamp || chat.updatedAt,
+//             isOnline: otherUser?.isOnline || false,
+//             isGroupChat: chat.isGroupChat === true || chat.isGroupChat === "true",
+//             unreadCount:
+//               typeof chat.unreadCount === "number"
+//                 ? chat.unreadCount
+//                 : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
+//           };
+//         })
+//         .filter(Boolean);
+
+//       console.log("Fetched recent chats:", formatted);
+
+//       // Deduplicate by chatId
+//       const seen = new Map();
+//       formatted.forEach((chat) => {
+//         const chatIdKey = String(chat.chatId);
+//         if (
+//           !seen.has(chatIdKey) ||
+//           new Date(chat.timestamp) > new Date(seen.get(chatIdKey).timestamp)
+//         ) {
+//           seen.set(chatIdKey, chat);
+//         }
+//       });
+
+//       const deduplicated = Array.from(seen.values());
+
+//       if (archivedChatIds && archivedChatIds.size > 0) {
+//         const filtered = deduplicated.filter(
+//           (c) => !archivedChatIds.has(String(c.chatId || ""))
+//         );
+//         setRecentChats(filtered);
+//       } else {
+//         setRecentChats(deduplicated);
+//       }
+//     } catch (err) {
+//       setError(err.message);
+//     } finally {
+//       setLoading(false);
+//     }
+//   };
+
+//   fetchRecentChats();
+// }, []);
 
   // Handle responsive design
   useEffect(() => {
@@ -4816,13 +5857,22 @@ useEffect(() => {
   return (
     <>
       {showDeleteChatModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-8 max-w-sm w-full relative border border-gray-200 dark:border-gray-700">
-            <h2 className="text-xl font-bold mb-4 text-gray-900 dark:text-white flex items-center gap-2">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+          style={{ backgroundColor: effectiveTheme.mode === 'dark' ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.85)' }}
+        >
+          <div
+            className={`rounded-2xl shadow-2xl p-8 max-w-sm w-full relative border ${
+              effectiveTheme.mode === 'dark'
+                ? `${effectiveTheme.secondary} ${effectiveTheme.border}`
+                : 'bg-gradient-to-br from-blue-50 to-purple-50 backdrop-blur-md border-blue-200 shadow-sm'
+            }`}
+          >
+            <h2 className={`text-xl font-bold mb-4 ${effectiveTheme.text} flex items-center gap-2`}>
               <Trash2 className="w-6 h-6 text-red-500" />
               Delete Chat
             </h2>
-            <p className="mb-6 text-gray-700 dark:text-gray-300">Are you sure you want to delete this chat? This will remove the chat for everyone if you are allowed. This action cannot be undone.</p>
+              <p className={`mb-6 ${effectiveTheme.textSecondary}`}>Are you sure you want to delete this chat? This will remove the chat for everyone if you are allowed. This action cannot be undone.</p>
             <div className="flex gap-3 justify-end">
               <button
                 className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition"
@@ -5938,40 +6988,74 @@ useEffect(() => {
         <>
           {/* Filtered Chats/Groups List */}
           {loading || (!minLoadingComplete && recentChats.length === 0) ? (
-            <div className="flex flex-col items-center justify-center py-10">
-              <svg className="animate-spin h-8 w-8 text-blue-500 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-              </svg>
-              <span className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>Loading chats...</span>
-            </div>
-          ) : (
-            (() => {
-              let filtered = [];
-              if (activeNavItem === 'chats') {
-                filtered = recentChats.filter(c => c.isGroupChat === false);
-              } else if (activeNavItem === 'groups') {
-                filtered = recentChats.filter(c => c.isGroupChat === true);
-              } else {
-                filtered = recentChats;
-              }
-              return filtered.length > 0 ? (
-                <div className="flex flex-col gap-2">
-                  <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-                    {activeNavItem === 'groups' ? 'Groups' : 'Recent Chats'}
-                  </h4>
-                  {filtered.map((chat) => (
-                    <ContactItem
-                      key={chat.chatId || chat.id}
-                      contact={chat}
-                      effectiveTheme={effectiveTheme}
-                      onSelect={(c) => handleOpenChat(c)}
-                    />
-                  ))}
-                </div>
-              ) : null;
-            })()
-          )}
+  <div className="flex flex-col items-center justify-center py-10">
+    <svg
+      className="animate-spin h-8 w-8 text-blue-500 mb-3"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      ></circle>
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+      ></path>
+    </svg>
+    <span className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+      Loading chats...
+    </span>
+  </div>
+) : (
+  (() => {
+    // Ensure every chat has an avatar before filtering
+    const chatsWithAvatar = recentChats.map(chat => ({
+      ...chat,
+      avatar: chat.avatar,
+    }));
+
+    let filtered = [];
+    if (activeNavItem === 'chats') {
+      filtered = chatsWithAvatar.filter(c => !c.isGroupChat);
+    } else if (activeNavItem === 'groups') {
+      filtered = chatsWithAvatar.filter(c => c.isGroupChat);
+    } else {
+      filtered = chatsWithAvatar;
+    }
+
+    return (
+      <div className="flex flex-col gap-2">
+        <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+          {activeNavItem === 'groups' ? 'Groups' : 'Recent Chats'}
+        </h4>
+
+        {filtered.length > 0 ? (
+          filtered.map(chat => (
+            <ContactItem
+              key={chat.chatId || chat.id}
+              contact={chat}
+              effectiveTheme={effectiveTheme}
+              onSelect={(c) => handleOpenChat(c)}
+            />
+          ))
+        ) : activeNavItem === 'groups' ? (
+          <div className="mt-2 text-sm">
+            <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+              You're not in any group!
+            </p>
+          </div>
+        ) : null}
+      </div>
+    );
+  })()
+)}
         </>
       )}
 
@@ -6299,6 +7383,38 @@ useEffect(() => {
           ) : selectedContact ? (
             // CASE 3: Normal person/group chat
             <>
+              {/* compute online status for selected contact */}
+              {
+                (() => {
+                  const isGroup = selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat;
+                  let __isOnline = false;
+                  let __groupOnlineCount = 0;
+                  if (isGroup) {
+                    const members = selectedContact.users || selectedContact.participants || [];
+                    // Prefer server-provided group online count when available (fallback to local computation)
+                    const chatIdKey = selectedContact.chatId || selectedContact._id || selectedContact.id || selectedContact.id;
+                    if (groupOnlineCounts && (groupOnlineCounts[String(chatIdKey)] != null)) {
+                      // server count includes this user's own connection — subtract 1
+                      const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+                      __groupOnlineCount = Math.max(0, raw - 1);
+                    } else {
+                      __groupOnlineCount = (members || []).filter(m => {
+                        const uid = m && (m._id || m.id || m);
+                        if (!uid) return false;
+                        if (String(uid) === String(currentUserId)) return false;
+                        return onlineUsers.has(String(uid));
+                      }).length;
+                    }
+                  } else {
+                    const contactUserId = selectedContact.userId || selectedContact._id || selectedContact.id || selectedContact.participantId;
+                    __isOnline = contactUserId ? onlineUsers.has(String(contactUserId)) : Boolean(selectedContact.isOnline);
+                  }
+                  // attach computed to object so we can pass through props
+                  selectedContact.__computedIsOnline = __isOnline;
+                  selectedContact.__computedGroupOnlineCount = __groupOnlineCount;
+                  return null;
+                })()
+              }
               <ChatHeader
                 selectedContact={selectedContact}
                 effectiveTheme={effectiveTheme}
@@ -6320,6 +7436,8 @@ useEffect(() => {
                 isArchived={isArchivedState}
                 setShowDeleteChatModal={setShowDeleteChatModal}
                 setChatToDelete={setChatToDelete}
+                isOnline={selectedContact.__computedIsOnline}
+                groupOnlineCount={selectedContact.__computedGroupOnlineCount}
                 onOpenGroupInfo={handleOpenGroupInfo}
                 onOpenUserProfile={() => {
                   console.log('🔔 onOpenUserProfile called with selectedContact:', selectedContact);
@@ -6422,8 +7540,46 @@ useEffect(() => {
                   onForwardMessage={handleForwardMessage}
                   onEditMessage={handleEditMessage}
                   manualScrollInProgress={manualScrollInProgressRef}
+                  onPollVote={handlePollVote}
+                  onPollRemoveVote={handlePollRemoveVote}
+                  onPollClose={handlePollClose}
+                  // Reply props
+                  replySelectionActive={replySelectionActive}
+                  selectedReplies={selectedReplies}
+                  onStartReplySelection={onStartReplySelection}
+                  onToggleSelectReply={onToggleSelectReply}
+                  onClearReplySelection={onClearReplySelection}
                 />
               </div>
+              {replySelectionActive && (
+                <div
+                  className={`p-2 border-t border-b flex items-center justify-between space-x-4 ${effectiveTheme.mode === 'dark' ? 'bg-gradient-to-r from-black/30 to-white/2' : 'bg-gradient-to-r from-white to-gray-50'}`}
+                  style={{
+                    background: effectiveTheme.mode === 'dark'
+                      ? 'linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))'
+                      : 'linear-gradient(90deg, rgba(0,0,0,0.02), rgba(0,0,0,0.01))',
+                    borderColor: effectiveTheme.border ? effectiveTheme.border.replace('border-', '') : undefined
+                  }}
+                >
+                  <div className={`text-sm ${effectiveTheme.text}`}>
+                    Replying to <strong className={`${effectiveTheme.text}`}>{selectedReplies?.length || 0}</strong> message{selectedReplies?.length > 1 ? 's' : ''}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {replySelectionHint && (
+                      <div className="mr-4 text-sm text-red-500" role="status">
+                        {replySelectionHint}
+                      </div>
+                    )}
+                    <button
+                      className={`text-sm px-3 py-1 rounded ${effectiveTheme.mode === 'dark' ? 'bg-white/6 text-white/90' : 'bg-gray-200 text-gray-800'}`}
+                      onClick={() => onClearReplySelection && onClearReplySelection()}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <MessageInput
                 onSendMessage={(payload) => {
                   // Helper to get correct chatId and userId for message sending
@@ -6445,15 +7601,18 @@ useEffect(() => {
                     }
                   }
                   // Log for debugging
-                  console.log('[MessageInput->onSendMessage] chatId:', chatId, 'userId:', userId, 'selectedContact:', selectedContact);
+                  console.log('[MessageInput->onSendMessage] chatId:', chatId, 'userId:', userId, 'selectedContact:', selectedContact, 'selectedReplies:', selectedReplies);
                   handleSendMessageFromInput({
                     ...payload,
                     chatId,
                     userId,
+                    repliedTo: selectedReplies || [],
                   });
                 }}
                 selectedContact={selectedContact}
+                selectedReplies={selectedReplies}
                 effectiveTheme={effectiveTheme}
+                isGroupChat={selectedContact?.isGroup || selectedContact?.isGroupChat || false}
               />
             </>
           ) : !isMobileView ? (
@@ -6515,6 +7674,6 @@ useEffect(() => {
       </div>
     </>
   );
-};
+}
 
 export default ChattingPage;

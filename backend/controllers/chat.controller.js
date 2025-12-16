@@ -89,7 +89,7 @@ export const fetchChats = asyncHandler(async (req, res) => {
       path: "lastMessage.sender",
       select: "name avatar email",
     });
-    
+    console.log(results);
     res.status(200).send(populatedResults);
   } catch (error) {
     res.status(400);
@@ -98,20 +98,17 @@ export const fetchChats = asyncHandler(async (req, res) => {
 });
 
 export const createGroupChat = asyncHandler(async (req, res) => {
-  const { name, users, description, avatar, isPublic } = req.body;
+  const { name, users, description, isPublic } = req.body;
 
-  if (!users || !name) {
+  if (!name || !users) {
     return res.status(400).json({ message: "Please fill all the fields" });
   }
 
-  // Handle both array or string
-  let parsedUsers = users;
-  if (typeof users === "string") {
-    try {
-      parsedUsers = JSON.parse(users);
-    } catch (err) {
-      return res.status(400).json({ message: "Invalid users format" });
-    }
+  let parsedUsers;
+  try {
+    parsedUsers = JSON.parse(users);
+  } catch {
+    return res.status(400).json({ message: "Invalid users format" });
   }
 
   if (!Array.isArray(parsedUsers) || parsedUsers.length < 2) {
@@ -120,34 +117,36 @@ export const createGroupChat = asyncHandler(async (req, res) => {
     });
   }
 
-  // Add creator to group
-  parsedUsers.push(req.user._id);
+  // ✅ avatar path from multer
+  const avatar = req.file ? `/uploads/${req.file.filename}` : "";
 
-  try {
-    const groupChat = await Chat.create({
-      chatName: name,
-      users: parsedUsers,
-      participants: parsedUsers,
-      isGroupChat: true,
-      groupAdmin: req.user._id,
-      admins: [req.user._id],
-      groupSettings: {
-        description: description || "",
-        avatar: avatar || "",
-        isPublic: isPublic || false,
-      },
-    });
+  console.log("Uploaded file:", req.file);
 
-    const fullGroupChat = await Chat.findById(groupChat._id)
-      .populate("users", "-password")
-      .populate("groupAdmin", "-password")
-      .populate("admins", "name email avatar");
-
-    res.status(200).json(fullGroupChat);
-  } catch (error) {
-    res.status(400);
-    throw new Error(error.message);
+  // ✅ ensure creator is included only once
+  if (!parsedUsers.includes(req.user._id.toString())) {
+    parsedUsers.push(req.user._id);
   }
+
+  const groupChat = await Chat.create({
+    chatName: name,
+    users: parsedUsers,
+    participants: parsedUsers,
+    isGroupChat: true,
+    groupAdmin: req.user._id,
+    admins: [req.user._id],
+    groupSettings: {
+      description: description || "",
+      avatar,
+      isPublic: isPublic === "true",
+    },
+  });
+
+  const fullGroupChat = await Chat.findById(groupChat._id)
+    .populate("users", "-password")
+    .populate("groupAdmin", "-password")
+    .populate("admins", "name email avatar");
+
+  res.status(200).json(fullGroupChat);
 });
 
 

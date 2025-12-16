@@ -16,13 +16,13 @@ import {
   // joinGroupByInvite
 } from "../controllers/chat.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
-
+import { upload } from "../config/multer.js";
 const router = express.Router();
 
 router.route("/").post(protect, accessChat);
 router.route("/").get(protect, fetchChats);
 router.route("/recent").get(protect, getRecentChats);
- router.route("/group").post(protect, createGroupChat);
+ router.route("/group").post(protect,upload.single("avatar"), createGroupChat);
 // router.route("/rename").put(protect, renameGroup);
 // router.route("/settings").put(protect, updateGroupSettings);
 // router.route("/groupremove").put(protect, removeFromGroup);

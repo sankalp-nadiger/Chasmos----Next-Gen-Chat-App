@@ -468,12 +468,21 @@ export const generateTypingIndicator = () => {
   return Math.random() < 0.3; // 30% chance of someone typing
 };
 
-// Avatar fallback generator
-export const generateAvatarFallback=(name)=> {
-  if (!name) return "NN"; // or "" or any default
-  const initials = name.split(" ").map(n => n[0]).join("");
-  return initials;
-}
+export const generateAvatarFallback = (contact) => {
+  const text =
+    contact?.name ||
+    contact?.username ||
+    contact?.chatName ||
+    "?";
+
+  return text
+    .toString()
+    .split(" ")
+    .map(word => word[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+};
 
 
 // Returns the hover label for a message date.
