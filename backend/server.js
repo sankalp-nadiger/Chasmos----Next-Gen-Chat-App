@@ -100,9 +100,10 @@ initScheduledMessageCron();
 io.on("connection", (socket) => {
   console.log("Connected to socket.io");
   
-  socket.on("setup", (userData) => {
+  socket.on("setup", async (userData) => {
     const uid = userData?._id || userData?.id || userData;
     if (!uid) {
+      console.log('[SOCKET] setup called with no uid, sending connected ack');
       socket.emit('connected');
       return;
     }
@@ -112,16 +113,100 @@ io.on("connection", (socket) => {
     // increment connection count for this user
     const prev = onlineUserConnections.get(socket.userId) || 0;
     onlineUserConnections.set(socket.userId, prev + 1);
+    console.log(`[SOCKET] setup: user=${socket.userId} prevConnections=${prev} newConnections=${prev + 1} totalOnlineUsers=${onlineUserConnections.size}`);
 
     // emit to others that this user is online only when first connection
     if (prev === 0) {
-      try { io.emit('user online', { userId: socket.userId }); } catch (e) {}
+      try {
+        io.emit('user online', { userId: socket.userId });
+        console.log(`[SOCKET] broadcast: user online -> ${socket.userId}`);
+      } catch (e) {
+        console.error('[SOCKET] error broadcasting user online', e);
+      }
     }
 
     // send current online users list to the connecting socket
     try {
-      socket.emit('online users', Array.from(onlineUserConnections.keys()));
-    } catch (e) {}
+      const onlineList = Array.from(onlineUserConnections.keys());
+      socket.emit('online users', onlineList);
+      console.log(`[SOCKET] sent online users list (${onlineList.length}) to ${socket.userId}`);
+    } catch (e) {
+      console.error('[SOCKET] error emitting online users list', e);
+    }
+
+    // Also send the online users list and per-chat online counts to each other participant
+    // in chats this user is in. This emits both the general `online users` list to personal
+    // rooms and a `group online count` event to each chat room and each member's personal room.
+    try {
+      const uid = socket.userId;
+      const chatDocs = await Chat.find({ $or: [{ users: uid }, { participants: uid }] }).select('users participants').lean();
+      if ((chatDocs || []).length === 0) {
+        // nothing to broadcast
+      } else {
+        // Prepare full online list for personal-room broadcasts
+        const onlineListForBroadcast = Array.from(onlineUserConnections.keys());
+
+        // Collect unique personal user IDs (excluding current) to continue sending the
+        // existing `online users` list as before for compatibility with clients.
+        const otherUserIds = new Set();
+        chatDocs.forEach(cd => {
+          const members = (cd.users || cd.participants || []);
+          members.forEach(m => {
+            const id = m && (m._id || m.id || m);
+            if (!id) return;
+            const sid = String(id);
+            if (sid === String(uid)) return;
+            otherUserIds.add(sid);
+          });
+        });
+
+        otherUserIds.forEach(ou => {
+          try {
+            io.to(ou).emit('online users', onlineListForBroadcast);
+          } catch (e) {
+            console.error(`[SOCKET] error emitting online users to ${ou}`, e);
+          }
+        });
+
+        // Now compute and emit per-chat online counts. For each chat, count how many
+        // of its members are currently connected (based on onlineUserConnections map),
+        // then emit `group online count` to the chat room and to each member's personal room.
+        chatDocs.forEach(cd => {
+          try {
+            const members = (cd.users || cd.participants || []);
+            const memberIds = members
+              .map(m => String(m && (m._id || m.id || m)))
+              .filter(Boolean);
+
+            const onlineCount = memberIds.reduce((acc, id) => acc + (onlineUserConnections.has(id) ? 1 : 0), 0);
+            const chatId = String(cd._id);
+
+            // Emit to the chat room (sockets that have joined the chat room)
+            try {
+              io.to(chatId).emit('group online count', { chatId, onlineCount });
+            } catch (e) {
+              console.error(`[SOCKET] error emitting group online count to chat room ${chatId}`, e);
+            }
+
+            // Also emit to each member's personal room as a fallback for sockets not
+            // currently in the chat room.
+            memberIds.forEach(mid => {
+              try {
+                io.to(mid).emit('group online count', { chatId, onlineCount });
+              } catch (e) {
+                console.error(`[SOCKET] error emitting group online count to user ${mid}`, e);
+              }
+            });
+          } catch (e2) {
+            console.error('[SOCKET] error computing group online count for a chat', e2);
+          }
+        });
+
+        console.log(`[SOCKET] broadcasted online users list to ${otherUserIds.size} other chat participant(s) for user ${uid}`);
+      }
+    } catch (e) {
+      console.error('[SOCKET] error finding chats to broadcast online users list', e);
+    }
 
     socket.emit("connected");
   });
@@ -820,9 +905,15 @@ socket.on("remove reaction", async (data) => {
       if (uid) {
         const prev = onlineUserConnections.get(uid) || 0;
         const next = Math.max(0, prev - 1);
+        console.log(`[SOCKET] disconnect: user=${uid} prevConnections=${prev} nextConnections=${next}`);
         if (next <= 0) {
           onlineUserConnections.delete(uid);
-          try { io.emit('user offline', { userId: uid }); } catch (e) {}
+          try {
+            io.emit('user offline', { userId: uid });
+            console.log(`[SOCKET] broadcast: user offline -> ${uid}`);
+          } catch (e) {
+            console.error('[SOCKET] error broadcasting user offline', e);
+          }
         } else {
           onlineUserConnections.set(uid, next);
         }

@@ -2420,6 +2420,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
   const socketRef = useRef(null);
   const [socketConnected, setSocketConnected] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(new Set());
+  const [groupOnlineCounts, setGroupOnlineCounts] = useState({});
   // Current user id (used for message alignment)
   const _localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
   const currentUserId = _localUser._id || _localUser.id || null;
@@ -4337,6 +4338,16 @@ const handleSendMessageFromInput = useCallback(
           return s;
         });
       } catch (e) {}
+    });
+
+    // Per-chat online counts emitted by server
+    socket.on('group online count', ({ chatId, onlineCount }) => {
+      try {
+        if (!chatId) return;
+        setGroupOnlineCounts(prev => ({ ...(prev || {}), [String(chatId)]: Number(onlineCount || 0) }));
+      } catch (e) {
+        console.error('Error handling group online count', e);
+      }
     });
 
     socket.on('message recieved', (newMessage) => {
@@ -7010,25 +7021,32 @@ useEffect(() => {
       filtered = chatsWithAvatar;
     }
 
-    return filtered.length > 0 ? (
+    return (
       <div className="flex flex-col gap-2">
         <h4 className={`font-semibold ${effectiveTheme.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
           {activeNavItem === 'groups' ? 'Groups' : 'Recent Chats'}
         </h4>
-        {filtered.map(chat => (
-          <ContactItem
-            key={chat.chatId || chat.id}
-            contact={chat}
-            effectiveTheme={effectiveTheme}
-            onSelect={(c) => handleOpenChat(c)}
-          />
-        ))}
+
+        {filtered.length > 0 ? (
+          filtered.map(chat => (
+            <ContactItem
+              key={chat.chatId || chat.id}
+              contact={chat}
+              effectiveTheme={effectiveTheme}
+              onSelect={(c) => handleOpenChat(c)}
+            />
+          ))
+        ) : activeNavItem === 'groups' ? (
+          <div className="mt-2 text-sm">
+            <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+              You're not in any group!
+            </p>
+          </div>
+        ) : null}
       </div>
-    ) : null;
+    );
   })()
 )}
-
-      
         </>
       )}
 
@@ -7364,12 +7382,20 @@ useEffect(() => {
                   let __groupOnlineCount = 0;
                   if (isGroup) {
                     const members = selectedContact.users || selectedContact.participants || [];
-                    __groupOnlineCount = (members || []).filter(m => {
-                      const uid = m && (m._id || m.id || m);
-                      if (!uid) return false;
-                      if (String(uid) === String(currentUserId)) return false;
-                      return onlineUsers.has(String(uid));
-                    }).length;
+                    // Prefer server-provided group online count when available (fallback to local computation)
+                    const chatIdKey = selectedContact.chatId || selectedContact._id || selectedContact.id || selectedContact.id;
+                    if (groupOnlineCounts && (groupOnlineCounts[String(chatIdKey)] != null)) {
+                      // server count includes this user's own connection — subtract 1
+                      const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+                      __groupOnlineCount = Math.max(0, raw - 1);
+                    } else {
+                      __groupOnlineCount = (members || []).filter(m => {
+                        const uid = m && (m._id || m.id || m);
+                        if (!uid) return false;
+                        if (String(uid) === String(currentUserId)) return false;
+                        return onlineUsers.has(String(uid));
+                      }).length;
+                    }
                   } else {
                     const contactUserId = selectedContact.userId || selectedContact._id || selectedContact.id || selectedContact.participantId;
                     __isOnline = contactUserId ? onlineUsers.has(String(contactUserId)) : Boolean(selectedContact.isOnline);
