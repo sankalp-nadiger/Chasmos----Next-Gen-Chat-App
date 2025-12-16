@@ -14,6 +14,7 @@ import {
   updateUserSettings,
   rejectChatRequest,
   getChatRequestStatus,
+  getBusinessUsers,
 } from "../controllers/user.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { checkBlockStatus } from "../middleware/block.middleware.js"; // NEW
@@ -50,7 +51,7 @@ router.post(
   protect,
   rejectChatRequest
 );
-
+router.get("/business", getBusinessUsers);
 
 
 export default router;

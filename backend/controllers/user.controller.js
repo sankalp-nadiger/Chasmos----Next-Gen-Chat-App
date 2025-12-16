@@ -24,25 +24,21 @@ export const allUsers = asyncHandler(async (req, res) => {
   let users = [];
 
   if (!search) {
-    // No search → return all except current user
     users = await User.find({ _id: { $ne: req.user._id } }).select(
       "-password -__v"
     );
     return res.status(200).json(users);
   }
 
-  // If search is an email → exact match
   if (search.includes("@")) {
     const user = await User.findOne({ email: search.toLowerCase() }).select(
       "-password -__v"
     );
     if (user && user._id.toString() !== req.user._id.toString()) {
-      return res.status(200).json([user]); // return array for compatibility
+      return res.status(200).json([user]);
     }
-    // fallback to fuzzy search if exact not found
   }
 
-  // Fuzzy search on name or email
   users = await User.find({
     $or: [
       { name: { $regex: search, $options: "i" } },
@@ -54,31 +50,39 @@ export const allUsers = asyncHandler(async (req, res) => {
   res.status(200).json(users);
 });
 
-export const registerUser = asyncHandler(async (req, res) => {
-  const { name, email, password, phoneNumber, avatar, bio } = req.body;
 
-  // Validate required fields
+export const registerUser = asyncHandler(async (req, res) => {
+  const {
+    name,
+    email,
+    password,
+    phoneNumber,
+    avatar,
+    bio,
+
+    // BUSINESS
+    isBusiness,
+    businessCategory,
+  } = req.body;
+
   if (!name || !email || !password || !phoneNumber) {
     res.status(400);
     throw new Error("Please enter all the required fields");
   }
 
-  // Validate email format
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
     res.status(400);
     throw new Error("Please enter a valid email address");
   }
 
-  // Validate password strength (minimum 6 characters)
   if (password.length < 6) {
     res.status(400);
     throw new Error("Password must be at least 6 characters long");
   }
 
-  // Check if user already exists (by email or phone)
   const userExists = await User.findOne({
-    $or: [{ email: email.toLowerCase() }, { phoneNumber: phoneNumber }],
+    $or: [{ email: email.toLowerCase() }, { phoneNumber }],
   });
 
   if (userExists) {
@@ -86,7 +90,6 @@ export const registerUser = asyncHandler(async (req, res) => {
     throw new Error("User already exists with this email or phone number");
   }
 
-  // Create new user
   const user = await User.create({
     name: name.trim(),
     email: email.toLowerCase().trim(),
@@ -96,6 +99,10 @@ export const registerUser = asyncHandler(async (req, res) => {
     avatar:
       avatar ||
       "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+
+    // BUSINESS
+    isBusiness: Boolean(isBusiness),
+    businessCategory: isBusiness ? businessCategory : "",
   });
 
   if (user) {
@@ -107,6 +114,8 @@ export const registerUser = asyncHandler(async (req, res) => {
       avatar: user.avatar,
       phoneNumber: user.phoneNumber,
       bio: user.bio,
+      isBusiness: user.isBusiness,
+      businessCategory: user.businessCategory,
       token: generateToken(user._id),
     });
   } else {
@@ -117,7 +126,6 @@ export const registerUser = asyncHandler(async (req, res) => {
 
 export const authUser = asyncHandler(async (req, res) => {
   const { emailOrPhone, password } = req.body;
-  // Validate required fields
   if (!emailOrPhone || !password) {
     res.status(400);
     throw new Error("Please provide email/phone and password");
@@ -129,6 +137,7 @@ export const authUser = asyncHandler(async (req, res) => {
   } else {
     user = await User.findOne({ phoneNumber: emailOrPhone.trim() });
   }
+
   if (user && (await user.matchPassword(password))) {
     res.status(200).json({
       _id: user._id,
@@ -138,6 +147,8 @@ export const authUser = asyncHandler(async (req, res) => {
       avatar: user.avatar,
       phoneNumber: user.phoneNumber,
       bio: user.bio,
+      isBusiness: user.isBusiness,
+      businessCategory: user.businessCategory,
       token: generateToken(user._id),
     });
   } else {
@@ -148,7 +159,6 @@ export const authUser = asyncHandler(async (req, res) => {
 
 export const getUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id).select("-password");
-
   if (user) {
     res.status(200).json(user);
   } else {
@@ -166,7 +176,12 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
     user.pic = req.body.pic || user.pic;
     user.bio = req.body.bio !== undefined ? req.body.bio : user.bio;
 
-    // Only update password if provided
+    // BUSINESS update (optional)
+    if (req.body.isBusiness !== undefined) {
+      user.isBusiness = Boolean(req.body.isBusiness);
+      user.businessCategory = user.isBusiness ? req.body.businessCategory : "";
+    }
+
     if (req.body.password) {
       if (req.body.password.length < 6) {
         res.status(400);
@@ -184,6 +199,8 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
       pic: updatedUser.pic,
       bio: updatedUser.bio,
       isAdmin: updatedUser.isAdmin,
+      isBusiness: updatedUser.isBusiness,
+      businessCategory: updatedUser.businessCategory,
       token: generateToken(updatedUser._id),
     });
   } else {
@@ -191,6 +208,7 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
     throw new Error("User not found");
   }
 });
+
 
 // Get user settings
 export const getUserSettings = asyncHandler(async (req, res) => {
@@ -564,3 +582,30 @@ export const rejectChatRequest = asyncHandler(async (req, res) => {
 
   res.status(200).json({ message: "Chat request rejected" });
 });
+
+
+/**
+ * GET all business accounts
+ */
+export const getBusinessUsers = async (req, res) => {
+  try {
+    const businesses = await User.find({ isBusiness: true })
+      .select("name avatar bio businessCategory")
+      .sort({ createdAt: -1 });
+
+    // Category count
+    const categoryCounts = businesses.reduce((acc, user) => {
+      const cat = user.businessCategory || "Other";
+      acc[cat] = (acc[cat] || 0) + 1;
+      return acc;
+    }, {});
+
+    res.status(200).json({
+      businesses,
+      categoryCounts,
+      total: businesses.length,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch business users" });
+  }
+};

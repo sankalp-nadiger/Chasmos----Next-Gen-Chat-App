@@ -30,333 +30,293 @@ import CosmosBackground from "./CosmosBg";
 
 // Business categories mock data
 const businessCategories = [
-  {
-    id: "restaurants",
-    name: "Restaurants",
-    icon: Utensils,
-    color: "bg-orange-500",
-    description: "Food & Dining",
-  },
-  {
-    id: "automotive",
-    name: "Automotive",
-    icon: Car,
-    color: "bg-blue-500",
-    description: "Car Services",
-  },
-  {
-    id: "real-estate",
-    name: "Real Estate",
-    icon: Home,
-    color: "bg-green-500",
-    description: "Property Services",
-  },
-  {
-    id: "healthcare",
-    name: "Healthcare",
-    icon: Stethoscope,
-    color: "bg-red-500",
-    description: "Medical Services",
-  },
-  {
-    id: "education",
-    name: "Education",
-    icon: GraduationCap,
-    color: "bg-purple-500",
-    description: "Learning & Training",
-  },
-  {
-    id: "beauty",
-    name: "Beauty & Salon",
-    icon: Scissors,
-    color: "bg-pink-500",
-    description: "Beauty Services",
-  },
-  {
-    id: "retail",
-    name: "Retail",
-    icon: ShoppingBag,
-    color: "bg-indigo-500",
-    description: "Shopping & Stores",
-  },
-  {
-    id: "cafe",
-    name: "Cafes & Coffee",
-    icon: Coffee,
-    color: "bg-yellow-600",
-    description: "Coffee Shops",
-  },
+  { id: "restaurants", name: "Restaurants", icon: Utensils },
+  { id: "cafe", name: "Cafes & Coffee", icon: Coffee },
+  { id: "automotive", name: "Automotive", icon: Car },
+  { id: "real-estate", name: "Real Estate", icon: Home },
+  { id: "healthcare", name: "Healthcare", icon: Stethoscope },
+  { id: "education", name: "Education", icon: GraduationCap },
+  { id: "beauty", name: "Beauty & Salon", icon: Scissors },
+  { id: "retail", name: "Retail & Shops", icon: ShoppingBag },
+  { id: "freelance", name: "Freelancers", icon: Palette },
+  { id: "legal", name: "Legal Services", icon: Briefcase },
+  { id: "finance", name: "Finance & Accounting", icon: Briefcase },
+  { id: "it", name: "IT & Software", icon: Users },
+  { id: "fitness", name: "Fitness & Wellness", icon: Users },
+  { id: "construction", name: "Construction", icon: Home },
+  { id: "travel", name: "Travel & Tourism", icon: MapPin },
 ];
 
+
 // Mock business contacts for each category - actual business professionals/contacts
-const businessContacts = {
-  restaurants: [
-    {
-      id: "rest1",
-      name: "Mario Rossi",
-      avatar:
-        "https://images.unsplash.com/photo-1566753323558-f4e0952af115?w=40&h=40&fit=crop&crop=face",
-      title: "Head Chef",
-      business: "Pizza Palace",
-      location: "Downtown",
-      isOnline: true,
-    },
-    {
-      id: "rest2",
-      name: "Sarah Johnson",
-      avatar:
-        "https://images.unsplash.com/photo-1494790108755-2616b612b789?w=40&h=40&fit=crop&crop=face",
-      title: "Restaurant Manager",
-      business: "Burger Barn",
-      location: "Mall Road",
-      isOnline: false,
-    },
-    {
-      id: "rest3",
-      name: "Raj Patel",
-      avatar:
-        "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face",
-      title: "Owner & Chef",
-      business: "Spice Garden",
-      location: "City Center",
-      isOnline: true,
-    },
-    {
-      id: "rest4",
-      name: "Yuki Tanaka",
-      avatar:
-        "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face",
-      title: "Sushi Master",
-      business: "Sushi Master",
-      location: "Business District",
-      isOnline: true,
-    },
-  ],
-  automotive: [
-    {
-      id: "auto1",
-      name: "Mike Rodriguez",
-      avatar:
-        "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=40&h=40&fit=crop&crop=face",
-      title: "Lead Mechanic",
-      business: "QuickFix Garage",
-      location: "Industrial Area",
-      isOnline: false,
-    },
-    {
-      id: "auto2",
-      name: "Lisa Chen",
-      avatar:
-        "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=40&h=40&fit=crop&crop=face",
-      title: "Service Manager",
-      business: "Elite Car Wash",
-      location: "Highway",
-      isOnline: true,
-    },
-    {
-      id: "auto3",
-      name: "Tom Wilson",
-      avatar:
-        "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=40&h=40&fit=crop&crop=face",
-      title: "Parts Specialist",
-      business: "AutoParts Plus",
-      location: "Main Street",
-      isOnline: true,
-    },
-  ],
-  "real-estate": [
-    {
-      id: "real1",
-      name: "Jennifer Smith",
-      avatar:
-        "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=40&h=40&fit=crop&crop=face",
-      title: "Senior Agent",
-      business: "Dream Homes Realty",
-      location: "City Center",
-      isOnline: true,
-    },
-    {
-      id: "real2",
-      name: "David Kumar",
-      avatar:
-        "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=40&h=40&fit=crop&crop=face",
-      title: "Property Developer",
-      business: "Urban Properties",
-      location: "Downtown",
-      isOnline: false,
-    },
-    {
-      id: "real3",
-      name: "Amanda Garcia",
-      avatar:
-        "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?w=40&h=40&fit=crop&crop=face",
-      title: "Rental Coordinator",
-      business: "Rent Easy",
-      location: "University Area",
-      isOnline: true,
-    },
-  ],
-  healthcare: [
-    {
-      id: "health1",
-      name: "Dr. Robert Adams",
-      avatar:
-        "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=40&h=40&fit=crop&crop=face",
-      title: "Cardiologist",
-      business: "City Medical Center",
-      location: "Medical District",
-      isOnline: false,
-    },
-    {
-      id: "health2",
-      name: "Dr. Emily Zhang",
-      avatar:
-        "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=40&h=40&fit=crop&crop=face",
-      title: "Dentist",
-      business: "Dental Care Plus",
-      location: "Suburb",
-      isOnline: true,
-    },
-    {
-      id: "health3",
-      name: "pharmacist John Lee",
-      avatar:
-        "https://images.unsplash.com/photo-1582750433449-648ed127bb54?w=40&h=40&fit=crop&crop=face",
-      title: "Pharmacist",
-      business: "Wellness Pharmacy",
-      location: "Mall",
-      isOnline: true,
-    },
-  ],
-  education: [
-    {
-      id: "edu1",
-      name: "Prof. Alex Thompson",
-      avatar:
-        "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face",
-      title: "Tech Instructor",
-      business: "TechSkills Academy",
-      location: "Tech Park",
-      isOnline: true,
-    },
-    {
-      id: "edu2",
-      name: "Maria Gonzalez",
-      avatar:
-        "https://images.unsplash.com/photo-1494790108755-2616b612b789?w=40&h=40&fit=crop&crop=face",
-      title: "Language Teacher",
-      business: "Language Masters",
-      location: "City Center",
-      isOnline: false,
-    },
-    {
-      id: "edu3",
-      name: "Chris Park",
-      avatar:
-        "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face",
-      title: "Tutor Coordinator",
-      business: "Kids Learning Hub",
-      location: "Residential Area",
-      isOnline: true,
-    },
-  ],
-  beauty: [
-    {
-      id: "beauty1",
-      name: "Sophia Martinez",
-      avatar:
-        "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=40&h=40&fit=crop&crop=face",
-      title: "Hair Stylist",
-      business: "Glamour Salon",
-      location: "Shopping District",
-      isOnline: true,
-    },
-    {
-      id: "beauty2",
-      name: "Nina Petrov",
-      avatar:
-        "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?w=40&h=40&fit=crop&crop=face",
-      title: "Spa Therapist",
-      business: "Spa Retreat",
-      location: "Luxury Area",
-      isOnline: false,
-    },
-    {
-      id: "beauty3",
-      name: "Carlos Rivera",
-      avatar:
-        "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=40&h=40&fit=crop&crop=face",
-      title: "Master Barber",
-      business: "Quick Cuts",
-      location: "Downtown",
-      isOnline: true,
-    },
-  ],
-  retail: [
-    {
-      id: "retail1",
-      name: "Ashley Brown",
-      avatar:
-        "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=40&h=40&fit=crop&crop=face",
-      title: "Fashion Consultant",
-      business: "Fashion Forward",
-      location: "Mall",
-      isOnline: true,
-    },
-    {
-      id: "retail2",
-      name: "Kevin Wang",
-      avatar:
-        "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=40&h=40&fit=crop&crop=face",
-      title: "Tech Sales Expert",
-      business: "Electronics Hub",
-      location: "Tech Street",
-      isOnline: true,
-    },
-    {
-      id: "retail3",
-      name: "Rachel Green",
-      avatar:
-        "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=40&h=40&fit=crop&crop=face",
-      title: "Home Design Specialist",
-      business: "Home & Garden",
-      location: "Suburban Plaza",
-      isOnline: false,
-    },
-  ],
-  cafe: [
-    {
-      id: "cafe1",
-      name: "Jake Morrison",
-      avatar:
-        "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=40&h=40&fit=crop&crop=face",
-      title: "Head Barista",
-      business: "Brew & Bite",
-      location: "University Area",
-      isOnline: true,
-    },
-    {
-      id: "cafe2",
-      name: "Emma Davis",
-      avatar:
-        "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=40&h=40&fit=crop&crop=face",
-      title: "Cafe Manager",
-      business: "Morning Glory Cafe",
-      location: "Business District",
-      isOnline: false,
-    },
-    {
-      id: "cafe3",
-      name: "Sam Taylor",
-      avatar:
-        "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face",
-      title: "Night Shift Supervisor",
-      business: "Night Owl Coffee",
-      location: "Downtown",
-      isOnline: true,
-    },
-  ],
-};
+// const businessContacts = {
+//   restaurants: [
+//     {
+//       id: "rest1",
+//       name: "Mario Rossi",
+//       avatar:
+//         "https://images.unsplash.com/photo-1566753323558-f4e0952af115?w=40&h=40&fit=crop&crop=face",
+//       title: "Head Chef",
+//       business: "Pizza Palace",
+//       location: "Downtown",
+//       isOnline: true,
+//     },
+//     {
+//       id: "rest2",
+//       name: "Sarah Johnson",
+//       avatar:
+//         "https://images.unsplash.com/photo-1494790108755-2616b612b789?w=40&h=40&fit=crop&crop=face",
+//       title: "Restaurant Manager",
+//       business: "Burger Barn",
+//       location: "Mall Road",
+//       isOnline: false,
+//     },
+//     {
+//       id: "rest3",
+//       name: "Raj Patel",
+//       avatar:
+//         "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face",
+//       title: "Owner & Chef",
+//       business: "Spice Garden",
+//       location: "City Center",
+//       isOnline: true,
+//     },
+//     {
+//       id: "rest4",
+//       name: "Yuki Tanaka",
+//       avatar:
+//         "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face",
+//       title: "Sushi Master",
+//       business: "Sushi Master",
+//       location: "Business District",
+//       isOnline: true,
+//     },
+//   ],
+//   automotive: [
+//     {
+//       id: "auto1",
+//       name: "Mike Rodriguez",
+//       avatar:
+//         "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=40&h=40&fit=crop&crop=face",
+//       title: "Lead Mechanic",
+//       business: "QuickFix Garage",
+//       location: "Industrial Area",
+//       isOnline: false,
+//     },
+//     {
+//       id: "auto2",
+//       name: "Lisa Chen",
+//       avatar:
+//         "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=40&h=40&fit=crop&crop=face",
+//       title: "Service Manager",
+//       business: "Elite Car Wash",
+//       location: "Highway",
+//       isOnline: true,
+//     },
+//     {
+//       id: "auto3",
+//       name: "Tom Wilson",
+//       avatar:
+//         "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=40&h=40&fit=crop&crop=face",
+//       title: "Parts Specialist",
+//       business: "AutoParts Plus",
+//       location: "Main Street",
+//       isOnline: true,
+//     },
+//   ],
+//   "real-estate": [
+//     {
+//       id: "real1",
+//       name: "Jennifer Smith",
+//       avatar:
+//         "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=40&h=40&fit=crop&crop=face",
+//       title: "Senior Agent",
+//       business: "Dream Homes Realty",
+//       location: "City Center",
+//       isOnline: true,
+//     },
+//     {
+//       id: "real2",
+//       name: "David Kumar",
+//       avatar:
+//         "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=40&h=40&fit=crop&crop=face",
+//       title: "Property Developer",
+//       business: "Urban Properties",
+//       location: "Downtown",
+//       isOnline: false,
+//     },
+//     {
+//       id: "real3",
+//       name: "Amanda Garcia",
+//       avatar:
+//         "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?w=40&h=40&fit=crop&crop=face",
+//       title: "Rental Coordinator",
+//       business: "Rent Easy",
+//       location: "University Area",
+//       isOnline: true,
+//     },
+//   ],
+//   healthcare: [
+//     {
+//       id: "health1",
+//       name: "Dr. Robert Adams",
+//       avatar:
+//         "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=40&h=40&fit=crop&crop=face",
+//       title: "Cardiologist",
+//       business: "City Medical Center",
+//       location: "Medical District",
+//       isOnline: false,
+//     },
+//     {
+//       id: "health2",
+//       name: "Dr. Emily Zhang",
+//       avatar:
+//         "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=40&h=40&fit=crop&crop=face",
+//       title: "Dentist",
+//       business: "Dental Care Plus",
+//       location: "Suburb",
+//       isOnline: true,
+//     },
+//     {
+//       id: "health3",
+//       name: "pharmacist John Lee",
+//       avatar:
+//         "https://images.unsplash.com/photo-1582750433449-648ed127bb54?w=40&h=40&fit=crop&crop=face",
+//       title: "Pharmacist",
+//       business: "Wellness Pharmacy",
+//       location: "Mall",
+//       isOnline: true,
+//     },
+//   ],
+//   education: [
+//     {
+//       id: "edu1",
+//       name: "Prof. Alex Thompson",
+//       avatar:
+//         "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face",
+//       title: "Tech Instructor",
+//       business: "TechSkills Academy",
+//       location: "Tech Park",
+//       isOnline: true,
+//     },
+//     {
+//       id: "edu2",
+//       name: "Maria Gonzalez",
+//       avatar:
+//         "https://images.unsplash.com/photo-1494790108755-2616b612b789?w=40&h=40&fit=crop&crop=face",
+//       title: "Language Teacher",
+//       business: "Language Masters",
+//       location: "City Center",
+//       isOnline: false,
+//     },
+//     {
+//       id: "edu3",
+//       name: "Chris Park",
+//       avatar:
+//         "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face",
+//       title: "Tutor Coordinator",
+//       business: "Kids Learning Hub",
+//       location: "Residential Area",
+//       isOnline: true,
+//     },
+//   ],
+//   beauty: [
+//     {
+//       id: "beauty1",
+//       name: "Sophia Martinez",
+//       avatar:
+//         "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=40&h=40&fit=crop&crop=face",
+//       title: "Hair Stylist",
+//       business: "Glamour Salon",
+//       location: "Shopping District",
+//       isOnline: true,
+//     },
+//     {
+//       id: "beauty2",
+//       name: "Nina Petrov",
+//       avatar:
+//         "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?w=40&h=40&fit=crop&crop=face",
+//       title: "Spa Therapist",
+//       business: "Spa Retreat",
+//       location: "Luxury Area",
+//       isOnline: false,
+//     },
+//     {
+//       id: "beauty3",
+//       name: "Carlos Rivera",
+//       avatar:
+//         "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=40&h=40&fit=crop&crop=face",
+//       title: "Master Barber",
+//       business: "Quick Cuts",
+//       location: "Downtown",
+//       isOnline: true,
+//     },
+//   ],
+//   retail: [
+//     {
+//       id: "retail1",
+//       name: "Ashley Brown",
+//       avatar:
+//         "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=40&h=40&fit=crop&crop=face",
+//       title: "Fashion Consultant",
+//       business: "Fashion Forward",
+//       location: "Mall",
+//       isOnline: true,
+//     },
+//     {
+//       id: "retail2",
+//       name: "Kevin Wang",
+//       avatar:
+//         "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=40&h=40&fit=crop&crop=face",
+//       title: "Tech Sales Expert",
+//       business: "Electronics Hub",
+//       location: "Tech Street",
+//       isOnline: true,
+//     },
+//     {
+//       id: "retail3",
+//       name: "Rachel Green",
+//       avatar:
+//         "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=40&h=40&fit=crop&crop=face",
+//       title: "Home Design Specialist",
+//       business: "Home & Garden",
+//       location: "Suburban Plaza",
+//       isOnline: false,
+//     },
+//   ],
+//   cafe: [
+//     {
+//       id: "cafe1",
+//       name: "Jake Morrison",
+//       avatar:
+//         "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=40&h=40&fit=crop&crop=face",
+//       title: "Head Barista",
+//       business: "Brew & Bite",
+//       location: "University Area",
+//       isOnline: true,
+//     },
+//     {
+//       id: "cafe2",
+//       name: "Emma Davis",
+//       avatar:
+//         "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=40&h=40&fit=crop&crop=face",
+//       title: "Cafe Manager",
+//       business: "Morning Glory Cafe",
+//       location: "Business District",
+//       isOnline: false,
+//     },
+//     {
+//       id: "cafe3",
+//       name: "Sam Taylor",
+//       avatar:
+//         "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face",
+//       title: "Night Shift Supervisor",
+//       business: "Night Owl Coffee",
+//       location: "Downtown",
+//       isOnline: true,
+//     },
+//   ],
+// };
 
 // API Base URL from environment variable
 const API_BASE_URL =
@@ -380,6 +340,7 @@ const formatTimestamp = (timestamp) => {
   );
 };
 
+
 const NewChat = ({
   effectiveTheme = {},
   onClose,
@@ -395,64 +356,74 @@ const NewChat = ({
     useState(null);
   const [activeSection, setActiveSection] = useState("contacts"); // 'contacts', 'users', 'business'
 
+  const [businessUsers, setBusinessUsers] = useState([]);
+const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(`${API_BASE_URL}/api/user`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error("Failed to fetch users");
+  const fetchAll = async () => {
+    try {
+      const token = localStorage.getItem("token");
 
-        const data = await res.json();
+      // 1️⃣ Fetch normal users (NON business)
+      const usersRes = await fetch(`${API_BASE_URL}/api/user`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const users = await usersRes.json();
 
-        // Assign random online status only once here
-        const formattedUsers = data.map((u) => ({
+      const normalUsers = users
+        .filter(u => !u.isBusiness) // ❗ EXCLUDE BUSINESS USERS
+        .map(u => ({
           id: u._id,
-          name: u.name || "unknown",
+          name: u.name,
           email: u.email,
-          avatar: u.avatar || null,
-          isOnline: Math.random() < 0.5, // ✅ assigned once
-          timestamp: u.createdAt,
+          avatar: u.avatar,
+          isOnline: Math.random() < 0.5,
           type: "user",
           bio: u.bio || "",
           acceptedChatRequests: u.acceptedChatRequests || [],
         }));
 
-        // Separate existing contacts from new registered users
-        const knownContacts = formattedUsers.filter((user) =>
-          existingContacts.some((contact) => contact.id === user.id)
-        );
-        const newUsers = formattedUsers.filter(
-          (user) => !existingContacts.some((contact) => contact.id === user.id)
-        );
+      // 2️⃣ Fetch business users
+      const bizRes = await fetch(`${API_BASE_URL}/api/user/business`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const bizData = await bizRes.json();
 
-        // Also include existingContacts that are NOT registered users (e.g., Google contacts)
-        const existingNotRegistered = (existingContacts || []).filter(
-          (c) => !formattedUsers.some((u) => String(u.id) === String(c.id))
-        );
+      setBusinessUsers(
+        bizData.businesses.map(b => ({
+          id: b._id,
+          name: b.name,
+          avatar: b.avatar,
+          title: b.title,
+          business: b.businessName,
+          location: b.location,
+          businessCategory: b.businessCategory,
+          isOnline: b.isOnline,
+          type: "business",
+        }))
+      );
 
-        const existingNotRegisteredMapped = existingNotRegistered.map((c) => ({
-          id: c.id || c._id || c.googleId || c.email || c.phone || `${c.name}`,
-          name: c.name || c.email || c.phone || "Unknown",
-          email: c.email || undefined,
-          avatar: c.avatar || null,
-          isOnline: c.isOnline || false,
-          type: c.isGoogleContact ? "google-contact" : "contact",
-        }));
+      setBusinessCategoryCounts(bizData.categoryCounts || {});
 
-        // Merge: put non-registered existing contacts first, then known registered contacts
-        setAllContacts([...existingNotRegisteredMapped, ...knownContacts]);
-        setRegisteredUsers(newUsers);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchUsers();
-    // ensure it runs only once on mount
-  }, []);
+      // Existing contact logic preserved
+      const knownContacts = normalUsers.filter(u =>
+        existingContacts.some(c => c.id === u.id)
+      );
+      const newUsers = normalUsers.filter(
+        u => !existingContacts.some(c => c.id === u.id)
+      );
+
+      setAllContacts(knownContacts);
+      setRegisteredUsers(newUsers);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchAll();
+}, []);
+
 
   const filteredAllContacts = useMemo(
     () =>
@@ -470,17 +441,19 @@ const NewChat = ({
     [registeredUsers, searchTerm]
   );
 
-  const filteredBusinessContacts = useMemo(() => {
-    if (!selectedBusinessCategory) return [];
-    return (
-      businessContacts[selectedBusinessCategory.id]?.filter(
-        (contact) =>
-          contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          contact.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          contact.business.toLowerCase().includes(searchTerm.toLowerCase())
-      ) || []
-    );
-  }, [selectedBusinessCategory, searchTerm]);
+ const filteredBusinessContacts = useMemo(() => {
+  if (!selectedBusinessCategory) return [];
+
+  return businessUsers.filter(b =>
+    b.businessCategory === selectedBusinessCategory.id &&
+    (
+      b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      b.business?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      b.title?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+  );
+}, [businessUsers, selectedBusinessCategory, searchTerm]);
+
 
   // Open chat UI for contact, but only set as pending if no chatId exists
   const handleStartChat = (contact) => {
@@ -753,11 +726,10 @@ const NewChat = ({
                       >
                         {category.description}
                       </p>
-                      <p
-                        className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"} mt-2`}
-                      >
-                        {businessContacts[category.id]?.length || 0} users
-                      </p>
+                     <p className="text-xs mt-2">
+  {businessCategoryCounts[category.id] || 0} businesses
+</p>
+
                     </motion.div>
                   ))}
                 </div>
@@ -1128,8 +1100,9 @@ const BusinessContactItem = ({ business, effectiveTheme, onClick }) => {
       className={`flex items-center justify-between p-4 cursor-pointer border-b ${effectiveTheme.border || "border-gray-300"} hover:${effectiveTheme.hover || "bg-gray-200"} transition-all duration-200`}
       onClick={() => onClick(business)}
     >
-      {/* Left: Contact Info */}
+      {/* Left: Avatar + Name + Company */}
       <div className="flex items-center space-x-3 min-w-0 flex-1">
+        {/* Avatar */}
         <div className="relative">
           {business.avatar ? (
             <img
@@ -1146,6 +1119,8 @@ const BusinessContactItem = ({ business, effectiveTheme, onClick }) => {
             <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
           )}
         </div>
+
+        {/* Name + Company */}
         <div className="flex-1 min-w-0">
           <h3
             className={`font-semibold ${effectiveTheme.text || "text-gray-900"} truncate`}
@@ -1155,46 +1130,24 @@ const BusinessContactItem = ({ business, effectiveTheme, onClick }) => {
           <p
             className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"} truncate`}
           >
-            {business.title}
+            {business.businessCategory || business.title}
           </p>
-          <div className="flex items-center space-x-2 mt-1">
-            <span
-              className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"} truncate`}
-            >
-              {business.business}
-            </span>
-            <span
-              className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"}`}
-            >
-              •
-            </span>
-            <div className="flex items-center space-x-1">
-              <MapPin
-                className={`w-3 h-3 ${effectiveTheme.textSecondary || "text-gray-500"}`}
-              />
-              <span
-                className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"} truncate`}
-              >
-                {business.location}
-              </span>
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* Right: Online Status & Chat Icon */}
-      <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
-        {business.isOnline && (
-          <span className={`text-xs text-green-500 font-medium`}>Online</span>
-        )}
+      {/* Right: Chat Icon */}
+      <div className="flex items-center flex-shrink-0 ml-4">
         <div
           className={`w-10 h-10 rounded-full ${effectiveTheme.accent || "bg-blue-500"} flex items-center justify-center`}
         >
-          <MessageCircle className="w-5 h-5 text-white" />
+          <MessageCircle
+            className={`w-5 h-5 ${effectiveTheme.textSecondary || "text-white"}`}
+          />
         </div>
       </div>
     </motion.div>
   );
 };
+
 
 export default NewChat;
