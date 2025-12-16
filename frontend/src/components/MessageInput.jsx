@@ -1,26 +1,69 @@
 /* eslint-disable no-unused-vars */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Send, Paperclip, Image, FileText, Camera, MapPin, X, Clock, Calendar } from 'lucide-react';
+import { Send, Paperclip, Image, FileText, Camera, MapPin, X, Clock, Calendar, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CosmosBg from './CosmosBg';
+import PollCreationModal from './PollCreationModal';
 
 const MessageInput = React.memo(({ 
   onSendMessage, 
   selectedContact,
-  effectiveTheme 
+  effectiveTheme,
+  isGroupChat = false
 }) => {
   const [messageInput, setMessageInput] = useState("");
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showPollModal, setShowPollModal] = useState(false);
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
+  const [creatingPoll, setCreatingPoll] = useState(false);
   const attachmentMenuRef = useRef(null);
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
   const videoInputRef = useRef(null);
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [uploading, setUploading] = useState(false);
+
+  const handleCreatePoll = useCallback(async (pollData) => {
+    try {
+      setCreatingPoll(true);
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const chatId = selectedContact?.chatId || selectedContact?.id || selectedContact?._id;
+
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/poll/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ...pollData,
+          chatId
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to create poll');
+      
+      const result = await response.json();
+      
+      // Send poll message
+      onSendMessage({
+        content: `📊 Poll: ${pollData.question}`,
+        type: 'poll',
+        chatId,
+        pollId: result.poll._id,
+      });
+
+      setShowPollModal(false);
+    } catch (err) {
+      console.error('Poll creation error:', err);
+      alert('Failed to create poll. Please try again.');
+    } finally {
+      setCreatingPoll(false);
+    }
+  }, [selectedContact, onSendMessage]);
 
   const handleInputChange = useCallback((e) => {
     setMessageInput(e.target.value);
@@ -232,15 +275,18 @@ const MessageInput = React.memo(({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.9 }}
                 transition={{ duration: 0.2 }}
-                className={`absolute -top-20 left-0 border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50 overflow-hidden`}
+                className={`absolute -top-20 left-0 border ${effectiveTheme.border} rounded-lg shadow-xl p-3 z-50 overflow-hidden backdrop-blur-md`}
                 style={{
                   background: effectiveTheme.mode === 'dark'
-                    ? effectiveTheme.secondary
-                    : '#fff',
+                    ? 'rgba(31, 41, 55, 0.95)'
+                    : 'rgba(255, 255, 255, 0.98)',
                   minWidth: '370px',
+                  boxShadow: effectiveTheme.mode === 'dark'
+                    ? '0 10px 40px rgba(0, 0, 0, 0.5)'
+                    : '0 10px 40px rgba(0, 0, 0, 0.1)',
                 }}
               >
-                <div className="absolute inset-0 pointer-events-none opacity-30 z-0">
+                <div className="absolute inset-0 pointer-events-none opacity-20 z-0">
                   <CosmosBg />
                 </div>
                 <div className="flex items-center space-x-4 relative z-10">
@@ -308,6 +354,23 @@ const MessageInput = React.memo(({
                     </div>
                     <p className={`${effectiveTheme.text} text-xs font-medium`}>Location</p>
                   </motion.div>
+
+                  {isGroupChat && (
+                    <motion.div
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.95 }}
+                      className={`cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg transition-colors ${effectiveTheme.mode === 'dark' ? 'hover:bg-cyan-500 hover:bg-opacity-10' : 'hover:bg-cyan-100'}`}
+                      onClick={() => {
+                        setShowPollModal(true);
+                        setShowAttachmentMenu(false);
+                      }}
+                    >
+                      <div className="w-10 h-10 bg-cyan-500 rounded-full flex items-center justify-center">
+                        <BarChart3 className="w-5 h-5 text-white" />
+                      </div>
+                      <p className={`${effectiveTheme.text} text-xs font-medium`}>Poll</p>
+                    </motion.div>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -691,11 +754,22 @@ const MessageInput = React.memo(({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <PollCreationModal 
+        isOpen={showPollModal}
+        onClose={() => setShowPollModal(false)}
+        onCreatePoll={handleCreatePoll}
+        effectiveTheme={effectiveTheme}
+        isLoading={creatingPoll}
+      />
     </div>
   );
 }, (prevProps, nextProps) => {
-  // Only re-render if selectedContact changes
-  return prevProps.selectedContact?.id === nextProps.selectedContact?.id;
+  // Re-render if selectedContact changes or the send handler changes
+  return (
+    prevProps.selectedContact?.id === nextProps.selectedContact?.id &&
+    prevProps.onSendMessage === nextProps.onSendMessage
+  );
 });
 
 export default MessageInput; 
