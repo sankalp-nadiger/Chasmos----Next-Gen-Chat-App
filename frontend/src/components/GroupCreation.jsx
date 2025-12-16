@@ -169,7 +169,7 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
     if (step === 3) return setStep(2);
   };
 
-  const handleCreateGroup = async () => {
+const handleCreateGroup = async () => {
   if (!groupName.trim()) return;
 
   const memberIds = selectedContacts.map((id) => normalizeId(id));
@@ -179,23 +179,26 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
     memberIds.push(currentUserId);
   }
 
-  const payload = {
-    name: groupName.trim(),
-    users: memberIds,
-    admins: [currentUserId],
-    createdBy: currentUserId,
-    description: groupDescription.trim() || "",
-    isPublic: true,
-  };
+  // ✅ USE FormData
+  const formData = new FormData();
+  formData.append("name", groupName.trim());
+  formData.append("users", JSON.stringify(memberIds));
+  formData.append("description", groupDescription.trim() || "");
+  formData.append("isPublic", "true");
+
+  // ✅ append uploaded group icon
+  if (iconFile) {
+    formData.append("avatar", iconFile); // MUST be "avatar"
+  }
 
   try {
     const res = await fetch(`${API_BASE_URL}/api/chat/group`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${localStorage.getItem("token")}`,
+        // ❌ DO NOT set Content-Type for FormData
       },
-      body: JSON.stringify(payload),
+      body: formData,
     });
 
     const json = await res.json();
@@ -205,7 +208,7 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
       alert("Group creation failed: " + (json.message || "Unknown error"));
     } else {
       console.log("Group created", json);
-      onCreateGroup?.(json); // send group object directly
+      onCreateGroup?.(json);
       onClose?.();
     }
   } catch (e) {
@@ -213,6 +216,7 @@ const GroupCreation = ({ contacts: initialContacts = [], effectiveTheme, onClose
     alert("Error creating group");
   }
 };
+
 
 
   // BUSINESS CORE FEATURES (default true)
