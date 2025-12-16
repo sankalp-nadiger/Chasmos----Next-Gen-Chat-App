@@ -2,7 +2,7 @@ import asyncHandler from "express-async-handler";
 import Chat from "../models/chat.model.js";
 import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
-import Group from "../models/group.model.js";
+//import Group from "../models/group.model.js";
 import Attachment from "../models/attachment.model.js";
 import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
 import path from "path";

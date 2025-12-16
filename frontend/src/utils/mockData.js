@@ -469,9 +469,12 @@ export const generateTypingIndicator = () => {
 };
 
 // Avatar fallback generator
-export const generateAvatarFallback = (name) => {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase();
-};
+export const generateAvatarFallback=(name)=> {
+  if (!name) return "NN"; // or "" or any default
+  const initials = name.split(" ").map(n => n[0]).join("");
+  return initials;
+}
+
 
 // Returns the hover label for a message date.
 // If the message is within the current week (Monday -> Saturday),
