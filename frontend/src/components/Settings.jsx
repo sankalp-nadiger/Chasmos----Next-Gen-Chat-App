@@ -18,6 +18,7 @@ import {
   Info,
 } from "lucide-react";
 import Logo from "./Logo";
+import CosmosBackground from "./CosmosBg";
 
 const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
   const [notifications, setNotifications] = useState(true);
@@ -123,8 +124,20 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
       transition={{ duration: 0.3, ease: "easeInOut" }}
       className={`fixed inset-0 ${effectiveTheme.primary} flex flex-col h-screen w-screen z-50`}
     >
-      {/* Header */}
-      <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-4`}>
+      {/* Solid white background in day/light mode */}
+      {(!effectiveTheme.mode || effectiveTheme.mode === 'light') && (
+        <div style={{ position: 'absolute', inset: 0, background: '#ffffff', zIndex: 0 }} />
+      )}
+
+ {/* Cosmos Background */}
+      <div className="absolute inset-0 overflow-hidden z-[2]">
+        <CosmosBackground effectiveTheme={effectiveTheme} />
+      </div>
+
+      {/* Content wrapper - relative positioning */}
+      <div className="relative z-10 flex flex-col h-full w-full">
+        {/* Header */}
+        <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-4`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <button
@@ -269,6 +282,7 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
             </p>
           </div>
         </div>
+      </div>
       </div>
     </motion.div>
   );

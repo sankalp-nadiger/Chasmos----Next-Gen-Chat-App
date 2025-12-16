@@ -367,6 +367,9 @@ export const getRecentChats = async (req, res) => {
     })
       .sort({ updatedAt: -1 })
       .populate('participants', '_id name email avatar')
+      .populate('users', '_id name email avatar')
+      .populate('admins', '_id name email avatar')
+      .populate('groupAdmin', '_id name email avatar')
       .populate({ path: 'lastMessage', populate: { path: 'attachments' } })
       .populate({ path: 'lastMessage.sender', select: '_id email name' })
       .lean();
@@ -412,22 +415,35 @@ export const getRecentChats = async (req, res) => {
         }
       }
 
-      return {
+      // For group chats, return all members; for 1-on-1, return the other user
+      const chatData = {
         chatId: chat._id,
-        participants: chat.participants,
         lastMessage: lastMessageText || "Say hi!",
         timestamp: chat.updatedAt || chat.timestamp,
         unreadCount: unread,
         isGroupChat: !!chat.isGroupChat,
         chatName: chat.chatName,
-        otherUser: {
+      };
+
+      if (chat.isGroupChat) {
+        // Group chat: include all members, admins, and group admin
+        chatData.users = chat.users || chat.participants || [];
+        chatData.admins = chat.admins || [];
+        chatData.groupAdmin = chat.groupAdmin || null;
+        chatData.groupSettings = chat.groupSettings || {};
+      } else {
+        // 1-on-1 chat: include participants and otherUser for backward compatibility
+        chatData.participants = chat.participants;
+        chatData.otherUser = {
           id: otherUser?._id ? String(otherUser._id) : null,
           username: otherUser?.name || otherUser?.email || null,
           email: otherUser?.email || null,
           avatar: otherUser?.avatar || null,
           isOnline: !!otherUser?.isOnline,
-        },
-      };
+        };
+      }
+
+      return chatData;
     });
     console.log("Recent chats fetched:", formattedChats);
     res.status(200).json(formattedChats);

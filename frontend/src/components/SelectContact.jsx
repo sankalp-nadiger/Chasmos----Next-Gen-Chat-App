@@ -39,7 +39,7 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
     <div
       onClick={() => onSelect(contactId)}
       className={`flex items-center justify-between p-3 cursor-pointer border-b ${effectiveTheme.border} transition rounded-lg 
-        ${selected ? "bg-green-600" : "hover:bg-gray-500/20"}`}
+        ${selected ? "bg-cyan-100 dark:bg-gradient-to-r dark:from-purple-900/40 dark:to-blue-900/40" : "hover:bg-gray-500/20"}`}
     >
       <div className="flex items-center space-x-3 flex-1 min-w-0">
         {/* Avatar */}
@@ -106,7 +106,7 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
       <div className="ml-3 flex-shrink-0">
         <div
           className={`w-6 h-6 rounded-full border-2 flex items-center justify-center
-            ${selected ? "bg-green-500 border-green-600 " : "border-gray-400 "}`}
+            ${selected ? "bg-cyan-500 border-cyan-600 text-white" : "border-gray-400 "}`}
         >
           {selected && <Check className="w-4 h-4" />}
         </div>
