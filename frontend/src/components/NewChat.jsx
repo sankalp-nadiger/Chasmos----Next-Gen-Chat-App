@@ -754,7 +754,7 @@ const filteredBusinessContacts = useMemo(() => {
                       <p
                         className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"}`}
                       >
-                        {category.description}
+                        {category.label}
                       </p>
                      <p className="text-xs mt-2">
   {businessCategoryCounts[category.id] || 0} businesses

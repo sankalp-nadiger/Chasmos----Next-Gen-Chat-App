@@ -22,7 +22,7 @@ import blockRoutes from "./routes/block.routes.js";
 import userProfileRoutes from "./routes/userProfile.routes.js"; 
 import screenshotRoutes from "./routes/screenshot.routes.js";
 //import groupRoutes from "./routes/group.route.js";
-import groupRoutes from "./routes/group.route.js";
+//import groupRoutes from "./routes/group.route.js";
 import { fileURLToPath } from "url";
 import pollRoutes from "./routes/poll.routes.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
