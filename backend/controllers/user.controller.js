@@ -305,160 +305,95 @@ export const updateUserSettings = asyncHandler(async (req, res) => {
 // });
 
 export const sendChatRequest = asyncHandler(async (req, res) => {
-  const { recipientEmail, inviteMessage } = req.body;
+  const { recipientEmail, inviteMessage, requestType } = req.body;
+  const me = await User.findById(req.user._id);
+  const recipient = await User.findOne({ email: recipientEmail });
 
-  if (!recipientEmail) {
-    res.status(400);
-    throw new Error("Please provide recipientEmail");
-  }
-
-  const sender = await User.findById(req.user._id);
-  const recipient = await User.findOne({ email: recipientEmail.toLowerCase().trim() });
-
-  if (!recipient) {
+  if (!me || !recipient) {
     res.status(404);
-    throw new Error("Recipient user not found");
+    throw new Error("User not found");
   }
 
-  // Prevent sending to yourself
-  if (recipient.email === sender.email) {
-    res.status(400);
-    throw new Error("You cannot send a chat request to yourself");
+  me.sentChatRequests = me.sentChatRequests || [];
+  recipient.receivedChatRequests = recipient.receivedChatRequests || [];
+
+  // Prevent duplicates
+  if (!me.sentChatRequests.some(r => r.email.toLowerCase() === recipientEmail.toLowerCase())) {
+    me.sentChatRequests.push({ email: recipientEmail, message: inviteMessage, type: requestType });
+    recipient.receivedChatRequests.push({ email: me.email, message: inviteMessage, type: requestType });
   }
 
-  // -------------------------
-  //  1. Check if already connected (accepted)
-  // -------------------------
-  const isAlreadyConnected =
-    sender.acceptedChatRequests?.includes(recipient.email) ||
-    recipient.acceptedChatRequests?.includes(sender.email);
-
-  if (isAlreadyConnected) {
-    res.status(409);
-    throw new Error("You are already connected with this user");
-  }
-
-  // -------------------------
-  //  2. Check if sender already sent one
-  // -------------------------
-  const alreadySent = sender.sentChatRequests?.some(
-    (reqItem) => reqItem.email.toLowerCase() === recipient.email.toLowerCase()
-  );
-
-  if (alreadySent) {
-    res.status(409);
-    throw new Error("You have already sent a chat request to this user");
-  }
-
-  // -------------------------
-  //  3. Check if recipient already sent one (reverse direction)
-  // -------------------------
-  const reversePending = recipient.sentChatRequests?.some(
-    (reqItem) => reqItem.email.toLowerCase() === sender.email.toLowerCase()
-  );
-
-  if (reversePending) {
-    res.status(409);
-    throw new Error("This user has already sent you a chat request");
-  }
-
-  // -------------------------
-  //  If no previous invites → create new pending request
-  // -------------------------
-
-  // Add to recipient (received)
-  recipient.receivedChatRequests.push({
-    email: sender.email,
-    message: inviteMessage || "",
-    date: new Date(),
-  });
+  await me.save();
   await recipient.save();
 
-  // Add to sender (sent)
-  sender.sentChatRequests.push({
-    email: recipient.email,
-    message: inviteMessage || "",
-    date: new Date(),
-  });
-  await sender.save();
-
-  res.status(200).json({ message: "Chat request sent successfully" });
+  res.json({ message: "Chat request sent", status: "outgoing" });
 });
 
 
 
 export const acceptChatRequest = asyncHandler(async (req, res) => {
-  const { senderEmail } = req.body;
+  const senderEmail = req.body.senderEmail.toLowerCase().trim();
+  const me = await User.findById(req.user._id);
+  const sender = await User.findOne({ email: senderEmail });
 
-  if (!senderEmail) {
-    res.status(400);
-    throw new Error("senderEmail required");
-  }
-
-  const receiver = await User.findById(req.user._id);
-  const sender = await User.findOne({
-    email: senderEmail.toLowerCase().trim(),
-  });
-
-  if (!receiver || !sender) {
+  if (!me || !sender) {
     res.status(404);
-    throw new Error("Sender or receiver not found");
+    throw new Error("User not found");
   }
 
+  // Remove received request from me
+  me.receivedChatRequests = me.receivedChatRequests?.filter(r => r.email.toLowerCase() !== senderEmail);
+  me.acceptedChatRequests = me.acceptedChatRequests || [];
+  if (!me.acceptedChatRequests.includes(senderEmail)) me.acceptedChatRequests.push(senderEmail);
 
-  // ---------------- REMOVE PENDING REQUESTS ----------------
-  receiver.receivedChatRequests = receiver.receivedChatRequests.filter(
-    (r) => r?.email?.toLowerCase() !== sender.email.toLowerCase()
-  );
+  // Remove sent request from sender
+  sender.sentChatRequests = sender.sentChatRequests?.filter(r => r.email.toLowerCase() !== me.email.toLowerCase());
+  sender.acceptedChatRequests = sender.acceptedChatRequests || [];
+  if (!sender.acceptedChatRequests.includes(me.email.toLowerCase())) sender.acceptedChatRequests.push(me.email.toLowerCase());
 
-  sender.sentChatRequests = sender.sentChatRequests.filter(
-    (r) => r?.email?.toLowerCase() !== receiver.email.toLowerCase()
-  );
-
-  // ---------------- ADD ACCEPTED ONLY FOR SENDER (who sent the invite) ----------------
-  if (!sender.acceptedChatRequests.includes(receiver.email)) {
-    sender.acceptedChatRequests.push(receiver.email);
-  }
-
-  await receiver.save();
+  await me.save();
   await sender.save();
 
-  // ---------------- RESPONSE ----------------
-  res.status(200).json({
-    message: "Chat request accepted",
-    acceptedChat: {
-      email: sender.email,
-      name: sender.name,
-      avatar: sender.avatar,
-    },
-  });
+  // Notify real-time (if socket is connected)
+  if (typeof socket !== "undefined" && socket?.emit) {
+    socket.emit("chatAccepted", { senderEmail, receiverEmail: me.email });
+  }
+
+  res.json({ message: "Chat request accepted", status: "accepted" });
 });
+
 
 
 // GET /api/user/request/status/:email
 export const getChatRequestStatus = asyncHandler(async (req, res) => {
   const otherEmail = req.params.email.toLowerCase().trim();
+  const type = req.query.type || "user";
+
   const me = await User.findById(req.user._id);
+  if (!me) return res.status(404).json({ message: "User not found" });
 
-  if (!me) {
-    res.status(404);
-    throw new Error("User not found");
-  }
+  const targetUser = await User.findOne({
+    email: otherEmail,
+    ...(type === "business" ? { isBusiness: true } : {}),
+  });
+  if (!targetUser) return res.status(404).json({ message: "Target user not found" });
 
-  if (me.acceptedChatRequests?.includes(otherEmail)) {
-    return res.json({ status: "accepted" });
-  }
+  const myEmailLower = me.email.toLowerCase();
 
-  if (me.sentChatRequests?.some(r => r.email.toLowerCase() === otherEmail)) {
-    return res.json({ status: "outgoing" });
-  }
+  // Accepted if either side has each other in acceptedChatRequests
+  const acceptedByMe = me.acceptedChatRequests?.includes(otherEmail);
+  const acceptedByTarget = targetUser.acceptedChatRequests?.includes(myEmailLower);
+  if (acceptedByMe || acceptedByTarget) return res.json({ status: "accepted" });
 
-  if (me.receivedChatRequests?.some(r => r.email.toLowerCase() === otherEmail)) {
-    return res.json({ status: "incoming" });
-  }
+  // Outgoing: I sent
+  if (me.sentChatRequests?.some(r => (r.email || "").toLowerCase() === otherEmail)) return res.json({ status: "outgoing" });
+
+  // Incoming: I received
+  if (me.receivedChatRequests?.some(r => (r.email || "").toLowerCase() === otherEmail)) return res.json({ status: "incoming" });
 
   return res.json({ status: "none" });
 });
+
 
 
 
@@ -590,7 +525,7 @@ export const rejectChatRequest = asyncHandler(async (req, res) => {
 export const getBusinessUsers = async (req, res) => {
   try {
     const businesses = await User.find({ isBusiness: true })
-      .select("name avatar bio businessCategory")
+      .select("name avatar bio businessCategory acceptedChatRequests sentChatRequests receivedChatRequests email") // include necessary fields
       .sort({ createdAt: -1 });
 
     // Category count
@@ -609,3 +544,4 @@ export const getBusinessUsers = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch business users" });
   }
 };
+

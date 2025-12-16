@@ -30,23 +30,20 @@ import CosmosBackground from "./CosmosBg";
 
 // Business categories mock data
 const businessCategories = [
-  { id: "restaurants", name: "Restaurants", icon: Utensils },
-  { id: "cafe", name: "Cafes & Coffee", icon: Coffee },
-  { id: "automotive", name: "Automotive", icon: Car },
-  { id: "real-estate", name: "Real Estate", icon: Home },
-  { id: "healthcare", name: "Healthcare", icon: Stethoscope },
-  { id: "education", name: "Education", icon: GraduationCap },
-  { id: "beauty", name: "Beauty & Salon", icon: Scissors },
-  { id: "retail", name: "Retail & Shops", icon: ShoppingBag },
-  { id: "freelance", name: "Freelancers", icon: Palette },
-  { id: "legal", name: "Legal Services", icon: Briefcase },
-  { id: "finance", name: "Finance & Accounting", icon: Briefcase },
-  { id: "it", name: "IT & Software", icon: Users },
-  { id: "fitness", name: "Fitness & Wellness", icon: Users },
-  { id: "construction", name: "Construction", icon: Home },
-  { id: "travel", name: "Travel & Tourism", icon: MapPin },
+  { id: "restaurants", label: "Restaurant", icon: Utensils },
+  { id: "retail", label: "Retail Store", icon: ShoppingBag },
+  { id: "ecommerce", label: "E-commerce", icon: Users },
+  { id: "technology", label: "Technology", icon: Users },
+  { id: "education", label: "Education", icon: GraduationCap },
+  { id: "healthcare", label: "Healthcare", icon: Stethoscope },
+  { id: "finance", label: "Finance", icon: Briefcase },
+  { id: "real-estate", label: "Real Estate", icon: Home },
+  { id: "travel", label: "Travel & Tourism", icon: MapPin },
+  { id: "entertainment", label: "Entertainment", icon: Users },
+  { id: "marketing", label: "Marketing & Advertising", icon: Users },
+  { id: "freelancer", label: "Freelancer / Consultant", icon: Palette },
+  { id: "other", label: "Other", icon: Users },
 ];
-
 
 // Mock business contacts for each category - actual business professionals/contacts
 // const businessContacts = {
@@ -358,6 +355,18 @@ const NewChat = ({
 
   const [businessUsers, setBusinessUsers] = useState([]);
 const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
+
+ // Get current user email once for all contacts
+  let currentUserEmail = "";
+  try {
+    const userInfo = JSON.parse(localStorage.getItem("userInfo"));
+    currentUserEmail = userInfo?.email || userInfo?.user?.email || "";
+  } catch (err) {
+    console.error("Failed to get current user email", err);
+  }
+
+
+
   useEffect(() => {
   const fetchAll = async () => {
     try {
@@ -383,24 +392,29 @@ const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
         }));
 
       // 2️⃣ Fetch business users
-      const bizRes = await fetch(`${API_BASE_URL}/api/user/business`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const bizData = await bizRes.json();
+      // 2️⃣ Fetch business users
+const bizRes = await fetch(`${API_BASE_URL}/api/user/business`, {
+  headers: { Authorization: `Bearer ${token}` },
+});
+const bizData = await bizRes.json();
 
-      setBusinessUsers(
-        bizData.businesses.map(b => ({
-          id: b._id,
-          name: b.name,
-          avatar: b.avatar,
-          title: b.title,
-          business: b.businessName,
-          location: b.location,
-          businessCategory: b.businessCategory,
-          isOnline: b.isOnline,
-          type: "business",
-        }))
-      );
+setBusinessUsers(
+  bizData.businesses.map(b => ({
+    id: b._id,
+    name: b.name,
+    email: b.email,
+    avatar: b.avatar,
+    title: b.title,
+    business: b.businessName,
+    location: b.location,
+    businessCategory: b.businessCategory,
+    isOnline: b.isOnline,
+    type: "business",
+    acceptedChatRequests: b.acceptedChatRequests || [],
+    sentChatRequests: b.sentChatRequests || [],
+    receivedChatRequests: b.receivedChatRequests || [],
+  }))
+);
 
       setBusinessCategoryCounts(bizData.categoryCounts || {});
 
@@ -441,18 +455,31 @@ const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
     [registeredUsers, searchTerm]
   );
 
- const filteredBusinessContacts = useMemo(() => {
+const filteredBusinessContacts = useMemo(() => {
   if (!selectedBusinessCategory) return [];
 
-  return businessUsers.filter(b =>
-    b.businessCategory === selectedBusinessCategory.id &&
-    (
-      b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      b.business?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      b.title?.toLowerCase().includes(searchTerm.toLowerCase())
-    )
+  // 1️⃣ Include logged-in user in this category unconditionally
+  const selfInCategory = businessUsers.find(
+    b =>
+      b.businessCategory === selectedBusinessCategory.id &&
+      b.email.toLowerCase() === currentUserEmail.toLowerCase()
   );
-}, [businessUsers, selectedBusinessCategory, searchTerm]);
+
+  // 2️⃣ Include other users who match the search term
+  const othersInCategory = businessUsers.filter(
+    b =>
+      b.businessCategory === selectedBusinessCategory.id &&
+      b.email.toLowerCase() !== currentUserEmail.toLowerCase() &&
+      (
+        b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        b.business?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        b.title?.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+  );
+
+  // 3️⃣ Combine: self first, then others
+  return selfInCategory ? [selfInCategory, ...othersInCategory] : othersInCategory;
+}, [businessUsers, selectedBusinessCategory, searchTerm, currentUserEmail]);
 
 
   // Open chat UI for contact, but only set as pending if no chatId exists
@@ -615,11 +642,7 @@ const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
                 </div>
               ) : (
                 (() => {
-                  let userEmail = "";
-                  try {
-                    const userInfo = JSON.parse(localStorage.getItem("userInfo"));
-                    userEmail = userInfo?.email || userInfo?.user?.email || "";
-                  } catch {}
+                 
                   return filteredAllContacts.map((contact) => (
                     <ContactItem
                       key={contact.id}
@@ -628,7 +651,7 @@ const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
                       onClick={() => handleStartChat(contact)}
                       showLastSeen
                       token={localStorage.getItem("token")}
-                      currentUserEmail={userEmail}
+                      currentUserEmail={currentUserEmail}
                     />
                   ));
                 })()
@@ -676,7 +699,7 @@ const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
                       showLastSeen
                       onClick={() => handleStartChat(user)}
                       token={localStorage.getItem("token")}
-                      currentUserEmail={userEmail}
+                      currentUserEmail={currentUserEmail}
                     />
                   ));
                 })()
@@ -701,7 +724,9 @@ const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
                   </h3>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {businessCategories.map((category) => (
+                  {businessCategories
+  .filter(category => businessCategoryCounts[category.id] > 0)
+  .map((category) => (
                     <motion.div
                       key={category.id}
                       whileHover={{ scale: 1.02 }}
@@ -711,11 +736,16 @@ const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
                         effectiveTheme.border || "border-gray-200"
                       } rounded-lg p-4 cursor-pointer hover:shadow-md transition-all duration-200`}
                     >
-                      <div
-                        className={`w-12 h-12 ${category.color} rounded-lg flex items-center justify-center mb-3`}
-                      >
-                        <category.icon className="w-6 h-6 text-white" />
-                      </div>
+                    <div
+  className={`w-12 h-12 rounded-lg flex items-center justify-center mb-3 ${
+    effectiveTheme.secondary || "bg-gray-200"
+  }`}
+>
+  <category.icon
+    className={`w-6 h-6 ${effectiveTheme.text || "text-gray-900"}`}
+  />
+</div>
+
                       <h4
                         className={`font-semibold ${effectiveTheme.text || "text-gray-900"} mb-1`}
                       >
@@ -755,31 +785,34 @@ const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
                   </h3>
                 </div>
 
-                {filteredBusinessContacts.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center p-8">
-                    <MessageCircle
-                      className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4`}
-                    />
-                    <p
-                      className={`${effectiveTheme.text || "text-gray-900"} text-center`}
-                    >
-                      {searchTerm
-                        ? "No business users found matching your search"
-                        : "No business users available"}
-                    </p>
-                  </div>
-                ) : (
-                  filteredBusinessContacts.map((business) => (
-                    <BusinessContactItem
-                      key={business.id}
-                      business={business}
-                      effectiveTheme={effectiveTheme}
-                      onClick={() =>
-                        handleStartChat({ ...business, type: "business" })
-                      }
-                    />
-                  ))
-                )}
+               {filteredBusinessContacts.length === 0 ? (
+  <div className="flex flex-col items-center justify-center p-8">
+    <MessageCircle
+      className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4`}
+    />
+    <p
+      className={`${effectiveTheme.text || "text-gray-900"} text-center`}
+    >
+      {searchTerm
+        ? "No business users found matching your search"
+        : "No other users in this category"}
+    </p>
+  </div>
+) : (
+  filteredBusinessContacts.map((business) => (
+    <ContactItem
+      key={business.id}
+      contact={business}
+      effectiveTheme={effectiveTheme}
+      onClick={() => handleStartChat(business)}
+      token={localStorage.getItem("token")}
+      currentUserEmail={currentUserEmail}
+      showLastSeen
+      isSelf={business.email.toLowerCase() === currentUserEmail.toLowerCase()} 
+    />
+  ))
+)}
+
               </div>
             )}
           </div>
@@ -790,7 +823,7 @@ const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
 };
 
 //Contacts appearing in new chat page
-const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, currentUserEmail }) => {
+const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, currentUserEmail, isSelf,  }) => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteMessage, setInviteMessage] = useState("");
   const [sending, setSending] = useState(false);
@@ -801,7 +834,7 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/user/request/status/${contact.email}`, {
+        const res = await fetch(`${API_BASE_URL} api/user/request/status/${contact.email}?type=${contact.type}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
@@ -816,8 +849,26 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
   }, [contact.email, token]);
 
   // Show chat icon if my email is in contact's acceptedChatRequests (case-insensitive)
-  const myEmailLower = currentUserEmail ? currentUserEmail.toLowerCase() : "";
-  const isMyEmailAcceptedByContact = myEmailLower && (contact.acceptedChatRequests || []).some(e => (e || "").toLowerCase() === myEmailLower);
+  // const myEmailLower = currentUserEmail ? currentUserEmail.toLowerCase() : "";
+  // const isMyEmailAcceptedByContact = myEmailLower && (contact.acceptedChatRequests || []).some(e => (e || "").toLowerCase() === myEmailLower);
+  // const canSendInvite = chatStatus === "none" && !isMyEmailAcceptedByContact;
+
+  const myEmailLower = currentUserEmail?.toLowerCase() || "";
+let status = "none";
+
+if ((contact.acceptedChatRequests || []).some(e => (e || "").toLowerCase() === myEmailLower)) {
+  status = "accepted";
+} else if ((contact.sentChatRequests || []).some(e => (e.email || "").toLowerCase() === myEmailLower)) {
+  status = "outgoing";
+} else if ((contact.receivedChatRequests || []).some(e => (e.email || "").toLowerCase() === myEmailLower)) {
+  status = "incoming";
+}
+
+// Determine if my email is accepted by contact
+  const isMyEmailAcceptedByContact = (contact.acceptedChatRequests || []).some(
+    e => (e || "").toLowerCase() === myEmailLower
+  );
+
   const canSendInvite = chatStatus === "none" && !isMyEmailAcceptedByContact;
 
   // ------------------- Socket Listener -------------------
@@ -848,7 +899,7 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ recipientEmail: contact.email, inviteMessage }),
+        body: JSON.stringify({ recipientEmail: contact.email, inviteMessage , requestType: contact.type}),
       });
 
       setInviteStatus("sent");
@@ -869,7 +920,7 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ recipientEmail: contact.email }),
+        body: JSON.stringify({ recipientEmail: contact.email, requestType: contact.type }),
       });
 
       setInviteStatus("idle");
@@ -895,7 +946,7 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ senderEmail: contact.email }),
+        body: JSON.stringify({ senderEmail: contact.email, requestType: contact.type  }),
       });
       const data = await res.json();
 
@@ -932,7 +983,9 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
             className="w-12 h-12 rounded-full object-cover"
           />
           <div>
-            <h3 className="font-semibold truncate">{contact.name}</h3>
+            <h3 className="font-semibold truncate">
+  {contact.name} {isSelf && <span className="text-xs text-blue-500 ml-1">(You)</span>}
+</h3>
             {showLastSeen && (
               <span className="text-xs text-gray-500">
                 {contact.isOnline ? "Online" : "Offline"}
@@ -1092,62 +1145,6 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
   );
 };
 
-// Business Contact Item Component - for business professionals/contacts
-const BusinessContactItem = ({ business, effectiveTheme, onClick }) => {
-  return (
-    <motion.div
-      whileHover={{ x: 4 }}
-      className={`flex items-center justify-between p-4 cursor-pointer border-b ${effectiveTheme.border || "border-gray-300"} hover:${effectiveTheme.hover || "bg-gray-200"} transition-all duration-200`}
-      onClick={() => onClick(business)}
-    >
-      {/* Left: Avatar + Name + Company */}
-      <div className="flex items-center space-x-3 min-w-0 flex-1">
-        {/* Avatar */}
-        <div className="relative">
-          {business.avatar ? (
-            <img
-              src={business.avatar}
-              alt={business.name}
-              className="w-12 h-12 rounded-full object-cover"
-            />
-          ) : (
-            <div className="w-12 h-12 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg">
-              {business.name.charAt(0)}
-            </div>
-          )}
-          {business.isOnline && (
-            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
-          )}
-        </div>
-
-        {/* Name + Company */}
-        <div className="flex-1 min-w-0">
-          <h3
-            className={`font-semibold ${effectiveTheme.text || "text-gray-900"} truncate`}
-          >
-            {business.name}
-          </h3>
-          <p
-            className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"} truncate`}
-          >
-            {business.businessCategory || business.title}
-          </p>
-        </div>
-      </div>
-
-      {/* Right: Chat Icon */}
-      <div className="flex items-center flex-shrink-0 ml-4">
-        <div
-          className={`w-10 h-10 rounded-full ${effectiveTheme.accent || "bg-blue-500"} flex items-center justify-center`}
-        >
-          <MessageCircle
-            className={`w-5 h-5 ${effectiveTheme.textSecondary || "text-white"}`}
-          />
-        </div>
-      </div>
-    </motion.div>
-  );
-};
 
 
 export default NewChat;
