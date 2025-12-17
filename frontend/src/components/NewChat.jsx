@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import Logo from "./Logo";
 import CosmosBackground from "./CosmosBg";
-//import { io } from "socket.io-client";
+import { io } from "socket.io-client";
 
 // Business categories mock data
 const businessCategories = [
@@ -386,9 +386,14 @@ const NewChat = ({
   onClose,
   onStartChat,
   existingContacts = [],
+  // optional realtime presence passed from parent (ChattingPage)
+  onlineUsers: parentOnlineUsers = null,
+  groupOnlineCounts: parentGroupOnlineCounts = null,
 }) => {
   const [allContacts, setAllContacts] = useState([]);
   const [registeredUsers, setRegisteredUsers] = useState([]);
+  const [onlineUsers, setOnlineUsers] = useState(new Set());
+  const [groupOnlineCounts, setGroupOnlineCounts] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -397,6 +402,10 @@ const NewChat = ({
   const [activeSection, setActiveSection] = useState("contacts"); // 'contacts', 'users', 'business'
 
   useEffect(() => {
+    // Sync from parent if provided
+    if (parentOnlineUsers) setOnlineUsers(new Set(parentOnlineUsers));
+    if (parentGroupOnlineCounts) setGroupOnlineCounts(parentGroupOnlineCounts);
+
     const fetchUsers = async () => {
       try {
         const token = localStorage.getItem("token");
@@ -448,7 +457,7 @@ const NewChat = ({
           phoneNumber: u.phoneNumber || u.phone || "",
           _rawPhone: normalizePhone(u.phoneNumber || u.phone || ""),
           avatar: u.avatar || null,
-          isOnline: Math.random() < 0.5,
+          isOnline: !!u.online, // use API-provided online flag when available
           timestamp: u.createdAt,
           type: "user",
           bio: u.bio || "",
@@ -482,6 +491,10 @@ const NewChat = ({
           if (matched) {
             // use registered user object for known contact
             if (!knownContacts.find((k) => String(k.id) === String(matched.id))) {
+              // If the original contact has an isOnline flag from parent, copy it to the matched registered user
+              if (c && (c.isOnline === true || c.isOnline === false)) {
+                matched.isOnline = c.isOnline;
+              }
               knownContacts.push(matched);
             }
           } else {
@@ -495,6 +508,29 @@ const NewChat = ({
             });
           }
         });
+
+        // Also apply online flags from existingContacts to formattedUsers where possible
+        if (Array.isArray(existingContacts) && existingContacts.length > 0) {
+          const byEmailExisting = new Map();
+          const byIdExisting = new Map();
+          const byPhoneExisting = new Map();
+          existingContacts.forEach(ec => {
+            if (ec.email) byEmailExisting.set(String(ec.email).toLowerCase(), ec);
+            if (ec.id) byIdExisting.set(String(ec.id), ec);
+            const ep = (ec.phone || ec.phoneNumber || ec._rawPhone) || '';
+            if (ep) byPhoneExisting.set(String(ep), ec);
+          });
+
+          formattedUsers.forEach(fu => {
+            let override = null;
+            if (fu.id && byIdExisting.has(String(fu.id))) override = byIdExisting.get(String(fu.id));
+            else if (fu.email && byEmailExisting.has(String(fu.email).toLowerCase())) override = byEmailExisting.get(String(fu.email).toLowerCase());
+            else if (fu._rawPhone && byPhoneExisting.has(String(fu._rawPhone))) override = byPhoneExisting.get(String(fu._rawPhone));
+            if (override && (override.isOnline === true || override.isOnline === false)) {
+              fu.isOnline = override.isOnline;
+            }
+          });
+        }
 
         // Users that were not included in knownContacts remain as newUsers
         const knownIds = new Set(knownContacts.map((u) => String(u.id)));
@@ -514,6 +550,82 @@ console.log("Existing not registered contacts:", existingNotRegisteredMapped);
     fetchUsers();
     // ensure it runs only once on mount
   }, []);
+
+  // If parent does not provide realtime presence, create a socket connection here
+  useEffect(() => {
+    if (parentOnlineUsers) return; // parent supplies presence
+    let sock = null;
+    try {
+      const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+      // helper to apply online flags into current contact lists
+      const applyOnlineFlags = (arr) => {
+        try {
+          const s = new Set((arr || []).map((a) => String(a)));
+          setOnlineUsers(s);
+          setAllContacts((prev) =>
+            prev.map((c) => ({
+              ...c,
+              isOnline:
+                Boolean(c.isOnline) ||
+                s.has(String(c.id)) ||
+                (c.email && s.has(String(c.email))) ||
+                false,
+            }))
+          );
+          setRegisteredUsers((prev) =>
+            prev.map((c) => ({
+              ...c,
+              isOnline: Boolean(c.isOnline) || s.has(String(c.id)) || (c.email && s.has(String(c.email))) || false,
+            }))
+          );
+        } catch (e) {
+          console.error('applyOnlineFlags error', e);
+        }
+      };
+
+      sock = io(API_BASE_URL, { transports: ['websocket'], withCredentials: true });
+      sock.on('connect', () => {
+        sock.emit('setup', userData);
+      });
+
+      sock.on('online users', (arr) => {
+        applyOnlineFlags(arr);
+      });
+      sock.on('user online', ({ userId }) => {
+        applyOnlineFlags([userId]);
+      });
+      sock.on('user offline', ({ userId }) => {
+        try {
+          setOnlineUsers((prev) => {
+            const s = new Set(prev);
+            s.delete(String(userId));
+            return s;
+          });
+          // mark offline in lists
+          setAllContacts((prev) => prev.map((c) => {
+            if (String(c.id) === String(userId) || (c.email && String(c.email) === String(userId))) {
+              return { ...c, isOnline: false };
+            }
+            return c;
+          }));
+          setRegisteredUsers((prev) => prev.map((c) => {
+            if (String(c.id) === String(userId) || (c.email && String(c.email) === String(userId))) {
+              return { ...c, isOnline: false };
+            }
+            return c;
+          }));
+        } catch (e) {}
+      });
+
+      sock.on('group online count', ({ chatId, onlineCount }) => {
+        try { if (!chatId) return; setGroupOnlineCounts(prev => ({ ...(prev||{}), [String(chatId)]: Number(onlineCount||0) })); } catch (e) {}
+      });
+    } catch (e) {
+      console.error('NewChat socket init failed', e);
+    }
+
+    return () => { if (sock) sock.disconnect(); };
+  }, [parentOnlineUsers]);
 
   const filteredAllContacts = useMemo(
     () =>
@@ -1125,14 +1237,16 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
 
       {/* Invite Modal */}
       {showInviteModal && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{background: 'rgba(0,0,0,0.4)'}}>
+        <div className="fixed inset-0 flex items-center justify-center z-50">
           <div className="absolute inset-0 w-full h-full pointer-events-none">
-            <CosmosBackground opacity={0.25} theme={document.documentElement.classList.contains('dark') ? 'dark' : 'light'} />
+            <CosmosBackground opacity={0.28} theme="light" />
           </div>
+          {/* White soft overlay above the cosmos background to create a day/light frosted effect */}
+          <div className="absolute inset-0 w-full h-full pointer-events-none" style={{ background: 'rgba(255,255,255,0.9)' }} />
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className={`relative w-full max-w-md rounded-2xl p-6 shadow-xl ${effectiveTheme.secondary || (document.documentElement.classList.contains('dark') ? 'bg-gray-800' : 'bg-white')}`}
+            className={`relative w-full max-w-md rounded-2xl p-6 shadow-xl ${effectiveTheme.secondary || 'bg-white'}`}
             style={{ zIndex: 10 }}
           >
             {/* Header */}
@@ -1220,12 +1334,17 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
 
       {/* Share Link Popup - Only for Your Contacts */}
       {showSharePopup && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4" onClick={() => setShowSharePopup(false)}>
+        <div className="fixed inset-0 flex items-center justify-center z-50 px-4" onClick={() => setShowSharePopup(false)}>
+          <div className="absolute inset-0 w-full h-full pointer-events-none">
+            <CosmosBackground opacity={0.22} theme="light" />
+          </div>
+          <div className="absolute inset-0 w-full h-full pointer-events-none" style={{ background: 'rgba(255,255,255,0.88)' }} />
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm rounded-2xl p-5 ${effectiveTheme.secondary || "bg-white dark:bg-gray-800"} shadow-2xl`}
+            className={`w-full max-w-sm rounded-2xl p-5 ${effectiveTheme.secondary || "bg-white"} shadow-2xl`}
+            style={{ zIndex: 10 }}
           >
             <div className="flex items-start justify-between mb-4">
               <div>

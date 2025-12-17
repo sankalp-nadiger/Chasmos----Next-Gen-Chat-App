@@ -1,6 +1,7 @@
 import asyncHandler from "express-async-handler";
 import User from "../models/user.model.js";
 import generateToken from "../config/generatetoken.js";
+import { isOnline, getOnlineList } from "../services/onlineUsers.js";
 
 // export const allUsers = asyncHandler(async (req, res) => {
 //   const keyword = req.query.search
@@ -28,7 +29,12 @@ export const allUsers = asyncHandler(async (req, res) => {
     users = await User.find({ _id: { $ne: req.user._id } }).select(
       "-password -__v"
     );
-    return res.status(200).json(users);
+    const onlineIds = getOnlineList();
+    const usersWithStatus = users.map((u) => ({
+      ...(typeof u.toObject === "function" ? u.toObject() : u),
+      online: onlineIds.includes(String(u._id)),
+    }));
+    return res.status(200).json(usersWithStatus);
   }
 
   // If search is an email → exact match
@@ -37,7 +43,10 @@ export const allUsers = asyncHandler(async (req, res) => {
       "-password -__v"
     );
     if (user && user._id.toString() !== req.user._id.toString()) {
-      return res.status(200).json([user]); // return array for compatibility
+      const onlineIds = getOnlineList();
+      const userObj = typeof user.toObject === "function" ? user.toObject() : user;
+      userObj.online = onlineIds.includes(String(user._id));
+      return res.status(200).json([userObj]); // return array for compatibility
     }
     // fallback to fuzzy search if exact not found
   }
@@ -51,7 +60,13 @@ export const allUsers = asyncHandler(async (req, res) => {
     _id: { $ne: req.user._id },
   }).select("-password -__v");
 
-  res.status(200).json(users);
+  const onlineIds = getOnlineList();
+  const usersWithStatus = users.map((u) => ({
+    ...(typeof u.toObject === "function" ? u.toObject() : u),
+    online: onlineIds.includes(String(u._id)),
+  }));
+
+  res.status(200).json(usersWithStatus);
 });
 
 export const registerUser = asyncHandler(async (req, res) => {

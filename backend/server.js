@@ -28,6 +28,13 @@ import { notFound, errorHandler } from "./middleware/error.middleware.js";
 import cors from 'cors';
 import { setSocketIOInstance } from "./services/scheduledMessageCron.js";
 import { initScheduledMessageCron } from "./services/scheduledMessageCron.js";
+import {
+  addConnection,
+  removeConnection,
+  isOnline,
+  getOnlineList,
+  getConnectionCount,
+} from "./services/onlineUsers.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -87,8 +94,7 @@ const io = new Server(server, {
   },
 });
 
-// Track online users (userId -> connection count)
-const onlineUserConnections = new Map();
+// Online users are tracked in ./services/onlineUsers.js
 
 // Initialize scheduled message cron job
 // Pass io to cron job
@@ -111,9 +117,9 @@ io.on("connection", (socket) => {
     socket.userId = String(uid);
 
     // increment connection count for this user
-    const prev = onlineUserConnections.get(socket.userId) || 0;
-    onlineUserConnections.set(socket.userId, prev + 1);
-    console.log(`[SOCKET] setup: user=${socket.userId} prevConnections=${prev} newConnections=${prev + 1} totalOnlineUsers=${onlineUserConnections.size}`);
+    const prev = getConnectionCount(socket.userId) || 0;
+    const newCount = addConnection(socket.userId);
+    console.log(`[SOCKET] setup: user=${socket.userId} prevConnections=${prev} newConnections=${newCount} totalOnlineUsers=${getOnlineList().length}`);
 
     // emit to others that this user is online only when first connection
     if (prev === 0) {
@@ -127,7 +133,7 @@ io.on("connection", (socket) => {
 
     // send current online users list to the connecting socket
     try {
-      const onlineList = Array.from(onlineUserConnections.keys());
+      const onlineList = getOnlineList();
       socket.emit('online users', onlineList);
       console.log(`[SOCKET] sent online users list (${onlineList.length}) to ${socket.userId}`);
     } catch (e) {
@@ -144,7 +150,7 @@ io.on("connection", (socket) => {
         // nothing to broadcast
       } else {
         // Prepare full online list for personal-room broadcasts
-        const onlineListForBroadcast = Array.from(onlineUserConnections.keys());
+        const onlineListForBroadcast = getOnlineList();
 
         // Collect unique personal user IDs (excluding current) to continue sending the
         // existing `online users` list as before for compatibility with clients.
@@ -178,7 +184,7 @@ io.on("connection", (socket) => {
               .map(m => String(m && (m._id || m.id || m)))
               .filter(Boolean);
 
-            const onlineCount = memberIds.reduce((acc, id) => acc + (onlineUserConnections.has(id) ? 1 : 0), 0);
+            const onlineCount = memberIds.reduce((acc, id) => acc + (isOnline(id) ? 1 : 0), 0);
             const chatId = String(cd._id);
 
             // Emit to the chat room (sockets that have joined the chat room)
@@ -925,19 +931,16 @@ socket.on("remove reaction", async (data) => {
     try {
       const uid = socket.userId;
       if (uid) {
-        const prev = onlineUserConnections.get(uid) || 0;
-        const next = Math.max(0, prev - 1);
+        const prev = getConnectionCount(uid) || 0;
+        const next = removeConnection(uid);
         console.log(`[SOCKET] disconnect: user=${uid} prevConnections=${prev} nextConnections=${next}`);
         if (next <= 0) {
-          onlineUserConnections.delete(uid);
           try {
             io.emit('user offline', { userId: uid });
             console.log(`[SOCKET] broadcast: user offline -> ${uid}`);
           } catch (e) {
             console.error('[SOCKET] error broadcasting user offline', e);
           }
-        } else {
-          onlineUserConnections.set(uid, next);
         }
       }
     } catch (e) {
