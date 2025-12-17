@@ -15,13 +15,29 @@ import {
   Phone,
   ArrowRight
 } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
 import { useTheme } from '../context/ThemeContext';
 import Logo from './Logo';
 import GoogleSignupComplete from './GoogleSignupComplete.jsx';
-
+import imageCompression from "browser-image-compression";
+// import { createClient } from "@supabase/supabase-js";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+import { supabase } from '../supabaseClient';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+
+const MAX_AVATAR_SIZE = 1 * 1024 * 1024; // 1 MB
+
+// Example usage:
+const { data, error } = await supabase
+  .from('users')
+  .select('*');
 
 // Use the full `GoogleSignupComplete` component from its file (imported above)
+import.meta.env.VITE_SUPABASE_URL
+import.meta.env.VITE_SUPABASE_ANON_KEY
 
 // Mock Cloudinary upload
 const uploadToCloudinary = async (file) => {
@@ -432,61 +448,150 @@ const SignupForm = ({ currentTheme, onSignup }) => {
     }
   };
 
-  const handleSubmit = useCallback(
-    async (e) => {
-      e.preventDefault();
-      setError("");
 
-      if (formData.password !== formData.confirmPassword) {
-        setError("Passwords don't match!");
-        return;
-      }
-      if (!formData.name || !formData.email || !formData.password || !formData.phoneNumber || !formData.bio) {
-        setError("Please fill in all required fields");
-        return;
-      }
 
-      setIsLoading(true);
 
-      try {
-        let avatarUrl = formData.avatar;
-        if (formData.picFile) {
-          avatarUrl = await uploadToCloudinary(formData.picFile);
-        }
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  setError("");
 
-        const response = await fetch(`${API_BASE_URL}/api/user`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: formData.name,
-            email: formData.email,
-            phoneNumber: formData.phoneNumber,
-            password: formData.password,
-            bio: formData.bio,
-            avatar: avatarUrl,
-          }),
-        });
+  // ✅ Check passwords
+  if (formData.password !== formData.confirmPassword) {
+    setError("Passwords don't match!");
+    return;
+  }
 
-        const data = await response.json();
+  // ✅ Check required fields
+  if (!formData.name || !formData.email || !formData.password || !formData.phoneNumber || !formData.bio) {
+    setError("Please fill in all required fields");
+    return;
+  }
 
-        if (!response.ok) {
-          throw new Error(data.message || "Registration failed");
-        }
+  setIsLoading(true);
 
-        localStorage.setItem("userInfo", JSON.stringify(data));
-        localStorage.setItem("chasmos_user_data", JSON.stringify(data));
-        localStorage.setItem("token", data.token);
-        onSignup?.(data);
-      } catch (err) {
-        setError(err.message || "Failed to create account. Please try again.");
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [formData, onSignup]
-  );
+  try {
+    let avatarUrl = null;
+
+    // ✅ Upload avatar if user selected a file
+    if (formData.picFile) {
+      // Compress image if needed
+      const compressedFile = await imageCompression(formData.picFile, {
+        maxSizeMB: 1,
+        maxWidthOrHeight: 1024,
+        useWebWorker: true,
+      });
+
+      const fileExt = compressedFile.name.split('.').pop();
+      const fileName = `avatars/${Date.now()}.${fileExt}`;
+
+      // Upload to Supabase
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, compressedFile, { cacheControl: '3600', upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(fileName);
+
+      avatarUrl = urlData.publicUrl;
+    }
+
+    // ✅ Send registration data to backend
+    const response = await fetch(`${API_BASE_URL}/api/user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: formData.name,
+        email: formData.email,
+        phoneNumber: formData.phoneNumber,
+        password: formData.password,
+        bio: formData.bio,
+        avatar: avatarUrl, // Send Supabase URL
+      }),
+    });
+
+   const data = await response.json();
+if (!response.ok) throw new Error(data.message || "Registration failed");
+
+// ✅ Normalize user object
+const normalizedUser = {
+  ...data,
+  createdAt: data.createdAt || new Date().toISOString(),
+};
+
+// ✅ Save locally
+localStorage.setItem("userInfo", JSON.stringify(normalizedUser));
+localStorage.setItem("chasmos_user_data", JSON.stringify(normalizedUser));
+localStorage.setItem("token", data.token);
+
+onSignup?.(normalizedUser);
+  } catch (err) {
+    console.error("Signup error:", err);
+    setError(err.message || "Failed to create account. Please try again.");
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+
+  // const handleSubmit = useCallback(
+  //   async (e) => {
+  //     e.preventDefault();
+  //     setError("");
+
+  //     if (formData.password !== formData.confirmPassword) {
+  //       setError("Passwords don't match!");
+  //       return;
+  //     }
+  //     if (!formData.name || !formData.email || !formData.password || !formData.phoneNumber || !formData.bio) {
+  //       setError("Please fill in all required fields");
+  //       return;
+  //     }
+
+  //     setIsLoading(true);
+
+  //     try {
+  //       let avatarUrl = formData.avatar;
+  //       if (formData.picFile) {
+  //         avatarUrl = await uploadToCloudinary(formData.picFile);
+  //       }
+
+  //       const response = await fetch(`${API_BASE_URL}/api/user`, {
+  //         method: "POST",
+  //         headers: {
+  //           "Content-Type": "application/json",
+  //         },
+  //         body: JSON.stringify({
+  //           name: formData.name,
+  //           email: formData.email,
+  //           phoneNumber: formData.phoneNumber,
+  //           password: formData.password,
+  //           bio: formData.bio,
+  //           avatar: avatarUrl,
+  //         }),
+  //       });
+
+  //       const data = await response.json();
+
+  //       if (!response.ok) {
+  //         throw new Error(data.message || "Registration failed");
+  //       }
+
+  //       localStorage.setItem("userInfo", JSON.stringify(data));
+  //       localStorage.setItem("chasmos_user_data", JSON.stringify(data));
+  //       localStorage.setItem("token", data.token);
+  //       onSignup?.(data);
+  //     } catch (err) {
+  //       setError(err.message || "Failed to create account. Please try again.");
+  //     } finally {
+  //       setIsLoading(false);
+  //     }
+  //   },
+  //   [formData, onSignup]
+  // );
 
   return (
     <motion.form

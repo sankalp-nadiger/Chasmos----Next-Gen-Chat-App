@@ -2,6 +2,7 @@ import asyncHandler from "express-async-handler";
 import User from "../models/user.model.js";
 import generateToken from "../config/generatetoken.js";
 import { isOnline, getOnlineList } from "../services/onlineUsers.js";
+import { uploadBase64ImageToSupabase } from "../utils/uploadToSupabase.js";
 
 // export const allUsers = asyncHandler(async (req, res) => {
 //   const keyword = req.query.search
@@ -68,32 +69,31 @@ export const allUsers = asyncHandler(async (req, res) => {
 
   res.status(200).json(usersWithStatus);
 });
-
 export const registerUser = asyncHandler(async (req, res) => {
   const { name, email, password, phoneNumber, avatar, bio } = req.body;
 
-  // Validate required fields
+  // ✅ Validate required fields
   if (!name || !email || !password || !phoneNumber) {
     res.status(400);
     throw new Error("Please enter all the required fields");
   }
 
-  // Validate email format
+  // ✅ Validate email
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
     res.status(400);
     throw new Error("Please enter a valid email address");
   }
 
-  // Validate password strength (minimum 6 characters)
+  // ✅ Validate password
   if (password.length < 6) {
     res.status(400);
     throw new Error("Password must be at least 6 characters long");
   }
 
-  // Check if user already exists (by email or phone)
+  // ✅ Check if user already exists
   const userExists = await User.findOne({
-    $or: [{ email: email.toLowerCase() }, { phoneNumber: phoneNumber }],
+    $or: [{ email: email.toLowerCase() }, { phoneNumber }],
   });
 
   if (userExists) {
@@ -101,16 +101,19 @@ export const registerUser = asyncHandler(async (req, res) => {
     throw new Error("User already exists with this email or phone number");
   }
 
-  // Create new user
+  // ✅ Use default avatar if none provided
+  const avatarUrl =
+    avatar ||
+    "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg";
+
+  // ✅ Create user
   const user = await User.create({
     name: name.trim(),
     email: email.toLowerCase().trim(),
     password,
     phoneNumber,
     bio: bio || "Hey there! I am using Chasmos.",
-    avatar:
-      avatar ||
-      "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+    avatar: avatarUrl,
   });
 
   if (user) {
@@ -121,6 +124,7 @@ export const registerUser = asyncHandler(async (req, res) => {
       isAdmin: user.isAdmin,
       avatar: user.avatar,
       phoneNumber: user.phoneNumber,
+      createdAt: user.createdAt,
       bio: user.bio,
       token: generateToken(user._id),
     });
@@ -129,6 +133,68 @@ export const registerUser = asyncHandler(async (req, res) => {
     throw new Error("Failed to create user");
   }
 });
+
+
+// export const registerUser = asyncHandler(async (req, res) => {
+//   const { name, email, password, phoneNumber, avatar, bio } = req.body;
+
+//   // Validate required fields
+//   if (!name || !email || !password || !phoneNumber) {
+//     res.status(400);
+//     throw new Error("Please enter all the required fields");
+//   }
+
+//   // Validate email format
+//   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+//   if (!emailRegex.test(email)) {
+//     res.status(400);
+//     throw new Error("Please enter a valid email address");
+//   }
+
+//   // Validate password strength (minimum 6 characters)
+//   if (password.length < 6) {
+//     res.status(400);
+//     throw new Error("Password must be at least 6 characters long");
+//   }
+
+//   // Check if user already exists (by email or phone)
+//   const userExists = await User.findOne({
+//     $or: [{ email: email.toLowerCase() }, { phoneNumber: phoneNumber }],
+//   });
+
+//   if (userExists) {
+//     res.status(400);
+//     throw new Error("User already exists with this email or phone number");
+//   }
+
+//   // Create new user
+//   const user = await User.create({
+//     name: name.trim(),
+//     email: email.toLowerCase().trim(),
+//     password,
+//     phoneNumber,
+//     bio: bio || "Hey there! I am using Chasmos.",
+//     avatar:
+//       avatar ||
+//       "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
+//   });
+
+//   if (user) {
+//     res.status(201).json({
+//       _id: user._id,
+//       name: user.name,
+//       email: user.email,
+//       isAdmin: user.isAdmin,
+//       avatar: user.avatar,
+//       phoneNumber: user.phoneNumber,
+//       bio: user.bio,
+//       token: generateToken(user._id),
+//     });
+//   } else {
+//     res.status(400);
+//     throw new Error("Failed to create user");
+//   }
+// });
 
 export const authUser = asyncHandler(async (req, res) => {
   const { emailOrPhone, password } = req.body;
@@ -172,40 +238,88 @@ export const getUserProfile = asyncHandler(async (req, res) => {
   }
 });
 
+
 export const updateUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
 
-  if (user) {
-    user.name = req.body.name || user.name;
-    user.email = req.body.email || user.email;
-    user.pic = req.body.pic || user.pic;
-    user.bio = req.body.bio !== undefined ? req.body.bio : user.bio;
-
-    // Only update password if provided
-    if (req.body.password) {
-      if (req.body.password.length < 6) {
-        res.status(400);
-        throw new Error("Password must be at least 6 characters long");
-      }
-      user.password = req.body.password;
-    }
-
-    const updatedUser = await user.save();
-
-    res.status(200).json({
-      _id: updatedUser._id,
-      name: updatedUser.name,
-      email: updatedUser.email,
-      pic: updatedUser.pic,
-      bio: updatedUser.bio,
-      isAdmin: updatedUser.isAdmin,
-      token: generateToken(updatedUser._id),
-    });
-  } else {
+  if (!user) {
     res.status(404);
     throw new Error("User not found");
   }
+
+  // keep existing logic EXACTLY same
+  user.name = req.body.name || user.name;
+  user.email = req.body.email || user.email;
+  user.bio = req.body.bio !== undefined ? req.body.bio : user.bio;
+
+  // ✅ SUPABASE AVATAR UPLOAD (ONLY CHANGE)
+  if (req.body.avatarBase64) {
+    user.avatar = await uploadBase64ImageToSupabase(
+      req.body.avatarBase64,
+      "avatars",
+      "users"
+    );
+  }
+
+  // password logic untouched
+  if (req.body.password) {
+    if (req.body.password.length < 6) {
+      res.status(400);
+      throw new Error("Password must be at least 6 characters long");
+    }
+    user.password = req.body.password;
+  }
+
+  const updatedUser = await user.save();
+
+  res.status(200).json({
+    _id: updatedUser._id,
+    name: updatedUser.name,
+     phoneNumber: updatedUser.phoneNumber, 
+    email: updatedUser.email,
+    avatar: updatedUser.avatar, // ✅ SUPABASE PUBLIC URL
+    bio: updatedUser.bio,
+    createdAt: updatedUser.createdAt,
+    isAdmin: updatedUser.isAdmin,
+    token: generateToken(updatedUser._id),
+  });
 });
+
+
+// export const updateUserProfile = asyncHandler(async (req, res) => {
+//   const user = await User.findById(req.user._id);
+
+//   if (user) {
+//     user.name = req.body.name || user.name;
+//     user.email = req.body.email || user.email;
+//     user.pic = req.body.pic || user.pic;
+//     user.bio = req.body.bio !== undefined ? req.body.bio : user.bio;
+
+//     // Only update password if provided
+//     if (req.body.password) {
+//       if (req.body.password.length < 6) {
+//         res.status(400);
+//         throw new Error("Password must be at least 6 characters long");
+//       }
+//       user.password = req.body.password;
+//     }
+
+//     const updatedUser = await user.save();
+
+//     res.status(200).json({
+//       _id: updatedUser._id,
+//       name: updatedUser.name,
+//       email: updatedUser.email,
+//       pic: updatedUser.pic,
+//       bio: updatedUser.bio,
+//       isAdmin: updatedUser.isAdmin,
+//       token: generateToken(updatedUser._id),
+//     });
+//   } else {
+//     res.status(404);
+//     throw new Error("User not found");
+//   }
+// });
 
 // Get user settings
 export const getUserSettings = asyncHandler(async (req, res) => {
