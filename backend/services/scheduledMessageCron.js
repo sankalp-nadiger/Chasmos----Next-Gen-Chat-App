@@ -9,6 +9,9 @@ export const setSocketIOInstance = (io) => {
   ioInstance = io;
 };
 
+// Getter for other modules to access the io instance
+export const getSocketIOInstance = () => ioInstance;
+
 // Function to send scheduled messages
 const sendScheduledMessages = async () => {
   try {

@@ -1928,6 +1928,31 @@ const togglePin = async (docId, isPinnedNow) => {
     }
   }, [activeSection]);
   const [recentChats, setRecentChats] = useState([]);
+
+  // Deduplicate recent chats by chatId/id to avoid duplicates
+  // (occurs when a group is created via API and also arrives via sockets)
+  useEffect(() => {
+    if (!recentChats || recentChats.length < 2) return;
+    try {
+      const map = new Map();
+      for (const c of recentChats) {
+        const key = String(c.chatId || c.id || c._id || "");
+        if (!key) continue;
+        const existing = map.get(key);
+        // prefer the entry with the newest timestamp
+        if (!existing || (c.timestamp || 0) > (existing.timestamp || 0)) {
+          map.set(key, c);
+        }
+      }
+      const deduped = Array.from(map.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      const compact = (arr) => arr.map((r) => ({ k: String(r.chatId || r.id || r._id || ""), t: r.timestamp || 0 }));
+      if (JSON.stringify(compact(deduped)) !== JSON.stringify(compact(recentChats))) {
+        setRecentChats(deduped);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [recentChats]);
   const [receivedChats, setReceivedChats] = React.useState([]); // incoming chat requests
   const [acceptedChats, setAcceptedChats] = React.useState([]); // chats you accepted
   const [showReceivedDropdown, setShowReceivedDropdown] = useState(false);
@@ -4466,6 +4491,93 @@ const handleSendMessageFromInput = useCallback(
       }
     });
 
+    // New group created elsewhere - add to UI immediately
+    socket.on('group created', (group) => {
+      try {
+        console.log('[SOCKET] group created event received', group && (group.chatId || group._id || group.id));
+        if (!group) return;
+        const chatId = String(group.chatId || group._id || group.id);
+        if (!chatId) return;
+
+        const name = group.chatName || group.name || group.groupName || 'New Group';
+        const avatar = (group.groupSettings && group.groupSettings.avatar) || group.avatar || '';
+        const participants = group.participants || group.users || [];
+
+        const contactEntry = {
+          id: chatId,
+          chatId,
+          name,
+          avatar,
+          participants,
+          isGroup: true,
+          isGroupChat: true,
+        };
+
+        setContacts((prev) => {
+          if ((prev || []).some(c => String(c.chatId) === chatId || String(c.id) === chatId)) return prev;
+          return [contactEntry, ...(prev || [])];
+        });
+
+        setRecentChats((prev) => {
+          if ((prev || []).some(c => String(c.chatId) === chatId || String(c.id) === chatId)) return prev;
+          const entry = {
+            id: chatId,
+            chatId,
+            name,
+            avatar,
+            lastMessage: '',
+            timestamp: Date.now(),
+            isGroupChat: true,
+            users: participants,
+            participants,
+          };
+          return [entry, ...(prev || [])];
+        });
+
+        // Ensure messages map exists
+        setMessages(prev => ({ ...(prev || {}), [chatId]: prev?.[chatId] || [] }));
+
+        // Join socket room for the new chat so real-time updates arrive
+        try {
+          if (socketRef.current && socketRef.current.emit) socketRef.current.emit('join chat', chatId);
+        } catch (e) {}
+
+      } catch (e) {
+        console.error('Error handling group created socket event', e);
+      }
+    });
+
+    // When server notifies that a chat was deleted, remove it from lists and close if open
+    socket.on('chat deleted', ({ chatId }) => {
+      try {
+        if (!chatId) return;
+        const idStr = String(chatId);
+        console.log('[SOCKET] chat deleted event received', idStr);
+
+        // Remove from recentChats
+        setRecentChats(prev => (prev || []).filter(c => String(c.chatId) !== idStr && String(c.id) !== idStr));
+
+        // Remove from contacts
+        setContacts(prev => (prev || []).filter(c => String(c.chatId) !== idStr && String(c.id) !== idStr));
+
+        // Remove messages and selection
+        setMessages(prev => {
+          if (!prev) return prev;
+          const copy = { ...prev };
+          delete copy[idStr];
+          return copy;
+        });
+
+        // If currently open chat is the deleted one, close it
+        if (selectedContact && (String(selectedContact.chatId) === idStr || String(selectedContact.id) === idStr || String(selectedContact._id) === idStr)) {
+          setSelectedContact(null);
+          if (isMobileView) setShowSidebar(true);
+        }
+      } catch (e) {
+        console.error('Error handling chat deleted socket event', e);
+      }
+    });
+
     socket.on('pin message', ({ chatId, pinnedMessages: updatedPinnedMessages }) => {
       try {
         const currentChatId = selectedContact?.id || selectedContact?._id;
@@ -5128,22 +5240,58 @@ const handleCreateGroup = useCallback(() => {
   }, []);
 
   const handleCreateGroupComplete = useCallback((newGroup) => {
+    // Normalize group object so UI detects it is a group/chat
+    const chatId = String(newGroup.chat?._id || newGroup._id || newGroup._id || newGroup.chat || newGroup.id || "");
+    const participants = newGroup.participants || newGroup.users || [];
+    const name = newGroup.chatName || newGroup.name || newGroup.groupName || "New Group";
+    const avatar = (newGroup.groupSettings && newGroup.groupSettings.avatar) || newGroup.avatar || newGroup.icon || "";
 
-  // Normalize group object so UI detects it is a group
-  const formatted = {
-    ...newGroup,
-    isGroup: true,
-    chatId: newGroup.chat?._id || newGroup.chat,  // ensure chat id is present
-    participants: newGroup.participants || [],
-  };
+    const formatted = {
+      ...newGroup,
+      isGroup: true,
+      isGroupChat: true,
+      chatId,
+      id: chatId,
+      _id: chatId || newGroup._id,
+      participants,
+      users: participants,
+      name,
+      avatar,
+      chat: newGroup, // keep raw chat payload available
+    };
 
-  setContacts((prev) => [formatted, ...prev]);
-  setShowGroupCreation(false);
+    // Add to contacts and recent chats so sidebar updates immediately
+    setContacts((prev) => [formatted, ...(prev || [])]);
 
-  // Auto-select the new group
-  setSelectedContact(formatted);
+    setRecentChats((prev) => {
+      const entry = {
+        id: chatId,
+        chatId,
+        name,
+        avatar,
+        lastMessage: "",
+        timestamp: Date.now(),
+        isGroupChat: true,
+        users: participants,
+        participants,
+      };
+      return [entry, ...(prev || [])];
+    });
 
-}, []);
+    setShowGroupCreation(false);
+
+    // Select the new group and ensure messages map exists
+    setSelectedContact(formatted);
+    setMessages((prev) => ({ ...(prev || {}), [chatId]: prev?.[chatId] || [] }));
+
+    // Join socket room for real-time updates
+    try {
+      if (socketRef.current && socketRef.current.emit && chatId) {
+        socketRef.current.emit("join chat", chatId);
+      }
+    } catch (e) {}
+
+  }, []);
 
 
   const handleStartNewChat = useCallback(
@@ -7051,7 +7199,13 @@ useEffect(() => {
               You're not in any group!
             </p>
           </div>
-        ) : null}
+        ) : (
+          <div className="mt-2 text-sm">
+            <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+              You don't have any active chat going on!
+            </p>
+          </div>
+        )}
       </div>
     );
   })()

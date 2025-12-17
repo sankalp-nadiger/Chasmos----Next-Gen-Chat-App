@@ -32,6 +32,32 @@ export const createGroup = async (req, res) => {
       chat: chat._id,
     });
 
+    // Emit socket event to participants so other connected users update immediately
+    try {
+      const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+      const io = getSocketIOInstance();
+      const payload = {
+        _id: group._id,
+        id: group._id,
+        chat: group.chat,
+        chatId: group.chat,
+        name: group.name,
+        participants: group.participants || [],
+        admin: group.admin,
+      };
+      console.log('[group.controller] Emitting group created', { ioAvailable: !!io, groupId: String(group._id) });
+      if (io && Array.isArray(payload.participants)) {
+        // emit to each participant personal room
+        payload.participants.forEach(p => {
+          try { io.to(String(p)).emit('group created', payload); } catch (e) { console.error('emit group created to participant failed', e); }
+        });
+        // also emit to chat room id
+        try { io.to(String(group.chat)).emit('group created', payload); } catch (e) { console.error('emit group created to chat room failed', e); }
+      }
+    } catch (e) {
+      console.error('group.controller: failed to emit group created', e);
+    }
+
     return ok(res, { message: "Group created", group });
   } catch (error) {
     err(res, error.message, 500);
