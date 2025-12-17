@@ -3983,7 +3983,45 @@ const handleSendMessageFromInput = useCallback(
 
           if (!res.ok) throw new Error('Failed to send text message');
 
-          const sent = await res.json();
+          const resJson = await res.json();
+          // backend may return { message, chat } when it created a new 1-on-1 chat
+          const sent = resJson && resJson.message ? resJson.message : resJson;
+
+          // If backend created a new chat, adopt the chatId and move pending messages
+          if (resJson && resJson.chat) {
+            const newChat = resJson.chat;
+            chatId = String(newChat._id || newChat.id || chatId);
+            setSelectedContact(prev => ({
+              ...prev,
+              chatId: chatId,
+              id: chatId,
+              isPendingChat: false,
+              isAcceptedRequest: false,
+              participants: newChat.users || newChat.participants || prev?.participants || [],
+            }));
+
+            // Move any messages stored under null/undefined keys to the new chatId
+            setMessages(prev => {
+              const copy = { ...prev };
+              const possibleKeys = [null, undefined, 'null', 'undefined', ''];
+              possibleKeys.forEach((k) => {
+                if (copy[k]) {
+                  if (!copy[chatId]) copy[chatId] = [];
+                  copy[chatId] = [...copy[chatId], ...copy[k]];
+                  delete copy[k];
+                }
+              });
+              return copy;
+            });
+
+            // Ensure recentChats entries reference the new chat id
+            setRecentChats(prev => prev.map(c => {
+              if (!c.id || String(c.id) === String(selectedContact?.id) || String(c.chatId) === String(selectedContact?.chatId)) {
+                return { ...c, id: chatId, chatId };
+              }
+              return c;
+            }));
+          }
 
           const formatted = {
             id: sent._id || sent.id || Date.now(),
@@ -4095,7 +4133,40 @@ const handleSendMessageFromInput = useCallback(
 
           if (!res.ok) throw new Error('Failed to send message with attachments');
 
-          const sent = await res.json();
+          const resJson = await res.json();
+          const sent = resJson && resJson.message ? resJson.message : resJson;
+
+          if (resJson && resJson.chat) {
+            const newChat = resJson.chat;
+            chatId = String(newChat._id || newChat.id || chatId);
+            setSelectedContact(prev => ({
+              ...prev,
+              chatId: chatId,
+              id: chatId,
+              isPendingChat: false,
+              participants: newChat.users || newChat.participants || prev?.participants || [],
+            }));
+
+            setMessages(prev => {
+              const copy = { ...prev };
+              const possibleKeys = [null, undefined, 'null', 'undefined', ''];
+              possibleKeys.forEach((k) => {
+                if (copy[k]) {
+                  if (!copy[chatId]) copy[chatId] = [];
+                  copy[chatId] = [...copy[chatId], ...copy[k]];
+                  delete copy[k];
+                }
+              });
+              return copy;
+            });
+
+            setRecentChats(prev => prev.map(c => {
+              if (!c.id || String(c.id) === String(selectedContact?.id) || String(c.chatId) === String(selectedContact?.chatId)) {
+                return { ...c, id: chatId, chatId };
+              }
+              return c;
+            }));
+          }
 
           const formatted = {
             id: sent._id || sent.id || Date.now(),
@@ -4207,7 +4278,40 @@ const handleSendMessageFromInput = useCallback(
 
           if (!res.ok) throw new Error('Failed to send message');
 
-          const sent = await res.json();
+          const resJson = await res.json();
+          const sent = resJson && resJson.message ? resJson.message : resJson;
+
+          if (resJson && resJson.chat) {
+            const newChat = resJson.chat;
+            chatId = String(newChat._id || newChat.id || chatId);
+            setSelectedContact(prev => ({
+              ...prev,
+              chatId: chatId,
+              id: chatId,
+              isAcceptedRequest: false,
+              participants: newChat.users || newChat.participants || prev?.participants || [],
+            }));
+
+            setMessages(prev => {
+              const copy = { ...prev };
+              const possibleKeys = [null, undefined, 'null', 'undefined', ''];
+              possibleKeys.forEach((k) => {
+                if (copy[k]) {
+                  if (!copy[chatId]) copy[chatId] = [];
+                  copy[chatId] = [...copy[chatId], ...copy[k]];
+                  delete copy[k];
+                }
+              });
+              return copy;
+            });
+
+            setRecentChats(prev => prev.map(c => {
+              if (!c.id || String(c.id) === String(selectedContact?.id) || String(c.chatId) === String(selectedContact?.chatId)) {
+                return { ...c, id: chatId, chatId };
+              }
+              return c;
+            }));
+          }
 
           const formatted = {
             id: sent._id || sent.id || Date.now(),

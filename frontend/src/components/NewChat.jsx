@@ -23,6 +23,7 @@ import {
   Scissors,
   MapPin,
   ChevronLeft,
+  Copy,
 } from "lucide-react";
 import Logo from "./Logo";
 import CosmosBackground from "./CosmosBg";
@@ -407,40 +408,100 @@ const NewChat = ({
         const data = await res.json();
 
         // Assign random online status only once here
+        // include phoneNumber and normalize where possible
+        const normalizePhone = (p) => (p ? String(p).replace(/\D/g, "") : "");
+
+        // Try to extract a phone-like string from various google-contact shapes
+        const extractPossiblePhone = (c) => {
+          if (!c) return "";
+          // common explicit fields
+          const candidates = [
+            c.phone,
+            c.phoneNumber,
+            c.mobile,
+            c.value,
+            // google contacts may provide an array
+            (c.phoneNumbers && c.phoneNumbers[0] && c.phoneNumbers[0].value),
+            // sometimes number is in resourceName or id like 'google-+919012345678' or 'google-9012345678'
+            c.resourceName,
+            c.id,
+          ].filter(Boolean);
+
+          for (const cand of candidates) {
+            const normalized = normalizePhone(cand);
+            if (normalized) return normalized;
+          }
+
+          // fallback: try to extract any run of digits (with optional leading +)
+          const idStr = String(c.id || "");
+          const m = idStr.match(/(\+?\d[\d\s-]{6,})/); // at least 7 digits-ish
+          if (m) return normalizePhone(m[0]);
+
+          return "";
+        };
+
         const formattedUsers = data.map((u) => ({
-          id: u._id,
+          id: u._1d || u._id || u.id,
           name: u.name || "unknown",
           email: u.email,
+          contacts: u.googleContacts || [],
+          phoneNumber: u.phoneNumber || u.phone || "",
+          _rawPhone: normalizePhone(u.phoneNumber || u.phone || ""),
           avatar: u.avatar || null,
-          isOnline: Math.random() < 0.5, // ✅ assigned once
+          isOnline: Math.random() < 0.5,
           timestamp: u.createdAt,
           type: "user",
           bio: u.bio || "",
           acceptedChatRequests: u.acceptedChatRequests || [],
         }));
+        console.log("Formatted Users:", formattedUsers);
+        // Build lookup maps for fast matching
+        const byId = new Map();
+        const byEmail = new Map();
+        const byPhone = new Map();
+        formattedUsers.forEach((u) => {
+          if (u.id) byId.set(String(u.id), u);
+          if (u.email) byEmail.set(String(u.email).toLowerCase(), u);
+          if (u._rawPhone) byPhone.set(u._rawPhone, u);
+        });
 
-        // Separate existing contacts from new registered users
-        const knownContacts = formattedUsers.filter((user) =>
-          existingContacts.some((contact) => contact.id === user.id)
-        );
-        const newUsers = formattedUsers.filter(
-          (user) => !existingContacts.some((contact) => contact.id === user.id)
-        );
+        const knownContacts = [];
+        const existingNotRegisteredMapped = [];
 
-        // Also include existingContacts that are NOT registered users (e.g., Google contacts)
-        const existingNotRegistered = (existingContacts || []).filter(
-          (c) => !formattedUsers.some((u) => String(u.id) === String(c.id))
-        );
+        (existingContacts || []).forEach((c) => {
+          const cId = c.id || c._id;
+          const cEmail = c.email ? String(c.email).toLowerCase() : "";
+          // improved phone extraction: check many shapes and normalize
+          const cPhoneRaw = extractPossiblePhone(c);
 
-        const existingNotRegisteredMapped = existingNotRegistered.map((c) => ({
-          id: c.id || c._id || c.googleId || c.email || c.phone || `${c.name}`,
-          name: c.name || c.email || c.phone || "Unknown",
-          email: c.email || undefined,
-          avatar: c.avatar || null,
-          isOnline: c.isOnline || false,
-          type: c.isGoogleContact ? "google-contact" : "contact",
-        }));
+          let matched = null;
+          if (cId && byId.has(String(cId))) matched = byId.get(String(cId));
+          else if (cEmail && byEmail.has(cEmail)) matched = byEmail.get(cEmail);
+          else if (cPhoneRaw && byPhone.has(cPhoneRaw)) matched = byPhone.get(cPhoneRaw);
 
+          if (matched) {
+            // use registered user object for known contact
+            if (!knownContacts.find((k) => String(k.id) === String(matched.id))) {
+              knownContacts.push(matched);
+            }
+          } else {
+            existingNotRegisteredMapped.push({
+              id: c.id || c._id || c.googleId || c.email || c.phone || `${c.name}`,
+              name: c.name || c.email || c.phone || "Unknown",
+              email: c.email || undefined,
+              avatar: c.avatar || null,
+              isOnline: c.isOnline || false,
+              type: c.isGoogleContact ? "google-contact" : "contact",
+            });
+          }
+        });
+
+        // Users that were not included in knownContacts remain as newUsers
+        const knownIds = new Set(knownContacts.map((u) => String(u.id)));
+        const newUsers = formattedUsers.filter((u) => !knownIds.has(String(u.id)));
+console.log("Known contacts:", knownContacts);  
+console.log("New users:", newUsers);
+console.log("Existing not registered contacts:", existingNotRegisteredMapped);
         // Merge: put non-registered existing contacts first, then known registered contacts
         setAllContacts([...existingNotRegisteredMapped, ...knownContacts]);
         setRegisteredUsers(newUsers);
@@ -493,6 +554,25 @@ const NewChat = ({
       onStartChat({ ...contact, isPendingChat: true, userId });
     }
     onClose();
+  };
+
+  // Create or access a one-to-one chat via backend then open it
+  const openOneToOneChat = async (contact) => {
+    // Do not create a chat on click — open as pending unless a real chat id exists.
+    try {
+      const userId = contact.id || contact._id || contact.email;
+      // If contact already has a chatId (or a DB-like id), treat as existing chat and open normally
+      if (contact.chatId || (contact.id && String(contact.id).length === 24)) {
+        handleStartChat({ ...contact, isPendingChat: false, userId });
+        return;
+      }
+
+      // Otherwise, open a pending chat locally. The real chat will be created only when the user sends the first message.
+      handleStartChat({ ...contact, isPendingChat: true, userId });
+    } catch (err) {
+      console.error("openOneToOneChat error:", err);
+      handleStartChat(contact);
+    }
   };
 
   const handleBusinessCategoryClick = (category) => {
@@ -652,10 +732,13 @@ const NewChat = ({
                       key={contact.id}
                       contact={contact}
                       effectiveTheme={effectiveTheme}
-                      onClick={() => handleStartChat(contact)}
+                      onClick={() => {}}
                       showLastSeen
                       token={localStorage.getItem("token")}
                       currentUserEmail={userEmail}
+                      leftActionType={contact.type === 'user' ? 'chat' : 'copy'}
+                      onLeftAction={openOneToOneChat}
+                      hideRightActions={true}
                     />
                   ));
                 })()
@@ -701,7 +784,7 @@ const NewChat = ({
                       contact={user}
                       effectiveTheme={effectiveTheme}
                       showLastSeen
-                      onClick={() => handleStartChat(user)}
+                      onClick={() => openOneToOneChat(user)}
                       token={localStorage.getItem("token")}
                       currentUserEmail={userEmail}
                     />
@@ -818,12 +901,14 @@ const NewChat = ({
 };
 
 //Contacts appearing in new chat page
-const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, currentUserEmail }) => {
+const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, currentUserEmail, leftActionType, onLeftAction, hideRightActions }) => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteMessage, setInviteMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [inviteStatus, setInviteStatus] = useState("idle");
   const [chatStatus, setChatStatus] = useState("none");
+  const [copyFeedback, setCopyFeedback] = useState("");
+  const [showSharePopup, setShowSharePopup] = useState(false);
 
   // Fetch chat status only (acceptedChatRequests is now in contact)
   useEffect(() => {
@@ -843,27 +928,9 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
     return () => clearInterval(interval);
   }, [contact.email, token]);
 
-  // Show chat icon if my email is in contact's acceptedChatRequests (case-insensitive)
-  const myEmailLower = currentUserEmail ? currentUserEmail.toLowerCase() : "";
-  const isMyEmailAcceptedByContact = myEmailLower && (contact.acceptedChatRequests || []).some(e => (e || "").toLowerCase() === myEmailLower);
-  const canSendInvite = chatStatus === "none" && !isMyEmailAcceptedByContact;
-
-  // ------------------- Socket Listener -------------------
-//  useEffect(() => {
-//   if (!socketRef.current) return;
-
-//   const handleChatAccepted = ({ senderEmail, receiverEmail }) => {
-//     if (contact.email === senderEmail || contact.email === receiverEmail) {
-//       setChatStatus("accepted");
-//     }
-//   };
-
-//   socketRef.current.on("chatAccepted", handleChatAccepted);
-
-//   return () => {
-//     socketRef.current.off("chatAccepted", handleChatAccepted);
-//   };
-// }, [contact.email]);
+  // Show chat icon for registered users
+  const isRegisteredUser = contact.type === "user";
+  const canSendInvite = chatStatus === "none";
 
 
   // ------------------- Send Invite -------------------
@@ -949,12 +1016,12 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
       {/* Contact Row */}
       <motion.div
         whileHover={{ x: 4 }}
-        className={`flex items-center justify-between p-4 cursor-pointer border-b
+        className={`flex items-center justify-between p-4 border-b
         ${effectiveTheme.border || "border-gray-300"}
         hover:${effectiveTheme.hover || "bg-gray-100"}`}
       >
         {/* LEFT */}
-        <div className="flex items-center gap-3" onClick={() => onClick(contact)}>
+        <div className="flex items-center gap-3">
           <img
             src={contact.avatar || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"}
             className="w-12 h-12 rounded-full object-cover"
@@ -969,56 +1036,90 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
           </div>
         </div>
 
-        {/* RIGHT ICONS */}
-        {(chatStatus === "accepted" || isMyEmailAcceptedByContact) && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleOpenChat();
-            }}
-            className="p-2 rounded-full hover:bg-green-500/20"
-          >
-            <MessageCircle className="w-5 h-5 text-green-500" />
-          </button>
+        {/* LEFT ACTION (for contacts list) */}
+        {leftActionType && (
+          <div className="flex items-center mr-3">
+            {leftActionType === "chat" && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (typeof onLeftAction === "function") onLeftAction(contact);
+                }}
+                className="p-2 rounded-full hover:bg-green-500/20"
+                title="Start Chat"
+              >
+                <MessageCircle className="w-5 h-5 text-green-500" />
+              </button>
+            )}
+
+            {leftActionType === "copy" && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowSharePopup(true);
+                }}
+                className="p-2 rounded-full hover:bg-blue-500/20"
+                title={copyFeedback || 'Copy invite link'}
+              >
+                <Copy className="w-5 h-5 text-blue-500" />
+              </button>
+            )}
+          </div>
         )}
 
-        {canSendInvite && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setInviteStatus("idle");
-              setShowInviteModal(true);
-            }}
-            className="p-2 rounded-full hover:bg-blue-500/20"
-          >
-            <Send className="w-5 h-5 text-blue-500" />
-          </button>
-        )}
-
-        {chatStatus === "outgoing" && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setInviteStatus("sent");
-              setShowInviteModal(true);
-            }}
-            className="p-2 rounded-full hover:bg-yellow-500/20"
-          >
-            <Clock className="w-5 h-5 text-yellow-500" />
-          </button>
-        )}
-
-        {chatStatus === "incoming" && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setInviteStatus("incoming");
-              setShowInviteModal(true);
-            }}
-            className="p-2 rounded-full hover:bg-orange-500/20"
-          >
-            <Clock className="w-5 h-5 text-orange-500" />
-          </button>
+        {/* RIGHT ICONS (consolidated into a single action column) */}
+        {!hideRightActions && (
+          <div className="flex items-center space-x-2">
+            {chatStatus === "accepted" ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenChat();
+                }}
+                className="p-2 rounded-full hover:bg-green-500/20"
+                title="Open Chat"
+              >
+                <MessageCircle className="w-5 h-5 text-green-500" />
+              </button>
+            ) : chatStatus === "outgoing" ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInviteStatus("sent");
+                  setShowInviteModal(true);
+                }}
+                className="p-2 rounded-full hover:bg-yellow-500/20"
+                title="Invite pending"
+              >
+                <Clock className="w-5 h-5 text-yellow-500" />
+              </button>
+            ) : chatStatus === "incoming" ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInviteStatus("incoming");
+                  setShowInviteModal(true);
+                }}
+                className="p-2 rounded-full hover:bg-orange-500/20"
+                title="Incoming request"
+              >
+                <Clock className="w-5 h-5 text-orange-500" />
+              </button>
+            ) : (
+              // default: no existing request -> show send (airplane) to invite
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInviteStatus("idle");
+                  setShowInviteModal(true);
+                }}
+                className="p-2 rounded-full hover:bg-blue-500/20"
+                title="Send invite"
+              >
+                <Send className="w-5 h-5 text-blue-500" />
+              </button>
+            )}
+          </div>
         )}
       </motion.div>
 
@@ -1112,6 +1213,70 @@ const ContactItem = ({ contact, effectiveTheme, onClick, showLastSeen, token, cu
                   </button>
                 </>
               )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Share Link Popup - Only for Your Contacts */}
+      {showSharePopup && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4" onClick={() => setShowSharePopup(false)}>
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className={`w-full max-w-sm rounded-2xl p-5 ${effectiveTheme.secondary || "bg-white dark:bg-gray-800"} shadow-2xl`}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className={`font-semibold ${effectiveTheme.text || "text-gray-900"}`}>
+                  Share Chasmos
+                </h3>
+                <p className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"}`}>
+                  Share this link to invite others
+                </p>
+              </div>
+              <button onClick={() => setShowSharePopup(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center space-x-3">
+              <div className={`flex-1 p-3 rounded-md border ${effectiveTheme.border || "border-gray-300"} ${effectiveTheme.primary || "bg-white"} text-sm break-words ${effectiveTheme.text || "text-gray-900"}`}>
+                chasmos.netlify.app
+              </div>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  const link = "https://chasmos.netlify.app";
+                  try {
+                    if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                      await navigator.clipboard.writeText(link);
+                    } else {
+                      const el = document.createElement('textarea');
+                      el.value = link;
+                      document.body.appendChild(el);
+                      el.select();
+                      document.execCommand('copy');
+                      document.body.removeChild(el);
+                    }
+                    setCopyFeedback('Copied');
+                    setTimeout(() => setCopyFeedback(''), 2000);
+                  } catch (err) {
+                    setCopyFeedback('Failed');
+                    setTimeout(() => setCopyFeedback(''), 2000);
+                  }
+                }}
+                className={`px-3 py-2 ${effectiveTheme.accent || "bg-blue-600"} text-white rounded-md hover:opacity-90 whitespace-nowrap transition-all`}
+              >
+                {copyFeedback || "Copy"}
+              </button>
+            </div>
+
+            <div className="flex justify-end mt-4">
+              <button onClick={() => setShowSharePopup(false)} className={`px-3 py-2 text-sm rounded-md ${effectiveTheme.secondary || "bg-gray-200"} ${effectiveTheme.text || "text-gray-900"} hover:opacity-80 transition-all`}>
+                Close
+              </button>
             </div>
           </motion.div>
         </div>

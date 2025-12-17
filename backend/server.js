@@ -347,6 +347,28 @@ io.on("connection", (socket) => {
     })();
   });
 
+  // When a client emits 'chat created' (mapping a tempId -> real chat), re-broadcast
+  // to other participants and connected clients so they can migrate pending state.
+  socket.on('chat created', ({ tempId, chat }) => {
+    try {
+      if (!chat) return;
+      console.log(`[SOCKET] chat created: tempId=${tempId} chatId=${chat._id || chat.id || ''}`);
+      const newId = String(chat._id || chat.id || '');
+      // Emit to participants' personal rooms if present
+      const participants = chat.users || chat.participants || [];
+      (participants || []).forEach(p => {
+        const uid = p && (p._id ? String(p._id) : String(p));
+        if (uid) {
+          try { io.to(uid).emit('chat created', { tempId, chat }); } catch (e) {}
+        }
+      });
+      // Also broadcast to everyone else as a fallback
+      socket.broadcast.emit('chat created', { tempId, chat });
+    } catch (e) {
+      console.error('[SOCKET] error re-broadcasting chat created', e);
+    }
+  });
+
   socket.on("delete message", async (data) => {
     try {
       const { messageId, chatId, deleteForEveryone } = data;
