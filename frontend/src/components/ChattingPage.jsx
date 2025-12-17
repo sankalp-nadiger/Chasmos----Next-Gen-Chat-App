@@ -259,104 +259,110 @@ const ChatHeader = React.memo(
                   style={effectiveTheme.mode !== 'dark' ? { background: '#fff' } : {}}
                 >
                   <ul className="divide-y relative z-10">
-                    <li>
-                      {!isBlocked ? (
-                        <button 
-                          className={`w-full text-left px-4 py-3 flex items-center gap-2 transition-all duration-200`}
-                          style={{ 
-                            color: effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000',
-                            backgroundColor: 'transparent'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? '#374151' : '#e5e7eb';
-                            e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#6b7280';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                            e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000';
-                          }}
-                          onClick={()=>{ onBlockUser && onBlockUser(selectedContact); setMenuOpen(false); }}
-                        >
-                          <UserMinus className="w-4 h-4" />
-                          <span>Block User</span>
-                        </button>
-                      ) : (
-                        <button 
-                          className={`w-full text-left px-4 py-3 flex items-center gap-2 transition-all duration-200`}
-                          style={{ 
-                            color: effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000',
-                            backgroundColor: 'transparent'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? '#374151' : '#e5e7eb';
-                            e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#6b7280';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                            e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000';
-                          }}
-                          onClick={()=>{ onUnblockUser && onUnblockUser(selectedContact); setMenuOpen(false); }}
-                        >
-                          <UserPlus className="w-4 h-4" />
-                          <span>Unblock User</span>
-                        </button>
-                      )}
-                    </li>
-                    <li>
-                      {!isArchived ? (
-                        <button 
-                          className={`w-full text-left px-4 py-3 flex items-center gap-2 transition-all duration-200`}
-                          style={{ 
-                            color: effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000',
-                            backgroundColor: 'transparent'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? '#374151' : '#e5e7eb';
-                            e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#6b7280';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                            e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000';
-                          }}
-                          onClick={()=>{ onArchiveChat && onArchiveChat(selectedContact); setMenuOpen(false); }}
-                        >
-                          <Archive className="w-4 h-4" />
-                          <span>Archive Chat</span>
-                        </button>
-                      ) : (
-                        <button 
-                          className={`w-full text-left px-4 py-3 flex items-center gap-2 transition-all duration-200`}
-                          style={{ 
-                            color: effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000',
-                            backgroundColor: 'transparent'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? '#374151' : '#e5e7eb';
-                            e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#6b7280';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                            e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000';
-                          }}
-                          onClick={()=>{ onUnarchiveChat && onUnarchiveChat(selectedContact); setMenuOpen(false); }}
-                        >
-                          <Archive className="w-4 h-4" />
-                          <span>Unarchive Chat</span>
-                        </button>
-                      )}
-                    </li>
+                    {!(selectedContact?.isGroup || selectedContact?.isGroupChat || selectedContact?.isgroupchat) && (
+  <li>
+    {!isBlocked ? (
+      <button
+        className={`w-full text-left px-4 py-3 flex items-center gap-2 transition-all duration-200`}
+        style={{
+          color: effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000',
+          backgroundColor: 'transparent'
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? '#374151' : '#e5e7eb';
+          e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#6b7280';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = 'transparent';
+          e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000';
+        }}
+        onClick={() => { onBlockUser && onBlockUser(selectedContact); setMenuOpen(false); }}
+      >
+        <UserMinus className="w-4 h-4" />
+        <span>Block User</span>
+      </button>
+    ) : (
+      <button
+        className={`w-full text-left px-4 py-3 flex items-center gap-2 transition-all duration-200`}
+        style={{
+          color: effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000',
+          backgroundColor: 'transparent'
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? '#374151' : '#e5e7eb';
+          e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#6b7280';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = 'transparent';
+          e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000';
+        }}
+        onClick={() => { onUnblockUser && onUnblockUser(selectedContact); setMenuOpen(false); }}
+      >
+        <UserPlus className="w-4 h-4" />
+        <span>Unblock User</span>
+      </button>
+    )}
+  </li>
+)}
+                    {selectedContact?.chatId && (
+                      <li>
+                        {!isArchived ? (
+                          <button 
+                            className={`w-full text-left px-4 py-3 flex items-center gap-2 transition-all duration-200`}
+                            style={{ 
+                              color: effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000',
+                              backgroundColor: 'transparent'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? '#374151' : '#e5e7eb';
+                              e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#6b7280';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                              e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000';
+                            }}
+                            onClick={()=>{ onArchiveChat && onArchiveChat(selectedContact); setMenuOpen(false); }}
+                          >
+                            <Archive className="w-4 h-4" />
+                            <span>Archive Chat</span>
+                          </button>
+                        ) : (
+                          <button 
+                            className={`w-full text-left px-4 py-3 flex items-center gap-2 transition-all duration-200`}
+                            style={{ 
+                              color: effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000',
+                              backgroundColor: 'transparent'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = effectiveTheme.mode === 'dark' ? '#374151' : '#e5e7eb';
+                              e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#6b7280';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                              e.currentTarget.style.color = effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#000000';
+                            }}
+                            onClick={()=>{ onUnarchiveChat && onUnarchiveChat(selectedContact); setMenuOpen(false); }}
+                          >
+                            <Archive className="w-4 h-4" />
+                            <span>Unarchive Chat</span>
+                          </button>
+                        )}
+                      </li>
+                    )}
                     {/* <li>
                           <button className={`w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-800 ${effectiveTheme.text}`} onClick={()=>{ navigator.clipboard?.writeText(selectedContact?.id || ''); setMenuOpen(false); }}>
                             <Copy className="w-4 h-4 opacity-80" />
                             <span>Copy Chat ID</span>
                           </button>
                     </li> */}
-                        <li>
-                          <button className={`w-full text-left px-4 py-3 flex items-center gap-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900`} onClick={() => { setShowDeleteChatModal(true); setChatToDelete(selectedContact); setMenuOpen(false); }}>
-                            <Trash2 className="w-4 h-4 opacity-90" />
-                            <span>Delete Chat</span>
-                          </button>
-                        </li>
+                        {selectedContact?.chatId && (
+                          <li>
+                            <button className={`w-full text-left px-4 py-3 flex items-center gap-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900`} onClick={() => { setShowDeleteChatModal(true); setChatToDelete(selectedContact); setMenuOpen(false); }}>
+                              <Trash2 className="w-4 h-4 opacity-90" />
+                              <span>Delete Chat</span>
+                            </button>
+                          </li>
+                        )}
                   </ul>
                 </div>
               )}
@@ -6196,54 +6202,42 @@ useEffect(() => {
       {/* Blocked users modal */}
       {/* Block confirmation modal */}
       {showBlockConfirmModal && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+          style={{ backgroundColor: effectiveTheme.mode === 'dark' ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.85)' }}
           onClick={() => {
             setShowBlockConfirmModal(false);
             setUserToBlock(null);
           }}
         >
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            onClick={(e) => e.stopPropagation()}
-            className={`${effectiveTheme.secondary} rounded-lg shadow-2xl w-[90%] max-w-md overflow-hidden`}
+          <div
+            className={`rounded-2xl shadow-2xl p-8 max-w-sm w-full relative border ${
+              effectiveTheme.mode === 'dark'
+                ? `${effectiveTheme.secondary} ${effectiveTheme.border}`
+                : 'bg-gradient-to-br from-blue-50 to-purple-50 backdrop-blur-md border-blue-200 shadow-sm'
+            }`}
           >
-            {/* Header */}
-            <div className="px-6 py-5">
-              <h2 className={`text-xl font-semibold ${effectiveTheme.text} flex items-center gap-2`}>
-                Block {userToBlock?.name || userToBlock?.chatName || 'User'}
-                ?
-              </h2>
-              <p className={`${effectiveTheme.textSecondary} mt-3 text-sm leading-relaxed`}>
-                This person won't be able to message. They won't know you blocked them.
-              </p>
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-3 px-6 py-4 bg-gray-50 dark:bg-gray-800/50">
+            <h2 className={`text-xl font-bold mb-4 ${effectiveTheme.text} flex items-center gap-2`}>
+              <UserMinus className="w-6 h-6 text-red-500" />
+              Block {userToBlock?.name || userToBlock?.chatName || 'User'}?
+            </h2>
+            <p className={`${effectiveTheme.textSecondary} mb-6`}>This person won't be able to message. They won't know you blocked them.</p>
+            <div className="flex gap-3 justify-end">
               <button
-                onClick={confirmBlockUser}
-                className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors"
-              >
-                Block
-              </button>
-              <button
-                onClick={() => {
-                  setShowBlockConfirmModal(false);
-                  setUserToBlock(null);
-                }}
-                className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-medium rounded-lg transition-colors"
+                className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+                onClick={() => { setShowBlockConfirmModal(false); setUserToBlock(null); }}
               >
                 Cancel
               </button>
+              <button
+                className="px-4 py-2 rounded-lg bg-green-500 text-white font-semibold hover:bg-green-600 transition"
+                onClick={confirmBlockUser}
+              >
+                Block
+              </button>
             </div>
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       )}
 
       {/* Pin Replace Modal */}
