@@ -5857,13 +5857,22 @@ useEffect(() => {
   return (
     <>
       {showDeleteChatModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-8 max-w-sm w-full relative border border-gray-200 dark:border-gray-700">
-            <h2 className="text-xl font-bold mb-4 text-gray-900 dark:text-white flex items-center gap-2">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+          style={{ backgroundColor: effectiveTheme.mode === 'dark' ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.85)' }}
+        >
+          <div
+            className={`rounded-2xl shadow-2xl p-8 max-w-sm w-full relative border ${
+              effectiveTheme.mode === 'dark'
+                ? `${effectiveTheme.secondary} ${effectiveTheme.border}`
+                : 'bg-gradient-to-br from-blue-50 to-purple-50 backdrop-blur-md border-blue-200 shadow-sm'
+            }`}
+          >
+            <h2 className={`text-xl font-bold mb-4 ${effectiveTheme.text} flex items-center gap-2`}>
               <Trash2 className="w-6 h-6 text-red-500" />
               Delete Chat
             </h2>
-            <p className="mb-6 text-gray-700 dark:text-gray-300">Are you sure you want to delete this chat? This will remove the chat for everyone if you are allowed. This action cannot be undone.</p>
+              <p className={`mb-6 ${effectiveTheme.textSecondary}`}>Are you sure you want to delete this chat? This will remove the chat for everyone if you are allowed. This action cannot be undone.</p>
             <div className="flex gap-3 justify-end">
               <button
                 className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition"
@@ -7549,7 +7558,7 @@ useEffect(() => {
                     background: effectiveTheme.mode === 'dark'
                       ? 'linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))'
                       : 'linear-gradient(90deg, rgba(0,0,0,0.02), rgba(0,0,0,0.01))',
-                    borderColor: effectiveTheme.border.replace?.('border-', '') || undefined
+                    borderColor: effectiveTheme.border ? effectiveTheme.border.replace('border-', '') : undefined
                   }}
                 >
                   <div className={`text-sm ${effectiveTheme.text}`}>

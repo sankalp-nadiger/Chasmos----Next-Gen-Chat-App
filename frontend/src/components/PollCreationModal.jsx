@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import CosmosBackground from './CosmosBg';
 
 const PollCreationModal = ({ 
   isOpen, 
@@ -80,8 +81,15 @@ const PollCreationModal = ({
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className={`${effectiveTheme.secondary} rounded-lg shadow-2xl w-full max-w-md border ${effectiveTheme.border}`}
+            className={`relative ${effectiveTheme.secondary} rounded-lg shadow-2xl w-full max-w-md border ${effectiveTheme.border}`}
           >
+            {/* White background overlay behind the cosmos background for day mode */}
+            <div className="absolute inset-0 rounded-lg bg-white z-0 pointer-events-none" />
+            {/* Cosmos background in day mode, subtle overlay */}
+            <div className="absolute inset-0 rounded-lg z-10 pointer-events-none overflow-hidden">
+              <CosmosBackground theme="light" opacity={0.22} />
+            </div>
+            <div className="relative z-20">
             {/* Header */}
             <div className={`flex items-center justify-between p-5 border-b ${effectiveTheme.border}`}>
               <h2 className={`text-xl font-semibold ${effectiveTheme.text}`}>Create Poll</h2>
@@ -205,6 +213,7 @@ const PollCreationModal = ({
               >
                 {isLoading ? 'Creating...' : 'Create Poll'}
               </button>
+            </div>
             </div>
           </motion.div>
         </div>
