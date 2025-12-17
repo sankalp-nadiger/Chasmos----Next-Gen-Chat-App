@@ -1,4 +1,5 @@
-// GroupInfoModalWhatsApp.jsx
+/* eslint-disable no-unused-vars */
+
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -9,13 +10,9 @@ import {
   Link as LinkIcon,
   LogOut,
   Trash,
-  Users,
-  Crown,
 } from "lucide-react";
 import Logo from "./Logo";
 import CosmosBackground from "./CosmosBg";
-
-/* ---------- Small UI Components ---------- */
 
 const TabButton = ({ active, icon: Icon, label, onClick, color, effectiveTheme }) => (
   <button
@@ -31,19 +28,11 @@ const TabButton = ({ active, icon: Icon, label, onClick, color, effectiveTheme }
     }`}
   >
     <Icon className="w-5 h-5" />
-    <span className="text-xs mt-1 font-medium">{label}</span>
+    <span className="text-xs mt-1">{label}</span>
   </button>
 );
 
-const Avatar = ({ text }) => (
-  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white font-semibold">
-    {(text || "?").charAt(0).toUpperCase()}
-  </div>
-);
-
-/* ---------- Main Component ---------- */
-
-const GroupInfoModalWhatsApp = ({
+const GroupInfoModal = ({
   open,
   group,
   currentUserId,
@@ -395,4 +384,4 @@ const GroupInfoModalWhatsApp = ({
   );
 };
 
-export default GroupInfoModalWhatsApp;
+export default GroupInfoModal;
