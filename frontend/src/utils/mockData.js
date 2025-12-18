@@ -472,8 +472,7 @@ export const generateAvatarFallback = (contact) => {
   const text =
     contact?.name ||
     contact?.username ||
-    contact?.chatName ||
-    "?";
+    contact?.chatName;
 
   return text
     .toString()

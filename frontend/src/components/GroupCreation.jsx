@@ -179,44 +179,51 @@ const handleCreateGroup = async () => {
     memberIds.push(currentUserId);
   }
 
-  // ✅ USE FormData
-  const formData = new FormData();
-  formData.append("name", groupName.trim());
-  formData.append("users", JSON.stringify(memberIds));
-  formData.append("description", groupDescription.trim() || "");
-  formData.append("isPublic", "true");
-
-  // ✅ append uploaded group icon
+  // ✅ Convert image file to Base64 (if exists)
+  let avatarBase64 = "";
   if (iconFile) {
-    formData.append("avatar", iconFile); // MUST be "avatar"
+    avatarBase64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(iconFile);
+    });
   }
+
+  // ✅ PURE JSON PAYLOAD
+  const payload = {
+    name: groupName.trim(),
+    users: memberIds,              // ✅ ARRAY (IMPORTANT)
+    description: groupDescription.trim() || "",
+    isPublic: true,
+    avatarBase64,
+  };
 
   try {
     const res = await fetch(`${API_BASE_URL}/api/chat/group`, {
       method: "POST",
       headers: {
+        "Content-Type": "application/json",
         Authorization: `Bearer ${localStorage.getItem("token")}`,
-        // ❌ DO NOT set Content-Type for FormData
       },
-      body: formData,
+      body: JSON.stringify(payload),
     });
 
     const json = await res.json();
 
     if (!res.ok) {
-      console.error("Failed to create group:", json);
+      console.error("❌ Failed to create group:", json);
       alert("Group creation failed: " + (json.message || "Unknown error"));
     } else {
-      console.log("Group created", json);
+      console.log("✅ Group created", json);
       onCreateGroup?.(json);
       onClose?.();
     }
   } catch (e) {
-    console.error("Error creating group:", e);
+    console.error("❌ Error creating group:", e);
     alert("Error creating group");
   }
 };
-
 
 
   // BUSINESS CORE FEATURES (default true)

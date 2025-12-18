@@ -119,7 +119,11 @@ const ChatHeader = React.memo(
   }) => {
     const [menuOpen, setMenuOpen] = React.useState(false);
     const menuRef = React.useRef(null);
-
+const avatarFallbackText =
+  selectedContact?.chatName ||
+  selectedContact?.name ||
+  selectedContact?.username ||
+  "U";
     React.useEffect(() => {
       const handler = (e) => {
         if (!menuRef.current) return;
@@ -185,9 +189,9 @@ const ChatHeader = React.memo(
                 />
               ) : (
                 <div
-                  className={`w-10 h-10 rounded-full ${effectiveTheme.accent} flex items-center justify-center text-white font-semibold`}
+                  className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-400 to-blue-500 flex items-center justify-center text-white font-bold text-lg"
                 >
-                  {generateAvatarFallback(selectedContact.name)}
+                  { avatarFallbackText.charAt(0)}
                 </div>
               )}
 

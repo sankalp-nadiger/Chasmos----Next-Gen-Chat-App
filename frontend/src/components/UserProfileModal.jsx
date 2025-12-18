@@ -538,11 +538,21 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
                       }}
                       className="mx-auto w-32 h-32 rounded-full overflow-hidden mb-4 border-4 border-blue-500 shadow-2xl shadow-blue-500/50"
                     >
-                      <img
+                      {/* <img
                         src={userDetails.avatar || 'https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg'}
                         alt={userDetails.name}
                         className="w-full h-full object-cover"
-                      />
+                      /> */}
+                      <img
+  src={
+    userDetails.avatar && userDetails.avatar.trim() !== ""
+      ? userDetails.avatar
+      : "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
+  }
+  alt={userDetails.name}
+  className="w-full h-full object-cover"
+/>
+
                     </motion.div>
                     
                     {/* Name - Appears Second */}

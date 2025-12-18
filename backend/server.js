@@ -58,7 +58,9 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json());
+// In your server setup
+app.use(express.json({ limit: '5mb' })); // default is 100kb
+app.use(express.urlencoded({ limit: '5mb', extended: true }));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/user", userRoutes);
 app.use("/api/auth", authRoutes);
