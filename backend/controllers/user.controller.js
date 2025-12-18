@@ -122,7 +122,7 @@ export const registerUser = asyncHandler(async (req, res) => {
     password,
     phoneNumber,
     bio: bio || "Hey there! I am using Chasmos.",
-    avatar: avatarUrl
+    avatar: avatarUrl,
     // BUSINESS
     isBusiness: Boolean(isBusiness),
     businessCategory: isBusiness ? businessCategory : "",

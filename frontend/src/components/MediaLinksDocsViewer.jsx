@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Download, ExternalLink, FileText, Image, Video, File, Link, Filter, Check, Camera } from 'lucide-react';
+import { X, Download, ExternalLink, FileText, Image, Video, File, Link, Filter, Check, Camera, Eye } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedContact }) => {
@@ -13,6 +13,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
   const [showFilter, setShowFilter] = useState(false);
   const [selectedChats, setSelectedChats] = useState([]);
   const [availableChats, setAvailableChats] = useState([]);
+  const [detailView, setDetailView] = useState(null); // For showing detail view of selected item
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
@@ -238,21 +239,12 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
             
             <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
               <button
-                onClick={() => handleDownload(item.url, item.fileName)}
-                className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors mr-2"
-                title="Download"
+                onClick={() => setDetailView({ ...item, type: 'media' })}
+                className="p-3 bg-white rounded-full hover:bg-gray-100 transition-colors"
+                title="View Details"
               >
-                <Download className="w-5 h-5 text-gray-800" />
+                <Eye className="w-6 h-6 text-gray-800" />
               </button>
-              <a
-                href={item.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors"
-                title="Open"
-              >
-                <ExternalLink className="w-5 h-5 text-gray-800" />
-              </a>
             </div>
             
             <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent">
@@ -355,24 +347,13 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                   </span>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleDownload(item.url, item.fileName)}
-                  className={`p-2 rounded-lg ${effectiveTheme.mode === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'} transition-colors`}
-                  title="Download"
-                >
-                  <Download className={`w-5 h-5 ${effectiveTheme.text}`} />
-                </button>
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`p-2 rounded-lg ${effectiveTheme.mode === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'} transition-colors`}
-                  title="Open"
-                >
-                  <ExternalLink className={`w-5 h-5 ${effectiveTheme.text}`} />
-                </a>
-              </div>
+              <button
+                onClick={() => setDetailView({ ...item, type: 'document' })}
+                className={`p-2 rounded-lg ${effectiveTheme.mode === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'} transition-colors`}
+                title="View Details"
+              >
+                <Eye className={`w-5 h-5 ${effectiveTheme.text}`} />
+              </button>
             </div>
           </motion.div>
         ))}
@@ -408,21 +389,12 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
             
             <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
               <button
-                onClick={() => handleDownload(item.url, item.fileName)}
-                className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors mr-2"
-                title="Download"
+                onClick={() => setDetailView({ ...item, type: 'screenshot' })}
+                className="p-3 bg-white rounded-full hover:bg-gray-100 transition-colors"
+                title="View Details"
               >
-                <Download className="w-5 h-5 text-gray-800" />
+                <Eye className="w-6 h-6 text-gray-800" />
               </button>
-              <a
-                href={item.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors"
-                title="Open"
-              >
-                <ExternalLink className="w-5 h-5 text-gray-800" />
-              </a>
             </div>
             
             <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent">
@@ -440,13 +412,164 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className={`w-full max-w-6xl h-[90vh] ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-2xl flex flex-col overflow-hidden`}
-      >
+    <>
+      {/* Detail View Modal */}
+      <AnimatePresence>
+        {detailView && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setDetailView(null)}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`w-full max-w-4xl max-h-[90vh] ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-2xl overflow-hidden flex flex-col`}
+            >
+              {/* Detail View Header */}
+              <div className={`flex items-center justify-between p-4 border-b ${effectiveTheme.border}`}>
+                <h3 className={`text-lg font-semibold ${effectiveTheme.text}`}>
+                  {detailView.type === 'screenshot' ? 'Screenshot Details' : 
+                   detailView.type === 'document' ? 'Document Details' : 'Media Details'}
+                </h3>
+                <button
+                  onClick={() => setDetailView(null)}
+                  className={`p-2 rounded-lg ${effectiveTheme.mode === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'} transition-colors`}
+                >
+                  <X className={`w-5 h-5 ${effectiveTheme.text}`} />
+                </button>
+              </div>
+
+              {/* Detail View Content */}
+              <div className="flex-1 overflow-y-auto p-6">
+                {/* Preview Section */}
+                <div className="mb-6 flex justify-center">
+                  {detailView.mimeType?.startsWith('image/') || detailView.type === 'screenshot' ? (
+                    <img
+                      src={detailView.url}
+                      alt={detailView.fileName}
+                      className={`max-w-full max-h-[50vh] object-contain rounded-lg border ${effectiveTheme.border}`}
+                    />
+                  ) : detailView.mimeType?.startsWith('video/') ? (
+                    <video
+                      src={detailView.url}
+                      controls
+                      className={`max-w-full max-h-[50vh] rounded-lg border ${effectiveTheme.border}`}
+                    />
+                  ) : detailView.mimeType?.includes('pdf') ? (
+                    <div className={`w-full h-[50vh] flex flex-col items-center justify-center ${effectiveTheme.mode === 'dark' ? 'bg-gray-800' : 'bg-gray-100'} rounded-lg border ${effectiveTheme.border}`}>
+                      <FileText className={`w-20 h-20 mb-4 ${effectiveTheme.mode === 'dark' ? 'text-red-400' : 'text-red-600'}`} />
+                      <p className={`text-lg font-medium ${effectiveTheme.text}`}>{detailView.fileName}</p>
+                      <p className={`text-sm ${effectiveTheme.textSecondary} mt-2`}>PDF Document</p>
+                    </div>
+                  ) : (
+                    <div className={`w-full h-[50vh] flex flex-col items-center justify-center ${effectiveTheme.mode === 'dark' ? 'bg-gray-800' : 'bg-gray-100'} rounded-lg border ${effectiveTheme.border}`}>
+                      <File className={`w-20 h-20 mb-4 ${effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-600'}`} />
+                      <p className={`text-lg font-medium ${effectiveTheme.text}`}>{detailView.fileName}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Information Section */}
+                <div className={`${effectiveTheme.mode === 'dark' ? 'bg-gray-800' : 'bg-gray-50'} rounded-lg p-4 space-y-3`}>
+                  {/* File Name */}
+                  <div>
+                    <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>File Name</p>
+                    <p className={`text-sm ${effectiveTheme.text} break-all`}>{detailView.fileName}</p>
+                  </div>
+
+                  {/* Caption/Content */}
+                  {detailView.content && detailView.content.trim() !== '' && (
+                    <div>
+                      <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>Caption</p>
+                      <p className={`text-sm ${effectiveTheme.text}`}>{detailView.content}</p>
+                    </div>
+                  )}
+
+                  {/* Sender */}
+                  <div>
+                    <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>Sent By</p>
+                    <p className={`text-sm ${effectiveTheme.text}`}>
+                      {detailView.senderName || detailView.capturedByName || 'Unknown'}
+                    </p>
+                  </div>
+
+                  {/* Date */}
+                  <div>
+                    <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>Date</p>
+                    <p className={`text-sm ${effectiveTheme.text}`}>
+                      {new Date(detailView.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+
+                  {/* File Size */}
+                  {detailView.fileSize && (
+                    <div>
+                      <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>File Size</p>
+                      <p className={`text-sm ${effectiveTheme.text}`}>
+                        {(detailView.fileSize / 1024).toFixed(2)} KB
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Type Badge */}
+                  <div>
+                    <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>Type</p>
+                    <div className="flex items-center gap-2">
+                      {detailView.type === 'screenshot' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-xs font-medium">
+                          <Camera className="w-3 h-3" />
+                          Screenshot
+                        </span>
+                      )}
+                      {detailView.type === 'document' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-500/20 text-green-600 dark:text-green-400 text-xs font-medium">
+                          <FileText className="w-3 h-3" />
+                          Document
+                        </span>
+                      )}
+                      {detailView.type === 'media' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 text-xs font-medium">
+                          {detailView.mimeType?.startsWith('image/') ? (
+                            <><Image className="w-3 h-3" /> Image</>
+                          ) : (
+                            <><Video className="w-3 h-3" /> Video</>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Detail View Actions */}
+              <div className={`flex items-center justify-end gap-3 p-4 border-t ${effectiveTheme.border}`}>
+                <button
+                  onClick={() => window.open(detailView.url, '_blank')}
+                  className={`px-4 py-2 rounded-lg ${effectiveTheme.mode === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'} ${effectiveTheme.text} transition-colors flex items-center gap-2`}
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Open in New Tab
+                </button>
+                <button
+                  onClick={() => handleDownload(detailView.url, detailView.fileName)}
+                  className={`px-4 py-2 rounded-lg ${effectiveTheme.mode === 'dark' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'} text-white transition-colors flex items-center gap-2`}
+                >
+                  <Download className="w-4 h-4" />
+                  Download
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Main Viewer */}
+      <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${effectiveTheme.mode === 'dark' ? 'bg-black/50 backdrop-blur-sm' : 'bg-white/90'}`}>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.95 }}
+          className={`w-full max-w-6xl h-[90vh] ${effectiveTheme.mode === 'dark' ? effectiveTheme.secondary : 'bg-white'} border ${effectiveTheme.border} rounded-lg shadow-2xl flex flex-col overflow-hidden`}
+        >
         {/* Header */}
         <div className={`flex items-center justify-between p-4 border-b ${effectiveTheme.border}`}>
           <h2 className={`text-xl font-semibold ${effectiveTheme.text}`}>
@@ -592,6 +715,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
         </div>
       </motion.div>
     </div>
+    </>
   );
 };
 
