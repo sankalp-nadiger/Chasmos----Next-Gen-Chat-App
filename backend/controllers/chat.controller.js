@@ -211,7 +211,41 @@ export const createGroupChat = asyncHandler(async (req, res) => {
     .populate("users", "-password")
     .populate("groupAdmin", "-password")
     .populate("admins", "name email avatar");
+// Emit socket event to participants so other connected users update immediately
+  try {
+    const io = getSocketIOInstance();
+    const participants = Array.isArray(fullGroupChat.participants) && fullGroupChat.participants.length ? fullGroupChat.participants : fullGroupChat.users || [];
+    const payload = {
+      _id: fullGroupChat._id,
+      chatId: fullGroupChat._id,
+      id: fullGroupChat._id,
+      chatName: fullGroupChat.chatName,
+      name: fullGroupChat.chatName,
+      isGroupChat: true,
+      users: fullGroupChat.users,
+      participants,
+      admins: fullGroupChat.admins || [],
+      groupAdmin: fullGroupChat.groupAdmin || null,
+      groupSettings: fullGroupChat.groupSettings || {},
+    };
 
+    console.log("[chat.controller] Emitting group created:", { ioAvailable: !!io, chatId: String(fullGroupChat._id), participantCount: (participants || []).length });
+
+    if (io) {
+      // Emit to chat room
+      try { io.to(String(fullGroupChat._id)).emit("group created", payload); } catch (e) { console.error('emit to chat room failed', e); }
+
+      // Also emit to each participant's personal room so sidebar updates
+      (participants || []).forEach((u) => {
+        const uid = u && (u._id ? u._id.toString() : (typeof u === 'string' ? u : (u.toString && u.toString())));
+        if (uid) {
+          try { io.to(String(uid)).emit("group created", payload); } catch (e) { console.error('emit to user room failed', uid, e); }
+        }
+      });
+    }
+  } catch (e) {
+    console.error("Failed to emit group created socket event:", e);
+  }
   res.status(201).json(fullGroupChat);
 });
 
