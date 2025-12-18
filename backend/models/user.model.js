@@ -119,9 +119,17 @@ const userSchema = new mongoose.Schema(
         type: Date,
         default: Date.now
       }
-    }]
-
+    }],
+    isBusiness: {
+      type: Boolean,
+      default: false
+    },
+    businessCategory: {
+      type: String,
+      default: ""
+    }
   },
+  
   { timestamps: true }
 );
 

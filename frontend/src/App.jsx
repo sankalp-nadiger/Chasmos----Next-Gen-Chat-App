@@ -14,6 +14,7 @@ import { Toaster } from "react-hot-toast";
 
 import Profile from "./components/Profile.jsx";
 import Settings from "./components/Settings.jsx";
+import GroupInfoModal from "./components/GroupInfoModal.jsx";
 
 // OAuth Callback Handler Component
 const OAuthCallback = () => {
@@ -170,7 +171,7 @@ const AppContent = () => {
         path="/home" 
         element={<OAuthCallback />} 
       />
-      
+       
       {/* Home/Chats Route */}
       <Route 
         path="/chats" 
@@ -248,9 +249,11 @@ const AppContent = () => {
         path="/" 
         element={<Navigate to="/auth" replace />} 
       />
+       
 
       {/* New Chat Route */}
       <Route path="/new-chat" element={<NewChat />} />
+    
 
       {/* Catch all route */}
       <Route 
