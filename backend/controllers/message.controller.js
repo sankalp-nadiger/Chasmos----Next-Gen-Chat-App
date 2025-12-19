@@ -6,6 +6,15 @@ import User from "../models/user.model.js";
 import Attachment from "../models/attachment.model.js";
 import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
 
+// Helper to normalize message timestamp for clients
+const normalizeMessage = (m) => {
+  const obj = (m && m.toObject) ? m.toObject() : m;
+  obj.timestamp = obj.isScheduled ? obj.scheduledFor : obj.createdAt;
+    console.log("Normalized message:", obj);
+  return obj;
+
+};
+
 export const allMessages = asyncHandler(async (req, res) => {
   try {
     // Exclude messages that are scheduled and not yet sent
@@ -43,11 +52,7 @@ export const allMessages = asyncHandler(async (req, res) => {
       .sort({ createdAt: 1 });
       
     // Attach a normalized `timestamp` field so clients can use scheduledFor when appropriate
-    const out = messages.map(m => {
-      const obj = (m && m.toObject) ? m.toObject() : m;
-      obj.timestamp = obj.isScheduled ? obj.scheduledFor : obj.createdAt;
-      return obj;
-    });
+    const out = messages.map(normalizeMessage);
     res.json(out);
   } catch (error) {
     res.status(400);
@@ -213,8 +218,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
     }
 
     // Attach normalized timestamp before sending
-    const messageOut = (message && message.toObject) ? message.toObject() : message;
-    messageOut.timestamp = messageOut.isScheduled ? messageOut.scheduledFor : messageOut.createdAt;
+    const messageOut = normalizeMessage(message);
 
     // If a new chat was created, return chat info as well
     if (createdNewChat) {
@@ -418,7 +422,9 @@ export const getStarredMessages = asyncHandler(async (req, res) => {
     .populate("starredBy.user", "name avatar")
     .sort({ createdAt: -1 });
 
-  res.json(messages);
+  // Normalize timestamps so scheduled messages expose `scheduledFor` as `timestamp`
+  const out = messages.map(normalizeMessage);
+  res.json(out);
 });
 
 export const addReaction = asyncHandler(async (req, res) => {
@@ -598,8 +604,7 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     await Chat.findByIdAndUpdate(chatId, { lastMessage: message });
 
     // Attach normalized timestamp for forwarded message
-    const forwardOut = (message && message.toObject) ? message.toObject() : message;
-    forwardOut.timestamp = forwardOut.isScheduled ? forwardOut.scheduledFor : forwardOut.createdAt;
+    const forwardOut = normalizeMessage(message);
     console.log("🎉 Forward message complete");
     res.json(forwardOut);
 
@@ -774,7 +779,19 @@ export const getPinnedMessages = asyncHandler(async (req, res) => {
     throw new Error("You are not authorized to view pinned messages in this chat");
   }
 
-  res.json(chat.pinnedMessages || []);
+  // Normalize timestamps on pinned messages' nested message objects
+  const pinned = (chat.pinnedMessages || []).map(pm => {
+    if (pm && pm.message) {
+      try {
+        pm.message = normalizeMessage(pm.message);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return pm;
+  });
+
+  res.json(pinned);
 });
 
 // Get media attachments (images, videos) from chats
@@ -1038,7 +1055,9 @@ export const getScheduledMessages = asyncHandler(async (req, res) => {
     .populate("attachments")
     .sort({ scheduledFor: 1 });
 
-  res.json(scheduledMessages);
+  // Ensure `timestamp` field present for scheduled messages
+  const scheduledOut = scheduledMessages.map(normalizeMessage);
+  res.json(scheduledOut);
 });
 
 // Cancel/delete a scheduled message

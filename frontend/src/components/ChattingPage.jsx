@@ -501,7 +501,8 @@ const MessageBubble = React.memo(
         whileHover={{ scale: 1.02 }}
         onMouseEnter={() => {
           try {
-            onHoverDateChange && onHoverDateChange(formatHoverDate(message.timestamp));
+            const timeForHover = message.isScheduled ? message.scheduledFor : (message.timestamp || message.scheduledFor || message.createdAt);
+            onHoverDateChange && onHoverDateChange(formatHoverDate(timeForHover));
           } catch (e) {
             // ignore
           }
@@ -4561,7 +4562,7 @@ const handleSendMessageFromInput = useCallback(
           // preserve populated sender object when present (don't collapse to id)
           sender: (newMessage.sender && typeof newMessage.sender === 'object') ? newMessage.sender : (newMessage.sender?._id || newMessage.sender),
           // prefer server-provided normalized timestamp, then scheduledFor, then createdAt
-          timestamp: new Date(newMessage.timestamp || newMessage.scheduledFor || newMessage.createdAt || Date.now()).getTime(),
+          timestamp: newMessage.timestamp ? new Date(newMessage.timestamp).getTime() : (newMessage.scheduledFor ? new Date(newMessage.scheduledFor).getTime() : new Date(newMessage.createdAt || Date.now()).getTime()),
           isRead: false,
           attachments: attachments,
           isSystemMessage: newMessage.type === 'system',
@@ -5083,7 +5084,7 @@ const handleSendMessageFromInput = useCallback(
           type: 'system',
           content: data.systemMessage.content,
           sender: data.systemMessage.sender._id || data.systemMessage.sender,
-          timestamp: new Date(data.systemMessage.timestamp || data.systemMessage.scheduledFor || data.systemMessage.createdAt || Date.now()).getTime(),
+          timestamp: new Date(data.systemMessage.timestamp || data.systemMessage.createdAt).getTime(),
           isSystemMessage: true,
         };
 

@@ -27,7 +27,7 @@ router.post('/', protect, upload.single('file'), async (req, res) => {
     });
 
     // Optionally create a message referencing this attachment if chatId provided
-    const { chatId, text } = req.body || {};
+    const { chatId, text, content } = req.body || {};
     // support scheduled fields from form-data (may be 'true' string)
     const isScheduledRaw = req.body && (req.body.isScheduled !== undefined) ? req.body.isScheduled : undefined;
     const isScheduled = isScheduledRaw === true || isScheduledRaw === 'true';
@@ -43,7 +43,7 @@ router.post('/', protect, upload.single('file'), async (req, res) => {
 
       const messageData = {
         sender: req.user._id,
-        content: text || '',
+        content: (content !== undefined && content !== null) ? content : (text || ''),
         type: msgType,
         chat: chatId,
         attachments: [attachment._id],

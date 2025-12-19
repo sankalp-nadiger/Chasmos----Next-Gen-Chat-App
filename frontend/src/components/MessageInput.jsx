@@ -128,7 +128,12 @@ const MessageInput = React.memo(({
             payload.isScheduled = true;
             payload.scheduledFor = scheduledDateTime.toISOString();
           }
-          if (!isScheduled) onSendMessage(payload);
+          // Always call onSendMessage when server returns only an attachment
+          // (the backend may not have created the message during upload,
+          // e.g. when chatId is not provided). This ensures scheduled
+          // messages with attachments are properly created via the
+          // `sendMessage` endpoint and saved with `isScheduled`.
+          onSendMessage(payload);
         }
       } catch (err) {
         console.error('Upload + send error', err);

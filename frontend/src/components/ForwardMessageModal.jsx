@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Search, Check, Send, Users, User } from 'lucide-react';
+import { X, Search, Check, Send, Users, User, Video, FileText } from 'lucide-react';
 import CosmosBackground from './CosmosBg';
 
 const ForwardMessageModal = ({ 
@@ -9,10 +9,69 @@ const ForwardMessageModal = ({
   onForward, 
   contacts, 
   effectiveTheme,
-  currentUserId 
+  currentUserId,
+  message, // optional message object being forwarded
+  setMessage // setter to allow editing/removing caption
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedChats, setSelectedChats] = useState([]);
+  const [localForwardContent, setLocalForwardContent] = useState((message && message.content) || '');
+  const [detectedDuration, setDetectedDuration] = useState(null);
+  const videoProbeRef = useRef(null);
+
+  // Probe video metadata for duration when attachment URL changes and no duration present
+  useEffect(() => {
+    setDetectedDuration(null);
+    if (!message) return;
+    const firstAttachment = Array.isArray(message.attachments) && message.attachments.length > 0 ? message.attachments[0] : null;
+    if (!firstAttachment) return;
+    const ft = firstAttachment.fileType || '';
+    if (!ft.startsWith || !ft.startsWith('video/')) return;
+    const existing = (
+      firstAttachment.duration || firstAttachment.length || firstAttachment.fileDuration || firstAttachment.durationSeconds ||
+      firstAttachment.duration_ms || firstAttachment.durationMs || firstAttachment.duration_seconds || firstAttachment.durationStr || firstAttachment.duration_str ||
+      (firstAttachment.meta && (firstAttachment.meta.duration || firstAttachment.meta.length || firstAttachment.meta.durationSeconds))
+    );
+    if (existing) return;
+
+    // create a detached video element to read metadata
+    try {
+      const v = document.createElement('video');
+      videoProbeRef.current = v;
+      v.preload = 'metadata';
+      v.crossOrigin = 'anonymous';
+      const src = firstAttachment.fileUrl || firstAttachment.file || firstAttachment.url || firstAttachment.fileUrl;
+      if (!src) return;
+      const onLoaded = () => {
+        try {
+          const dur = Math.floor(v.duration || 0);
+          if (!isNaN(dur) && dur > 0) setDetectedDuration(dur);
+        } catch (e) {}
+        cleanup();
+      };
+      const onError = () => { cleanup(); };
+      const cleanup = () => {
+        try {
+          v.removeEventListener('loadedmetadata', onLoaded);
+          v.removeEventListener('error', onError);
+          v.src = '';
+          if (videoProbeRef.current === v) videoProbeRef.current = null;
+        } catch (e) {}
+      };
+      v.addEventListener('loadedmetadata', onLoaded);
+      v.addEventListener('error', onError);
+      v.src = src;
+    } catch (e) {}
+
+    return () => {
+      try {
+        if (videoProbeRef.current) {
+          videoProbeRef.current.src = '';
+          videoProbeRef.current = null;
+        }
+      } catch (e) {}
+    };
+  }, [message && (Array.isArray(message.attachments) && message.attachments.length > 0 ? (message.attachments[0].fileUrl || message.attachments[0].file || message.attachments[0].url) : null)]);
 
   // Filter and sort contacts
   const filteredContacts = useMemo(() => {
@@ -50,7 +109,21 @@ const ForwardMessageModal = ({
 
   const handleForward = () => {
     if (selectedChats.length > 0) {
-      onForward(selectedChats);
+      // If message was edited/cleared via modal, ensure parent message state updated
+      if (localForwardContent !== (message && message.content)) {
+        try { setMessage && setMessage(prev => prev ? { ...prev, content: localForwardContent } : prev); } catch (e) {}
+      }
+      // Build optional forward payload (include content and attachments when present)
+      if (message) {
+        const payload = {
+          content: localForwardContent || '',
+          attachments: Array.isArray(message.attachments) ? message.attachments : (message.attachments ? [message.attachments] : []),
+          type: message.type || 'file',
+        };
+        onForward(selectedChats, payload);
+      } else {
+        onForward(selectedChats);
+      }
       setSelectedChats([]);
       setSearchTerm('');
       onClose();
@@ -94,11 +167,145 @@ const ForwardMessageModal = ({
               </h2>
               <button
                 onClick={onClose}
-                className={`${effectiveTheme.textSecondary} hover:${effectiveTheme.text} transition-colors p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700`}
+                className={`${effectiveTheme.textSecondary} transition-colors p-1 rounded-full hover:bg-red-500 hover:text-white dark:hover:bg-red-600`}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Message Preview (when forwarding a message) */}
+            {message && (() => {
+              const hasImageAttachment = Array.isArray(message.attachments) && message.attachments.some(a => a && a.fileType && a.fileType.startsWith && a.fileType.startsWith('image/'));
+              // Only show preview block when there's user text or an image attachment
+              if (!(message.content || hasImageAttachment)) return null;
+
+              const firstImage = hasImageAttachment ? message.attachments.find(a => a && a.fileType && a.fileType.startsWith && a.fileType.startsWith('image/')) : null;
+              const firstAttachment = Array.isArray(message.attachments) && message.attachments.length > 0 ? message.attachments[0] : null;
+
+            
+              const formatDuration = (val) => {
+                if (val === null || val === undefined || val === '') return null;
+                // If already in mm:ss or h:mm:ss form
+                if (typeof val === 'string') {
+                  const s = val.trim();
+                  // ISO 8601 duration like PT1M13S
+                  const isoMatch = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/i.exec(s);
+                  if (isoMatch) {
+                    const h = Number(isoMatch[1] || 0);
+                    const m = Number(isoMatch[2] || 0);
+                    const sec = Number(isoMatch[3] || 0);
+                    const total = h * 3600 + m * 60 + Math.round(sec);
+                    return formatDuration(total);
+                  }
+                  // If already mm:ss or h:mm:ss keep as-is (validate)
+                  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) return s;
+                  // If numeric string in seconds or milliseconds
+                  const asNum = Number(s);
+                  if (!isNaN(asNum)) return formatDuration(asNum);
+                  // If trailing 's' like '13s' or '1m13s'
+                  const humanMatch = /(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/i.exec(s);
+                  if (humanMatch && (humanMatch[1] || humanMatch[2] || humanMatch[3])) {
+                    const h = Number(humanMatch[1] || 0);
+                    const m = Number(humanMatch[2] || 0);
+                    const sec = Number(humanMatch[3] || 0);
+                    const total = h * 3600 + m * 60 + sec;
+                    return formatDuration(total);
+                  }
+                  return null;
+                }
+
+                // Numeric value
+                let seconds = Number(val);
+                if (isNaN(seconds)) return null;
+                // Convert milliseconds to seconds if value is large
+                if (seconds > 10000) seconds = Math.round(seconds / 1000);
+                seconds = Math.max(0, Math.floor(seconds));
+                const h = Math.floor(seconds / 3600);
+                const m = Math.floor((seconds % 3600) / 60);
+                const s = seconds % 60;
+                if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+              };
+
+              const getAttachmentDuration = (att) => {
+                if (!att) return null;
+                const cand = (
+                  att.duration ||
+                  att.length ||
+                  att.fileDuration ||
+                  att.durationSeconds ||
+                  att.duration_ms ||
+                  att.durationMs ||
+                  att.duration_seconds ||
+                  att.durationStr ||
+                  att.duration_str ||
+                  att.fileDurationMs ||
+                  att.lengthSeconds ||
+                  att.time ||
+                  att.video_length ||
+                  att.videoDuration ||
+                  att.video_duration ||
+                  (att.meta && (att.meta.duration || att.meta.length || att.meta.durationSeconds || att.meta.videoDuration)) ||
+                  (att.file && (att.file.duration || att.file.durationMs || (att.file.metadata && att.file.metadata.duration))) ||
+                  (att.info && att.info.duration) ||
+                  (att.metadata && att.metadata.duration) ||
+                  null
+                );
+                return cand;
+              };
+
+              const firstAttachmentDuration = getAttachmentDuration(firstAttachment);
+              const displayDuration = firstAttachmentDuration || detectedDuration;
+
+              return (
+                <div className={`p-3 border-b ${effectiveTheme.border} flex items-start space-x-3 ${effectiveTheme.secondary}`}>
+                  {/* Attachment thumbnail only for images; show icon for non-image when caption exists */}
+                  <div className="flex-shrink-0 w-14 h-14 flex items-center justify-center">
+                    {firstImage ? (
+                      <img src={firstImage.fileUrl || firstImage.file || ''} alt="attachment" className="w-14 h-14 rounded-md object-cover" />
+                    ) : (firstAttachment && message.content) ? (
+                      (() => {
+                        const ft = firstAttachment.fileType || '';
+                                if (ft.startsWith('video/')) {
+                          return (
+                            <div className={`w-14 h-14 rounded-md flex flex-col items-center justify-center text-sm ${effectiveTheme.secondary}`} style={{minWidth: 56, minHeight: 56}}>
+                              <Video className={`w-6 h-6 ${effectiveTheme.text}`} />
+                              {formatDuration(displayDuration) && (
+                                <div className={`text-[10px] mt-1 ${effectiveTheme.textSecondary}`}>{formatDuration(displayDuration)}</div>
+                              )}
+                            </div>
+                          );
+                        }
+                        // fallback to document icon
+                        return (
+                          <div className={`w-14 h-14 rounded-md flex items-center justify-center ${effectiveTheme.secondary}`} style={{minWidth:56, minHeight:56}}>
+                            <FileText className={`w-6 h-6 ${effectiveTheme.text}`} />
+                          </div>
+                        );
+                      })()
+                    ) : null}
+                  </div>
+                  <div className="flex-1 text-sm">
+                    {message.content ? (
+                      <div className="flex items-start justify-between">
+                        <div className={`text-sm ${effectiveTheme.text} mr-2 break-words`}>{localForwardContent || message.content}</div>
+                        {/* Only show X to remove caption when there are attachments or content */}
+                        {(Array.isArray(message.attachments) && message.attachments.length > 0) && (
+                          <button onClick={() => {
+                            try { setMessage && setMessage(prev => prev ? { ...prev, content: '' } : prev); } catch (e) {}
+                            setLocalForwardContent('');
+                          }} className={`${effectiveTheme.textSecondary} ml-2 rounded-full p-1`}>
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className={`text-sm ${effectiveTheme.textSecondary}`}>{hasImageAttachment ? 'Photo' : (message.type === 'poll' ? 'Poll' : 'Forwarded message')}</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Search Bar */}
             <div className={`p-4 border-b ${effectiveTheme.border}`}>
@@ -147,7 +354,7 @@ const ForwardMessageModal = ({
                             className="w-12 h-12 rounded-full object-cover"
                           />
                         ) : (
-                          <div className={`w-12 h-12 rounded-full ${effectiveTheme.accent} flex items-center justify-center text-white font-semibold`}>
+                          <div className={`w-12 h-12 rounded-full flex items-center justify-center font-semibold ${isGroup ? 'bg-gray-200 text-gray-700' : `${effectiveTheme.accent} text-white`}`}>
                             {isGroup ? (
                               <Users className="w-6 h-6" />
                             ) : (
