@@ -8,7 +8,14 @@ import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
 
 export const allMessages = asyncHandler(async (req, res) => {
   try {
-    const messages = await Message.find({ chat: req.params.chatId })
+    // Exclude messages that are scheduled and not yet sent
+    const messages = await Message.find({
+      chat: req.params.chatId,
+      $or: [
+        { isScheduled: { $ne: true } },
+        { scheduledSent: true }
+      ]
+    })
       .populate("sender", "name avatar email")
       .populate("attachments")
       .populate({
@@ -35,7 +42,13 @@ export const allMessages = asyncHandler(async (req, res) => {
       .populate("reactions.user", "name avatar")
       .sort({ createdAt: 1 });
       
-    res.json(messages);
+    // Attach a normalized `timestamp` field so clients can use scheduledFor when appropriate
+    const out = messages.map(m => {
+      const obj = (m && m.toObject) ? m.toObject() : m;
+      obj.timestamp = obj.isScheduled ? obj.scheduledFor : obj.createdAt;
+      return obj;
+    });
+    res.json(out);
   } catch (error) {
     res.status(400);
     throw new Error(error.message);
@@ -43,21 +56,24 @@ export const allMessages = asyncHandler(async (req, res) => {
 });
 
 export const sendMessage = asyncHandler(async (req, res) => {
-  const { content, chatId, attachments, type = "text", isScheduled = false, scheduledFor, userId, poll, repliedTo } = req.body;
-  console.log("➡️ [SEND MESSAGE] Request received", { chatId, userId, content, attachments, type, isScheduled, scheduledFor, poll, repliedTo });
+  const { content, chatId, attachments, type = "text", isScheduled, scheduledFor, userId, poll, repliedTo } = req.body;
+  // normalize isScheduled which may be boolean or string from client
+  const isScheduledFlag = (isScheduled === true || isScheduled === 'true' || isScheduled === '1' || isScheduled === 1);
+  // normalize scheduledFor into a Date if present
+  const scheduledForDate = scheduledFor ? new Date(scheduledFor) : null;
+  console.log("➡️ [SEND MESSAGE] Request received", { chatId, userId, content, attachments, type, isScheduled: isScheduledFlag, scheduledFor: scheduledForDate, poll, repliedTo });
   if (!content && (!attachments || attachments.length === 0) && !poll) {
     console.log("Invalid data passed into request");
     return res.sendStatus(400);
   }
 
   // Validate scheduled message
-  if (isScheduled) {
-    if (!scheduledFor) {
+  if (isScheduledFlag) {
+    if (!scheduledForDate || isNaN(scheduledForDate.getTime())) {
       res.status(400);
-      throw new Error("Scheduled time is required for scheduled messages");
+      throw new Error("Scheduled time is required for scheduled messages and must be a valid date");
     }
-    const scheduledDate = new Date(scheduledFor);
-    if (scheduledDate <= new Date()) {
+    if (scheduledForDate <= new Date()) {
       res.status(400);
       throw new Error("Scheduled time must be in the future");
     }
@@ -138,8 +154,8 @@ export const sendMessage = asyncHandler(async (req, res) => {
     attachments: attachments || [],
     // allow replying to one or multiple messages (only valid ObjectIds)
     repliedTo: normalizedRepliedTo,
-    isScheduled: isScheduled,
-    scheduledFor: isScheduled ? new Date(scheduledFor) : null,
+    isScheduled: !!isScheduledFlag,
+    scheduledFor: isScheduledFlag ? scheduledForDate : null,
     scheduledSent: false,
     poll: poll || null,
   };
@@ -147,6 +163,19 @@ export const sendMessage = asyncHandler(async (req, res) => {
   try {
     var message = await Message.create(newMessage);
     console.log("[sendMessage] Message created:", message._id);
+
+    // Debug: refetch saved message from DB to verify persisted fields
+    try {
+      const saved = await Message.findById(message._id).lean();
+      console.log('[sendMessage] Saved message in DB (raw):', {
+        id: saved && saved._id,
+        isScheduled: saved && saved.isScheduled,
+        scheduledFor: saved && saved.scheduledFor,
+        createdAt: saved && saved.createdAt
+      });
+    } catch (err) {
+      console.warn('[sendMessage] Failed to fetch saved message for debug:', err && err.message);
+    }
 
     message = await message.populate("sender", "name avatar");
     message = await message.populate("attachments");
@@ -183,12 +212,16 @@ export const sendMessage = asyncHandler(async (req, res) => {
       console.log("[sendMessage] Updated chat lastMessage:", chat._id);
     }
 
+    // Attach normalized timestamp before sending
+    const messageOut = (message && message.toObject) ? message.toObject() : message;
+    messageOut.timestamp = messageOut.isScheduled ? messageOut.scheduledFor : messageOut.createdAt;
+
     // If a new chat was created, return chat info as well
     if (createdNewChat) {
       console.log("[sendMessage] Returning new chat and message");
-      return res.json({ message, chat });
+      return res.json({ message: messageOut, chat });
     }
-    res.json(message);
+    res.json(messageOut);
   } catch (error) {
     console.error("[sendMessage] Error creating message:", error);
     res.status(400);
@@ -564,8 +597,11 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     console.log("🆙 Updating chat lastMessage");
     await Chat.findByIdAndUpdate(chatId, { lastMessage: message });
 
+    // Attach normalized timestamp for forwarded message
+    const forwardOut = (message && message.toObject) ? message.toObject() : message;
+    forwardOut.timestamp = forwardOut.isScheduled ? forwardOut.scheduledFor : forwardOut.createdAt;
     console.log("🎉 Forward message complete");
-    res.json(message);
+    res.json(forwardOut);
 
   } catch (error) {
     console.error("🔥 ERROR in forwardMessage:", error.message);

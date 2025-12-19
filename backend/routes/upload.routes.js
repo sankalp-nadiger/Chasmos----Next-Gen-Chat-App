@@ -28,6 +28,11 @@ router.post('/', protect, upload.single('file'), async (req, res) => {
 
     // Optionally create a message referencing this attachment if chatId provided
     const { chatId, text } = req.body || {};
+    // support scheduled fields from form-data (may be 'true' string)
+    const isScheduledRaw = req.body && (req.body.isScheduled !== undefined) ? req.body.isScheduled : undefined;
+    const isScheduled = isScheduledRaw === true || isScheduledRaw === 'true';
+    const scheduledForRaw = req.body && req.body.scheduledFor ? req.body.scheduledFor : undefined;
+    const scheduledFor = scheduledForRaw ? new Date(scheduledForRaw) : null;
     let message = null;
     if (chatId) {
       // determine type based on mimetype
@@ -36,21 +41,28 @@ router.post('/', protect, upload.single('file'), async (req, res) => {
       else if (file.mimetype && file.mimetype.startsWith('video/')) msgType = 'video';
       else if (file.mimetype && (file.mimetype.includes('pdf') || file.mimetype.includes('officedocument') || file.mimetype.includes('ms-'))) msgType = 'document';
 
-      message = await Message.create({
+      const messageData = {
         sender: req.user._id,
         content: text || '',
         type: msgType,
         chat: chatId,
         attachments: [attachment._id],
-      });
+        isScheduled: !!isScheduled,
+        scheduledFor: isScheduled && scheduledFor ? scheduledFor : null,
+        scheduledSent: false,
+      };
+
+      message = await Message.create(messageData);
 
       // populate message for response
       await message.populate('sender', 'name avatar email');
       await message.populate({ path: 'attachments' });
 
-      // Update chat lastMessage
+      // Update chat lastMessage only if message is not scheduled
       try {
-        await Chat.findByIdAndUpdate(chatId, { lastMessage: message._id });
+        if (!message.isScheduled) {
+          await Chat.findByIdAndUpdate(chatId, { lastMessage: message._id });
+        }
       } catch (e) {
         console.warn('Could not update chat lastMessage for chatId', chatId, e.message);
       }

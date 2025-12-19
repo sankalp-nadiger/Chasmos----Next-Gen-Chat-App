@@ -763,7 +763,7 @@ const MessageBubble = React.memo(
                 <span className={`text-xs opacity-75 whitespace-nowrap flex items-center gap-1 ml-2 flex-shrink-0 ${
     effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900'
   }`}>
-                  {formatMessageTime(message.timestamp)}
+                  {formatMessageTime(message.isScheduled ? message.scheduledFor : message.timestamp)}
                   {message.isEdited && <span className="text-[10px] italic opacity-60">edited</span>}
                   {message.isRead ? (
                     <img src={doubleCheckIcon} alt="read" className="w-4 h-4 flex-shrink-0" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
@@ -776,7 +776,7 @@ const MessageBubble = React.memo(
   <span className={`text-xs opacity-75 whitespace-nowrap ml-2 flex items-center gap-1 flex-shrink-0 ${
     effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900'
   }`}>
-    {formatMessageTime(message.timestamp)}
+    {formatMessageTime(message.isScheduled ? message.scheduledFor : message.timestamp)}
     {message.isEdited && <span className="text-[10px] italic opacity-60">edited</span>}
   </span>
 )}
@@ -798,7 +798,7 @@ const MessageBubble = React.memo(
     ? (effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900')
     : (effectiveTheme.mode === 'dark' ? 'text-white' : 'text-gray-900')
 }`}>
-  {formatMessageTime(message.timestamp)}
+  {formatMessageTime(message.isScheduled ? message.scheduledFor : message.timestamp)}
   {message.isEdited && <span className="text-[10px] italic opacity-60">edited</span>}
 </span>
               {isOwnMessage && (
@@ -2649,7 +2649,8 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             type: m.type || "text",
             content: m.content || m.text || "",
             sender: m.sender,
-            timestamp: new Date(m.createdAt || m.timestamp || Date.now()).getTime(),
+            // prefer backend-provided `timestamp` (normalized to scheduledFor when applicable)
+            timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
             isRead: true,
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
@@ -2700,7 +2701,8 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             type: m.type || "text",
             content: m.content || m.text || "",
             sender: m.sender,
-            timestamp: new Date(m.createdAt || m.timestamp || Date.now()).getTime(),
+            // prefer backend-provided `timestamp` (normalized to scheduledFor when applicable)
+            timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
             isRead: true,
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
@@ -2834,7 +2836,8 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               type: m.type || 'text',
               content: m.content || m.text || '',
               sender: m.sender,
-              timestamp: new Date(m.createdAt || m.timestamp || Date.now()).getTime(),
+              // Prefer normalized `timestamp` from backend (uses scheduledFor when applicable)
+              timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
               isRead: true,
               attachments: Array.isArray(m.attachments) ? m.attachments : [],
               isSystemMessage: m.type === 'system',
@@ -3110,7 +3113,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               type: m.type || 'text',
               content: m.content || m.text || '',
               sender: m.sender,
-              timestamp: new Date(m.createdAt || Date.now()).getTime(),
+              timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
               isRead: m.isRead || false,
               attachments: m.attachments || [],
               isForwarded: m.isForwarded || false,
@@ -3225,7 +3228,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             type: m.type || "text",
             content: m.content || m.text || "",
             sender: m.sender,
-            timestamp: new Date(m.createdAt || m.createdAt || m.timestamp || Date.now()).getTime(),
+            timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
             isRead: true,
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
@@ -3789,6 +3792,72 @@ useEffect(() => {
     setChatSearchTerm(e.target.value);
   }, []);
 
+  // Hoisted helpers so socket handlers and other callbacks can use them
+  const updateRecentChat = useCallback((chatId, preview, hasAttachment = false, meta = {}) => {
+    setRecentChats((prev) => {
+      if (archivedChatIds && archivedChatIds.has(String(chatId))) {
+        return prev;
+      }
+
+      const providedTs = meta && (meta.timestamp || meta.timestamp === 0)
+        ? (typeof meta.timestamp === 'number' ? meta.timestamp : new Date(meta.timestamp).getTime())
+        : null;
+      const useTs = providedTs || Date.now();
+
+      const exists = prev.find((c) => c.id === chatId || c.chatId === chatId);
+      if (exists) {
+        return prev.map((c) =>
+          c.id === chatId || c.chatId === chatId
+            ? Object.assign({}, c, {
+                lastMessage: preview,
+                timestamp: useTs,
+                hasAttachment: !!hasAttachment,
+                ...(hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {}),
+                ...(hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {}),
+              })
+            : c
+        );
+      }
+      return [
+        Object.assign(
+          {
+            id: chatId,
+            chatId,
+            name: selectedContact?.name || '',
+            avatar: selectedContact?.avatar || '/default-avatar.png',
+            lastMessage: preview,
+            hasAttachment: !!hasAttachment,
+            timestamp: useTs,
+            unreadCount: 0,
+          },
+          hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {},
+          hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {}
+        ),
+        ...prev,
+      ];
+    });
+  }, [archivedChatIds, selectedContact]);
+
+  const updateContactPreview = useCallback((chatId, preview, hasAttachment = false, meta = {}) => {
+    setContacts((prev) =>
+      prev.map((c) => {
+        if (String(c.id) !== String(chatId) && String(c.chatId) !== String(chatId)) return c;
+        const updated = { ...c, lastMessage: preview };
+        if (hasAttachment) {
+          updated.hasAttachment = true;
+          if (meta.attachmentFileName) updated.attachmentFileName = meta.attachmentFileName;
+          if (meta.attachmentMime) updated.attachmentMime = meta.attachmentMime;
+        } else {
+          updated.hasAttachment = false;
+          delete updated.attachmentFileName;
+          delete updated.attachmentMime;
+          delete updated.attachments;
+        }
+        return updated;
+      })
+    );
+  }, []);
+
   // Handle sending message from the MessageInput component-Updated
   // Updated handleSendMessageFromInput function
 const handleSendMessageFromInput = useCallback(
@@ -3815,70 +3884,7 @@ const handleSendMessageFromInput = useCallback(
         [chatId]: [...(prev[chatId] || []), message],
       }));
     };
-
-    const updateRecentChat = (chatId, preview, hasAttachment = false, meta = {}) => {
-      setRecentChats((prev) => {
-        // don't add/archive update if this chat is archived
-        if (archivedChatIds && archivedChatIds.has(String(chatId))) {
-          return prev;
-        }
-
-        const exists = prev.find((c) => c.id === chatId || c.chatId === chatId);
-        if (exists) {
-          return prev.map((c) =>
-            c.id === chatId || c.chatId === chatId
-              ? Object.assign({}, c, {
-                  lastMessage: preview,
-                  timestamp: Date.now(),
-                  hasAttachment: !!hasAttachment,
-                  ...(hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {}),
-                  ...(hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {}),
-                })
-              : c
-          );
-        }
-        return [
-          Object.assign(
-            {
-              id: chatId,
-              chatId,
-              name: selectedContact?.name || '',
-              avatar: selectedContact?.avatar || '/default-avatar.png',
-              lastMessage: preview,
-              hasAttachment: !!hasAttachment,
-              timestamp: Date.now(),
-              unreadCount: 0,
-            },
-            hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {},
-            hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {}
-          ),
-          ...prev,
-        ];
-      });
-    };
-
-    // Also update the contacts list preview so sidebar reflects latest message/icon
-    const updateContactPreview = (chatId, preview, hasAttachment = false, meta = {}) => {
-      setContacts((prev) =>
-        prev.map((c) => {
-          if (String(c.id) !== String(chatId) && String(c.chatId) !== String(chatId)) return c;
-          // base update
-          const updated = { ...c, lastMessage: preview };
-          if (hasAttachment) {
-            updated.hasAttachment = true;
-            if (meta.attachmentFileName) updated.attachmentFileName = meta.attachmentFileName;
-            if (meta.attachmentMime) updated.attachmentMime = meta.attachmentMime;
-          } else {
-            // clear attachment markers when no attachment
-            updated.hasAttachment = false;
-            delete updated.attachmentFileName;
-            delete updated.attachmentMime;
-            delete updated.attachments;
-          }
-          return updated;
-        })
-      );
-    };
+    
 
     // Case 1: Server message object (already sent from backend)
     if (typeof payload === 'object' && (payload._id || payload.id || payload.createdAt)) {
@@ -3894,7 +3900,7 @@ const handleSendMessageFromInput = useCallback(
           type: payload.type || 'file',
           content: payload.content || payload.text || '',
           sender: payload.sender?._id || payload.sender || 'me',
-          timestamp: new Date(payload.createdAt || Date.now()).getTime(),
+          timestamp: new Date(payload.timestamp || payload.scheduledFor || payload.createdAt || Date.now()).getTime(),
           isRead: true,
           attachments: payload.attachments || payload.files || [],
           repliedTo: payload.repliedTo || [],
@@ -3983,13 +3989,18 @@ const handleSendMessageFromInput = useCallback(
         }
 
         try {
+          const bodyObj = { content: payload.content, chatId, userId, repliedTo: selectedReplies || [] };
+          if (payload.isScheduled) {
+            bodyObj.isScheduled = true;
+            if (payload.scheduledFor) bodyObj.scheduledFor = payload.scheduledFor;
+          }
           const res = await fetch(`${API_BASE_URL}/api/message`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({ content: payload.content, chatId, userId, repliedTo: selectedReplies || [] }),
+            body: JSON.stringify(bodyObj),
           });
 
           if (!res.ok) throw new Error('Failed to send text message');
@@ -4011,7 +4022,12 @@ const handleSendMessageFromInput = useCallback(
               participants: newChat.users || newChat.participants || prev?.participants || [],
             }));
 
-            // Move any messages stored under null/undefined keys to the new chatId
+            // If this poll message is scheduled, don't append now; cron will emit later
+            if (sent && sent.isScheduled) {
+              console.log('[send] scheduled poll message saved, will be delivered later:', sent._id || sent.id);
+              return;
+            }
+
             setMessages(prev => {
               const copy = { ...prev };
               const possibleKeys = [null, undefined, 'null', 'undefined', ''];
@@ -4034,12 +4050,19 @@ const handleSendMessageFromInput = useCallback(
             }));
           }
 
+          // If this message is scheduled, do not append it to the UI now;
+          // the backend cron will emit the message when it's due.
+          if (sent && sent.isScheduled) {
+            console.log('[send] message scheduled on server, will be delivered later:', sent._id || sent.id);
+            return;
+          }
+
           const formatted = {
             id: sent._id || sent.id || Date.now(),
             type: 'text',
             content: sent.content || sent.text || payload.content,
             sender: sent.sender?._id || sent.sender || 'me',
-            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
             isRead: true,
             repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
           };
@@ -4127,19 +4150,24 @@ const handleSendMessageFromInput = useCallback(
         }
 
         try {
+          const bodyObj = {
+            content: payload.text || '',
+            chatId,
+            attachments: payload.attachments,
+            type: payload.type,
+            repliedTo: selectedReplies || [],
+          };
+          if (payload.isScheduled) {
+            bodyObj.isScheduled = true;
+            if (payload.scheduledFor) bodyObj.scheduledFor = payload.scheduledFor;
+          }
           const res = await fetch(`${API_BASE_URL}/api/message`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({
-              content: payload.text || '',
-              chatId,
-              attachments: payload.attachments,
-              type: payload.type,
-              repliedTo: selectedReplies || [],
-            }),
+            body: JSON.stringify(bodyObj),
           });
 
           if (!res.ok) throw new Error('Failed to send message with attachments');
@@ -4179,12 +4207,19 @@ const handleSendMessageFromInput = useCallback(
             }));
           }
 
+          // If this message is scheduled, do not append it to the UI now;
+          // the backend cron will emit the message when it's due.
+          if (sent && sent.isScheduled) {
+            console.log('[send] scheduled attachment message saved, will be delivered later:', sent._id || sent.id);
+            return;
+          }
+
           const formatted = {
             id: sent._id || sent.id || Date.now(),
             type: sent.type || payload.type || 'file',
             content: sent.content || sent.text || payload.text || '',
             sender: sent.sender?._id || sent.sender || 'me',
-            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
             isRead: true,
             attachments: sent.attachments || payload.attachments,
             repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
@@ -4329,7 +4364,7 @@ const handleSendMessageFromInput = useCallback(
             type: 'text',
             content: sent.content || sent.text || messageText,
             sender: sent.sender?._id || sent.sender || 'me',
-            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
             isRead: true,
             repliedTo: sent.repliedTo || selectedReplies || [],
           };
@@ -4374,18 +4409,23 @@ const handleSendMessageFromInput = useCallback(
 
         try {
           // Create a message with poll reference
+          const bodyObj = {
+            content: payload.content || '📊 Poll',
+            chatId,
+            type: 'poll',
+            poll: payload.pollId,
+          };
+          if (payload.isScheduled) {
+            bodyObj.isScheduled = true;
+            if (payload.scheduledFor) bodyObj.scheduledFor = payload.scheduledFor;
+          }
           const res = await fetch(`${API_BASE_URL}/api/message`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({
-              content: payload.content || '📊 Poll',
-              chatId,
-              type: 'poll',
-              poll: payload.pollId,
-            }),
+            body: JSON.stringify(bodyObj),
           });
 
           if (!res.ok) throw new Error('Failed to send poll message');
@@ -4407,7 +4447,7 @@ const handleSendMessageFromInput = useCallback(
             type: 'poll',
             content: sent.content || payload.content || '📊 Poll',
             sender: sent.sender?._id || sent.sender || 'me',
-            timestamp: new Date(sent.createdAt || Date.now()).getTime(),
+            timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
             isRead: true,
             poll: fullPoll,
             repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
@@ -4494,7 +4534,7 @@ const handleSendMessageFromInput = useCallback(
       try {
         const chatId = newMessage.chat?._id || newMessage.chat;
         const senderId = newMessage.sender?._id || newMessage.sender;
-        const key = chatId || senderId;
+        const key = String(chatId || senderId);
         const attachments = Array.isArray(newMessage.attachments) ? newMessage.attachments : [];
         const inferredType = newMessage.type || (attachments.length ? (
           (attachments[0].mimeType && attachments[0].mimeType.startsWith('image/')) ? 'image' :
@@ -4520,7 +4560,8 @@ const handleSendMessageFromInput = useCallback(
           content: newMessage.content || newMessage.text || '',
           // preserve populated sender object when present (don't collapse to id)
           sender: (newMessage.sender && typeof newMessage.sender === 'object') ? newMessage.sender : (newMessage.sender?._id || newMessage.sender),
-          timestamp: newMessage.scheduledFor ? new Date(newMessage.scheduledFor).getTime() : new Date(newMessage.createdAt || Date.now()).getTime(),
+          // prefer server-provided normalized timestamp, then scheduledFor, then createdAt
+          timestamp: new Date(newMessage.timestamp || newMessage.scheduledFor || newMessage.createdAt || Date.now()).getTime(),
           isRead: false,
           attachments: attachments,
           isSystemMessage: newMessage.type === 'system',
@@ -4589,6 +4630,7 @@ const handleSendMessageFromInput = useCallback(
         updateRecentChat(key, preview, hasAttachment, {
           attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
           attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+          timestamp: formatted.timestamp,
         });
         setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
         updateContactPreview(key, preview, hasAttachment, {
@@ -5041,7 +5083,7 @@ const handleSendMessageFromInput = useCallback(
           type: 'system',
           content: data.systemMessage.content,
           sender: data.systemMessage.sender._id || data.systemMessage.sender,
-          timestamp: new Date(data.systemMessage.createdAt).getTime(),
+          timestamp: new Date(data.systemMessage.timestamp || data.systemMessage.scheduledFor || data.systemMessage.createdAt || Date.now()).getTime(),
           isSystemMessage: true,
         };
 
@@ -5433,7 +5475,8 @@ const handleCreateGroup = useCallback(() => {
                   type: m.type || 'text',
                   content: m.content || m.text || '',
                   sender: m.sender,
-                  timestamp: new Date(m.createdAt || m.timestamp || Date.now()).getTime(),
+                  // prefer backend-provided `timestamp` (normalized to scheduledFor when applicable)
+                  timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
                   isRead: m.isRead || false,
                   attachments: Array.isArray(m.attachments) ? m.attachments : [],
                   isSystemMessage: m.type === 'system',

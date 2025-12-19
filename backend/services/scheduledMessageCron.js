@@ -38,22 +38,36 @@ const sendScheduledMessages = async () => {
 
     for (const message of dueMessages) {
       try {
-        // Mark as no longer scheduled and set as sent
-        message.isScheduled = false;
+        // Mark as sent but KEEP isScheduled flag for historical/reference
         message.scheduledSent = true;
         await message.save();
 
-        // Update the chat's last message
-        await Chat.findByIdAndUpdate(message.chat._id, { 
-          lastMessage: message._id 
-        });
+        // Update the chat's last message and bump updatedAt so recent-chat lists reorder
+        try {
+          await Chat.findByIdAndUpdate(
+            message.chat._id,
+            { $set: { lastMessage: message._id }, $currentDate: { updatedAt: true } }
+          );
+        } catch (e) {
+          console.warn('[CRON] Failed to update chat.lastMessage for', message.chat && message.chat._id, e && e.message);
+        }
 
         console.log(`✅ [CRON] Sent scheduled message ${message._id} to chat ${message.chat._id}`);
+
+        // Re-fetch the saved message with populated fields to emit a consistent object
+        const populated = await Message.findById(message._id)
+          .populate('sender', 'name avatar')
+          .populate('attachments')
+          .populate({ path: 'chat', populate: [{ path: 'users', select: '_id' }, { path: 'participants', select: '_id' }] });
+
+        const emitMsg = (populated && populated.toObject) ? populated.toObject() : message;
+        // Attach a timestamp that clients expect (prefer scheduledFor if present)
+        emitMsg.timestamp = emitMsg.isScheduled ? emitMsg.scheduledFor : emitMsg.createdAt;
 
         // Emit socket event to all users in the chat room AND to each participant's userId room
         if (ioInstance && message.chat && message.chat._id) {
           // To chat room (for users who joined the chat)
-          ioInstance.to(message.chat._id.toString()).emit("message recieved", message);
+          ioInstance.to(message.chat._id.toString()).emit("message recieved", emitMsg);
 
           // To each userId room (for users not in the chat room)
           const users = (message.chat.users && message.chat.users.length)
@@ -62,7 +76,7 @@ const sendScheduledMessages = async () => {
           if (Array.isArray(users)) {
             users.forEach(user => {
               const userId = user._id ? user._id.toString() : user.toString();
-              ioInstance.to(userId).emit("message recieved", message);
+              ioInstance.to(userId).emit("message recieved", emitMsg);
             });
           }
         }

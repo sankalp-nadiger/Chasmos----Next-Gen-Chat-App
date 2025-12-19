@@ -33,7 +33,22 @@ export const accessChat = asyncHandler(async (req, res) => {
   });
 
   if (isChat.length > 0) {
-    res.send(isChat[0]);
+    // Ensure consistent timestamp on lastMessage for client display
+    const chat = isChat[0];
+    if (chat && chat.lastMessage) {
+      try {
+        const lm = chat.lastMessage;
+        const ts = (lm.isScheduled && lm.scheduledSent && lm.scheduledFor) ? lm.scheduledFor : (lm.createdAt || lm.updatedAt || null);
+        if (lm.toObject && typeof lm.toObject === 'function') {
+          const obj = lm.toObject();
+          obj.timestamp = ts;
+          chat.lastMessage = obj;
+        } else {
+          chat.lastMessage.timestamp = ts;
+        }
+      } catch (e) {}
+    }
+    res.send(chat);
   } else {
     var chatData = {
       chatName: "sender",
@@ -91,8 +106,32 @@ export const fetchChats = asyncHandler(async (req, res) => {
       path: "lastMessage.sender",
       select: "name avatar email",
     });
+
+    // Normalize lastMessage timestamp so clients can rely on `timestamp` field.
+    // If a message was scheduled and has been sent (`scheduledSent === true`),
+    // prefer `scheduledFor` as the display timestamp; otherwise use `createdAt`.
+    const normalized = (Array.isArray(populatedResults) ? populatedResults : []).map((chat) => {
+      if (chat && chat.lastMessage) {
+        try {
+          const lm = chat.lastMessage;
+          const ts = (lm.isScheduled && lm.scheduledSent && lm.scheduledFor) ? lm.scheduledFor : (lm.createdAt || lm.updatedAt || null);
+          // attach a consistent `timestamp` property on lastMessage (lean objects may already have it)
+          if (lm.toObject && typeof lm.toObject === 'function') {
+            const obj = lm.toObject();
+            obj.timestamp = ts;
+            chat.lastMessage = obj;
+          } else {
+            chat.lastMessage.timestamp = ts;
+          }
+        } catch (e) {
+          // ignore and continue
+        }
+      }
+      return chat;
+    });
+
     console.log(results);
-    res.status(200).send(populatedResults);
+    res.status(200).send(normalized);
   } catch (error) {
     res.status(400);
     throw new Error(error.message);
@@ -485,7 +524,15 @@ export const getRecentChats = async (req, res) => {
       } else if (chat.unreadCount && typeof chat.unreadCount === "object") {
         unread = chat.unreadCount[String(userId)] || chat.unreadCount[userId] || 0;
       }
+      // Determine a timestamp for this chat preview. Prefer lastMessage's scheduledFor
+      // when the last message was a scheduled message that has been sent.
+      let previewTimestamp = chat.updatedAt || chat.timestamp;
+      if (chat.lastMessage) {
+        const lm = chat.lastMessage;
+        previewTimestamp = (lm.isScheduled && lm.scheduledSent && lm.scheduledFor) ? lm.scheduledFor : (lm.createdAt || lm.updatedAt || previewTimestamp);
+      }
 
+      // For group chats, return all members; for 1-on-1, return the other user
       let lastMessageText = "";
       if (chat.lastMessage) {
         const msg = chat.lastMessage;
@@ -518,7 +565,7 @@ export const getRecentChats = async (req, res) => {
       const chatData = {
         chatId: chat._id,
         lastMessage: lastMessageText || "Say hi!",
-        timestamp: chat.updatedAt || chat.timestamp,
+        timestamp: previewTimestamp,
         unreadCount: unread,
         isGroupChat: !!chat.isGroupChat,
         chatName: chat.chatName,
