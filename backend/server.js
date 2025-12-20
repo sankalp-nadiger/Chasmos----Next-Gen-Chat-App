@@ -7,6 +7,12 @@ import User from "./models/user.model.js";
 import Message from "./models/message.model.js";
 import colors from "colors";
 import path from "path";
+import fs from 'fs';
+import { fileURLToPath } from "url";
+import cors from 'cors';
+import https from 'https';
+
+// Import routes
 import userRoutes from "./routes/user.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
@@ -22,11 +28,14 @@ import blockRoutes from "./routes/block.routes.js";
 import userProfileRoutes from "./routes/userProfile.routes.js"; 
 import screenshotRoutes from "./routes/screenshot.routes.js";
 import groupRoutes from "./routes/group.route.js";
-//import groupRoutes from "./routes/group.route.js";
-import { fileURLToPath } from "url";
 import pollRoutes from "./routes/poll.routes.js";
+import encryptionRoutes from "./routes/encryption.routes.js"; 
+
+// Import middleware
 import { notFound, errorHandler } from "./middleware/error.middleware.js"; 
-import cors from 'cors';
+import { encryptOutgoingMessages, verifyEncryptedMessage } from "./middleware/encryption.middleware.js"; 
+
+// Import services
 import { setSocketIOInstance } from "./services/scheduledMessageCron.js";
 import { initScheduledMessageCron } from "./services/scheduledMessageCron.js";
 import {
@@ -36,12 +45,20 @@ import {
   getOnlineList,
   getConnectionCount,
 } from "./services/onlineUsers.js";
+
+// Import encryption service
+import encryptionService from "./services/encryption.service.js"; 
+import { ChatKey } from "./models/encryption.model.js"; 
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Connect to database
 connectDB();
+
 const app = express();
 
+// CORS configuration
 const allowedOrigins = [
   'http://localhost:5173',
   'https://chasmos.netlify.app'
@@ -58,15 +75,19 @@ app.use(cors({
   credentials: true
 }));
 
-// In your server setup
-app.use(express.json({ limit: '5mb' })); // default is 100kb
-app.use(express.urlencoded({ limit: '5mb', extended: true }));
+// Body parser with increased limits
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Static files
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// API Routes
 app.use("/api/user", userRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatRoutes);
- app.use("/api/group", groupRoutes);
-app.use("/api/message", messageRoutes);
+app.use("/api/group", groupRoutes);
+app.use("/api/message", verifyEncryptedMessage, messageRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/sprints", sprintRoutes); 
 app.use("/api/contacts", contactRoutes);
@@ -78,164 +99,292 @@ app.use("/api/block", blockRoutes);
 app.use("/api/users", userProfileRoutes); 
 app.use("/api/screenshot", screenshotRoutes);
 app.use("/api/poll", pollRoutes);
+app.use("/api/encryption", encryptionRoutes); 
 
+// Error handling middleware
 app.use(notFound);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
-const server = app.listen(
-  PORT,
-  console.log(`Server running on PORT ${PORT}...`.yellow.bold)
-);
+// SSL/TLS Configuration for HTTPS
+const createSecureServer = () => {
+  try {
+    // Check if SSL certificates exist
+    const sslKeyPath = process.env.SSL_KEY_PATH || './ssl/private.key';
+    const sslCertPath = process.env.SSL_CERT_PATH || './ssl/certificate.crt';
+    
+    if (fs.existsSync(sslKeyPath) && fs.existsSync(sslCertPath)) {
+      const sslOptions = {
+        key: fs.readFileSync(sslKeyPath),
+        cert: fs.readFileSync(sslCertPath),
+        // Enable strong cipher suites
+        ciphers: [
+          'TLS_AES_256_GCM_SHA384',
+          'TLS_CHACHA20_POLY1305_SHA256',
+          'TLS_AES_128_GCM_SHA256',
+          'ECDHE-RSA-AES256-GCM-SHA384',
+          'ECDHE-RSA-AES128-GCM-SHA256',
+          'DHE-RSA-AES256-GCM-SHA384'
+        ].join(':'),
+        honorCipherOrder: true,
+        secureProtocol: 'TLSv1_2_method'
+      };
+      
+      console.log('🔒 SSL/TLS certificates found. Creating HTTPS server...'.green);
+      return https.createServer(sslOptions, app);
+    } else {
+      console.log('⚠️ SSL certificates not found. Using HTTP server (NOT FOR PRODUCTION)'.yellow);
+      return require('http').createServer(app);
+    }
+  } catch (error) {
+    console.error('❌ SSL configuration error:', error.message);
+    console.log('⚠️ Falling back to HTTP server'.yellow);
+    return require('http').createServer(app);
+  }
+};
 
+const server = createSecureServer();
+
+// Initialize Socket.IO with encryption support
 const io = new Server(server, {
-  pingTimeout: 60000,
   cors: {
-    origin: ['http://localhost:5173','https://chasmos.netlify.app'],
-    methods: ["GET", "POST"]
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+    credentials: true
   },
+  pingTimeout: 60000,
+  // Enable secure WebSocket in production
+  secure: process.env.NODE_ENV === 'production'
 });
 
-// Online users are tracked in ./services/onlineUsers.js
-
 // Initialize scheduled message cron job
-// Pass io to cron job
 setSocketIOInstance(io);
 initScheduledMessageCron();
 
-
-
+// Online users tracking
 io.on("connection", (socket) => {
-  console.log("Connected to socket.io");
+  console.log("🔌 Socket connected:", socket.id);
   
+  // User setup with encryption support
   socket.on("setup", async (userData) => {
-    const uid = userData?._id || userData?.id || userData;
-    if (!uid) {
-      console.log('[SOCKET] setup called with no uid, sending connected ack');
-      socket.emit('connected');
-      return;
-    }
-    socket.join(uid);
-    socket.userId = String(uid);
-
-    // increment connection count for this user
-    const prev = getConnectionCount(socket.userId) || 0;
-    const newCount = addConnection(socket.userId);
-    console.log(`[SOCKET] setup: user=${socket.userId} prevConnections=${prev} newConnections=${newCount} totalOnlineUsers=${getOnlineList().length}`);
-
-    // emit to others that this user is online only when first connection
-    if (prev === 0) {
+    try {
+      const uid = userData?._id || userData?.id || userData;
+      if (!uid) {
+        socket.emit('connected');
+        return;
+      }
+      
+      socket.join(uid);
+      socket.userId = String(uid);
+      
+      // Track user connection
+      const prev = getConnectionCount(socket.userId) || 0;
+      const newCount = addConnection(socket.userId);
+      
+      console.log(`👤 User ${socket.userId} connected (connections: ${newCount})`);
+      
+      // Emit online status only for first connection
+      if (prev === 0) {
+        try {
+          io.emit('user online', { userId: socket.userId });
+          console.log(`📢 Broadcast: user online -> ${socket.userId}`);
+        } catch (e) {
+          console.error('Error broadcasting user online:', e);
+        }
+      }
+      
+      // Send online users list
       try {
-        io.emit('user online', { userId: socket.userId });
-        console.log(`[SOCKET] broadcast: user online -> ${socket.userId}`);
+        const onlineList = getOnlineList();
+        socket.emit('online users', onlineList);
+        console.log(`📋 Sent online users list to ${socket.userId}`);
       } catch (e) {
-        console.error('[SOCKET] error broadcasting user online', e);
+        console.error('Error emitting online users list:', e);
       }
-    }
-
-    // send current online users list to the connecting socket
-    try {
-      const onlineList = getOnlineList();
-      socket.emit('online users', onlineList);
-      console.log(`[SOCKET] sent online users list (${onlineList.length}) to ${socket.userId}`);
-    } catch (e) {
-      console.error('[SOCKET] error emitting online users list', e);
-    }
-
-    // Also send the online users list and per-chat online counts to each other participant
-    // in chats this user is in. This emits both the general `online users` list to personal
-    // rooms and a `group online count` event to each chat room and each member's personal room.
-    try {
-      const uid = socket.userId;
-      const chatDocs = await Chat.find({ $or: [{ users: uid }, { participants: uid }] }).select('users participants').lean();
-      if ((chatDocs || []).length === 0) {
-        // nothing to broadcast
-      } else {
-        // Prepare full online list for personal-room broadcasts
-        const onlineListForBroadcast = getOnlineList();
-
-        // Collect unique personal user IDs (excluding current) to continue sending the
-        // existing `online users` list as before for compatibility with clients.
-        const otherUserIds = new Set();
-        chatDocs.forEach(cd => {
-          const members = (cd.users || cd.participants || []);
-          members.forEach(m => {
-            const id = m && (m._id || m.id || m);
-            if (!id) return;
-            const sid = String(id);
-            if (sid === String(uid)) return;
-            otherUserIds.add(sid);
-          });
-        });
-
-        otherUserIds.forEach(ou => {
-          try {
-            io.to(ou).emit('online users', onlineListForBroadcast);
-          } catch (e) {
-            console.error(`[SOCKET] error emitting online users to ${ou}`, e);
-          }
-        });
-
-        // Now compute and emit per-chat online counts. For each chat, count how many
-        // of its members are currently connected (based on onlineUserConnections map),
-        // then emit `group online count` to the chat room and to each member's personal room.
-        chatDocs.forEach(cd => {
-          try {
+      
+      // Broadcast user's online status to their chat participants
+      try {
+        const uid = socket.userId;
+        const chatDocs = await Chat.find({ 
+          $or: [{ users: uid }, { participants: uid }] 
+        }).select('users participants').lean();
+        
+        if (chatDocs?.length > 0) {
+          const onlineListForBroadcast = getOnlineList();
+          const otherUserIds = new Set();
+          
+          chatDocs.forEach(cd => {
             const members = (cd.users || cd.participants || []);
-            const memberIds = members
-              .map(m => String(m && (m._id || m.id || m)))
-              .filter(Boolean);
-
-            const onlineCount = memberIds.reduce((acc, id) => acc + (isOnline(id) ? 1 : 0), 0);
-            const chatId = String(cd._id);
-
-            // Emit to the chat room (sockets that have joined the chat room)
-            try {
-              io.to(chatId).emit('group online count', { chatId, onlineCount });
-            } catch (e) {
-              console.error(`[SOCKET] error emitting group online count to chat room ${chatId}`, e);
-            }
-
-            // Also emit to each member's personal room as a fallback for sockets not
-            // currently in the chat room.
-            memberIds.forEach(mid => {
-              try {
-                io.to(mid).emit('group online count', { chatId, onlineCount });
-              } catch (e) {
-                console.error(`[SOCKET] error emitting group online count to user ${mid}`, e);
-              }
+            members.forEach(m => {
+              const id = m && (m._id || m.id || m);
+              if (!id) return;
+              const sid = String(id);
+              if (sid === String(uid)) return;
+              otherUserIds.add(sid);
             });
-          } catch (e2) {
-            console.error('[SOCKET] error computing group online count for a chat', e2);
-          }
-        });
-
-        console.log(`[SOCKET] broadcasted online users list to ${otherUserIds.size} other chat participant(s) for user ${uid}`);
+          });
+          
+          otherUserIds.forEach(ou => {
+            try {
+              io.to(ou).emit('online users', onlineListForBroadcast);
+            } catch (e) {
+              console.error(`Error emitting online users to ${ou}:`, e);
+            }
+          });
+          
+          // Compute and emit per-chat online counts
+          chatDocs.forEach(cd => {
+            try {
+              const members = (cd.users || cd.participants || []);
+              const memberIds = members
+                .map(m => String(m && (m._id || m.id || m)))
+                .filter(Boolean);
+              
+              const onlineCount = memberIds.reduce((acc, id) => 
+                acc + (isOnline(id) ? 1 : 0), 0);
+              const chatId = String(cd._id);
+              
+              // Emit to chat room
+              try {
+                io.to(chatId).emit('group online count', { chatId, onlineCount });
+              } catch (e) {
+                console.error(`Error emitting group online count to chat room ${chatId}:`, e);
+              }
+              
+              // Emit to each member's personal room
+              memberIds.forEach(mid => {
+                try {
+                  io.to(mid).emit('group online count', { chatId, onlineCount });
+                } catch (e) {
+                  console.error(`Error emitting group online count to user ${mid}:`, e);
+                }
+              });
+            } catch (e2) {
+              console.error('Error computing group online count for a chat:', e2);
+            }
+          });
+        }
+      } catch (e) {
+        console.error('Error finding chats to broadcast online users list:', e);
       }
-    } catch (e) {
-      console.error('[SOCKET] error finding chats to broadcast online users list', e);
+      
+      socket.emit("connected");
+    } catch (error) {
+      console.error('Error in socket setup:', error);
     }
-
-    socket.emit("connected");
   });
-
+  
+  // Join chat room
   socket.on("join chat", (room) => {
     socket.join(room);
-    console.log("User Joined Room: " + room);
+    console.log(`🚪 User joined room: ${room}`);
   });
   
+  // Typing indicators
   socket.on("typing", (room) => socket.in(room).emit("typing"));
   socket.on("stop typing", (room) => socket.in(room).emit("stop typing"));
-
-  socket.on("new message", (newMessageRecieved) => {
+  
+  // NEW: Handle encrypted messages
+  socket.on("encrypted message", async (data) => {
+    try {
+      const { chatId, encryptedData, encryptionMetadata, signature } = data;
+      const userId = socket.userId;
+      
+      if (!userId || !chatId || !encryptedData) {
+        socket.emit("encryption error", { message: "Missing required fields" });
+        return;
+      }
+      
+      // Verify user is in chat
+      const chat = await Chat.findById(chatId);
+      if (!chat) {
+        socket.emit("encryption error", { message: "Chat not found" });
+        return;
+      }
+      
+      const isUserInChat = chat.users.some(user => 
+        user.toString() === userId.toString()
+      ) || chat.participants.some(participant => 
+        participant.toString() === userId.toString()
+      );
+      
+      if (!isUserInChat) {
+        socket.emit("encryption error", { message: "Not authorized" });
+        return;
+      }
+      
+      // Check if chat is encrypted
+      const chatKey = await ChatKey.findOne({ chat: chatId, isActive: true });
+      if (!chatKey) {
+        socket.emit("encryption error", { message: "Chat is not encrypted" });
+        return;
+      }
+      
+      // Verify message signature (if provided)
+      if (signature) {
+        const isValid = await encryptionService.verifyMessageIntegrity(
+          encryptedData, 
+          signature
+        );
+        
+        if (!isValid) {
+          socket.emit("encryption error", { message: "Invalid message signature" });
+          return;
+        }
+      }
+      
+      // Create message in database
+      const message = await Message.create({
+        sender: userId,
+        encryptedContent: encryptedData.encrypted,
+        chat: chatId,
+        type: 'text',
+        encryption: encryptionMetadata,
+        isEncrypted: true
+      });
+      
+      // Populate message
+      const populatedMessage = await Message.findById(message._id)
+        .populate("sender", "name avatar email")
+        .lean();
+      
+      // Broadcast encrypted message to chat room (server never decrypts)
+      const messagePayload = {
+        ...populatedMessage,
+        content: '[ENCRYPTED]', // Don't send actual content
+        isEncrypted: true,
+        encryption: encryptionMetadata
+      };
+      
+      socket.to(chatId).emit('encrypted message received', messagePayload);
+      
+      // Also emit to each user's personal room
+      const users = chat.users || chat.participants || [];
+      users.forEach(user => {
+        const userIdStr = user.toString();
+        if (userIdStr !== socket.userId) {
+          io.to(userIdStr).emit('encrypted message received', messagePayload);
+        }
+      });
+      
+      console.log(`🔐 Encrypted message broadcast for chat ${chatId}`);
+      
+    } catch (error) {
+      console.error("Error in encrypted message handler:", error);
+      socket.emit("encryption error", { message: error.message });
+    }
+  });
+  
+  // Handle new message (legacy support)
+  socket.on("new message", (newMessageReceived) => {
     (async () => {
       try {
-        let chat = newMessageRecieved.chat;
-
+        let chat = newMessageReceived.chat;
+        
         if (!chat || typeof chat === "string" || (!chat.users && !chat.participants)) {
           try {
-            chat = await Chat.findById(newMessageRecieved.chat || chat)
+            chat = await Chat.findById(newMessageReceived.chat || chat)
               .populate("users", "blockedUsers") 
               .populate("participants", "blockedUsers") 
               .select("users participants isGroupChat")
@@ -245,24 +394,25 @@ io.on("connection", (socket) => {
             return;
           }
         }
-
+        
         if (!chat) {
-          console.warn("[SOCKET] new message received with null/undefined chat", newMessageRecieved);
+          console.warn("[SOCKET] new message received with null/undefined chat", newMessageReceived);
           return;
         }
-
-        if (!Object.prototype.hasOwnProperty.call(chat, 'isGroupChat')) {
-          // Defensive: fallback to false if missing
-          chat.isGroupChat = false;
-        }
-
-        if (!chat.isGroupChat) {
-          const senderId = newMessageRecieved.sender?._id
-            ? String(newMessageRecieved.sender._id)
-            : String(newMessageRecieved.sender);
+        
+        // Check if chat is encrypted
+        const chatKey = await ChatKey.findOne({ chat: chat._id, isActive: true });
+        const isEncrypted = !!chatKey;
+        
+        // Handle blocked users for non-encrypted chats
+        if (!chat.isGroupChat && !isEncrypted) {
+          const senderId = newMessageReceived.sender?._id
+            ? String(newMessageReceived.sender._id)
+            : String(newMessageReceived.sender);
           const otherUser = chat.users.find(user => 
             String(user._id) !== senderId
           );
+          
           if (otherUser && otherUser.blockedUsers && 
               otherUser.blockedUsers.includes(senderId)) {
             socket.emit("message blocked", { 
@@ -272,17 +422,17 @@ io.on("connection", (socket) => {
             return;
           }
         }
-
+        
         const users = chat.users || chat.participants || [];
-
+        
         if (!users || users.length === 0) {
-          return console.log("chat has no participants to notify");
+          return console.log("Chat has no participants to notify");
         }
-
-        // Try to fetch populated message from DB so repliedTo and sender fields are present for all clients
-        let payload = newMessageRecieved;
+        
+        // Try to fetch populated message from DB
+        let payload = newMessageReceived;
         try {
-          const messageId = newMessageRecieved._id || newMessageRecieved.id;
+          const messageId = newMessageReceived._id || newMessageReceived.id;
           if (messageId) {
             const populated = await Message.findById(messageId)
               .populate('sender', 'name avatar _id')
@@ -291,61 +441,43 @@ io.on("connection", (socket) => {
                 populate: { path: 'sender', select: 'name avatar _id' }
               })
               .lean();
-            if (populated) payload = populated;
-          } else if (newMessageRecieved.repliedTo && newMessageRecieved.repliedTo.length) {
-            // If message has no ID yet (not saved or not returned), try to fetch the repliedTo messages
-            const ids = (newMessageRecieved.repliedTo || []).map(r => r._id || r.id || r).filter(Boolean);
-            if (ids.length) {
-              try {
-                const repliedDocs = await Message.find({ _id: { $in: ids } })
-                  .populate('sender', 'name avatar _id')
-                  .lean();
-                const map = {};
-                repliedDocs.forEach(d => { map[String(d._id)] = d; });
-                payload = {
-                  ...newMessageRecieved,
-                  repliedTo: ids.map(id => map[String(id)] || { _id: id })
-                };
-              } catch (e2) {
-                console.warn('Could not fetch repliedTo messages for broadcast', e2);
+            
+            if (populated) {
+              payload = populated;
+              // If message is encrypted, mask content
+              if (populated.isEncrypted) {
+                payload.content = '[ENCRYPTED]';
               }
-            }
-          }
-
-          // Ensure top-level sender is populated if possible (best-effort)
-          if (payload && payload.sender && (typeof payload.sender === 'string' || !payload.sender.name)) {
-            try {
-              const u = await User.findById(payload.sender).select('name avatar _id').lean();
-              if (u) payload.sender = u;
-            } catch (e3) {
-              // ignore
             }
           }
         } catch (e) {
           console.warn('Could not populate message before broadcast', e);
         }
-
-        // Broadcast to the chat room (connected sockets in the chat)
+        
+        // Add encryption flag
+        payload.isEncrypted = isEncrypted;
+        
+        // Broadcast to chat room
         try {
           const roomId = chat._id ? String(chat._id) : (typeof chat === 'string' ? chat : null);
           if (roomId) {
-            socket.to(roomId).emit('message recieved', payload);
+            socket.to(roomId).emit('message received', payload);
           }
         } catch (e) {
           console.warn('Error emitting to chat room', e);
         }
-
-        // Also emit to each user's personal room (fallback for users not joined to chat room)
+        
+        // Also emit to each user's personal room
         users.forEach((user) => {
           const userId = user._id ? String(user._id) : String(user);
-          const senderId = newMessageRecieved.sender?._id
-            ? String(newMessageRecieved.sender._id)
-            : String(newMessageRecieved.sender);
-
+          const senderId = newMessageReceived.sender?._id
+            ? String(newMessageReceived.sender._id)
+            : String(newMessageReceived.sender);
+          
           if (userId === senderId) return;
-
+          
           try {
-            io.to(userId).emit('message recieved', payload);
+            io.to(userId).emit('message received', payload);
           } catch (e) {
             console.warn(`Failed to emit to user room ${userId}`, e);
           }
@@ -355,14 +487,14 @@ io.on("connection", (socket) => {
       }
     })();
   });
-
-  // When a client emits 'chat created' (mapping a tempId -> real chat), re-broadcast
-  // to other participants and connected clients so they can migrate pending state.
+  
+  // Chat creation with encryption support
   socket.on('chat created', ({ tempId, chat }) => {
     try {
       if (!chat) return;
       console.log(`[SOCKET] chat created: tempId=${tempId} chatId=${chat._id || chat.id || ''}`);
       const newId = String(chat._id || chat.id || '');
+      
       // Emit to participants' personal rooms if present
       const participants = chat.users || chat.participants || [];
       (participants || []).forEach(p => {
@@ -371,13 +503,15 @@ io.on("connection", (socket) => {
           try { io.to(uid).emit('chat created', { tempId, chat }); } catch (e) {}
         }
       });
-      // Also broadcast to everyone else as a fallback
+      
+      // Also broadcast to everyone else
       socket.broadcast.emit('chat created', { tempId, chat });
     } catch (e) {
       console.error('[SOCKET] error re-broadcasting chat created', e);
     }
   });
-
+  
+  // Delete message
   socket.on("delete message", async (data) => {
     try {
       const { messageId, chatId, deleteForEveryone } = data;
@@ -387,28 +521,28 @@ io.on("connection", (socket) => {
         socket.emit("delete message error", { message: "User not authenticated" });
         return;
       }
-
+      
       const message = await Message.findById(messageId);
       if (!message) {
         socket.emit("delete message error", { message: "Message not found" });
         return;
       }
-
+      
       const chat = await Chat.findById(chatId);
       if (!chat) {
         socket.emit("delete message error", { message: "Chat not found" });
         return;
       }
-
+      
       const isSender = message.sender.toString() === userId.toString();
       const isGroupAdmin = chat.isGroupChat && chat.admins.includes(userId);
       const isChatAdmin = chat.admins.includes(userId);
-
+      
       if (!isSender && !isGroupAdmin && !isChatAdmin) {
         socket.emit("delete message error", { message: "Not authorized to delete this message" });
         return;
       }
-
+      
       if (deleteForEveryone) {
         await Message.findByIdAndDelete(messageId);
         socket.to(chatId).emit("message deleted", { messageId, chatId, deletedForEveryone: true });
@@ -421,7 +555,7 @@ io.on("connection", (socket) => {
           await message.save();
         }
       }
-
+      
       socket.emit("message deleted", { messageId, chatId, deletedForEveryone: deleteForEveryone });
       
     } catch (error) {
@@ -429,7 +563,8 @@ io.on("connection", (socket) => {
       socket.emit("delete message error", { message: error.message });
     }
   });
-
+  
+  // Delete chat
   socket.on("delete chat", async (data) => {
     try {
       const { chatId } = data;
@@ -439,13 +574,13 @@ io.on("connection", (socket) => {
         socket.emit("delete chat error", { message: "User not authenticated" });
         return;
       }
-
+      
       const chat = await Chat.findById(chatId);
       if (!chat) {
         socket.emit("delete chat error", { message: "Chat not found" });
         return;
       }
-
+      
       if (chat.isGroupChat) {
         if (!chat.admins.includes(userId)) {
           socket.emit("delete chat error", { message: "Only admins can delete group chats" });
@@ -455,22 +590,28 @@ io.on("connection", (socket) => {
         await Message.deleteMany({ chat: chatId });
         await Chat.findByIdAndDelete(chatId);
         
+        // Also delete encryption keys for this chat
+        await ChatKey.deleteMany({ chat: chatId });
+        
         socket.to(chatId).emit("chat deleted", { chatId, deletedBy: userId });
       } else {
         if (!chat.users.includes(userId)) {
           socket.emit("delete chat error", { message: "Not authorized to delete this chat" });
           return;
         }
-
+        
         await Message.deleteMany({ chat: chatId });
         await Chat.findByIdAndDelete(chatId);
+        
+        // Delete encryption keys
+        await ChatKey.deleteMany({ chat: chatId });
         
         const otherUser = chat.users.find(user => user.toString() !== userId.toString());
         if (otherUser) {
           socket.to(otherUser.toString()).emit("chat deleted", { chatId, deletedBy: userId });
         }
       }
-
+      
       socket.emit("chat deleted", { chatId });
       
     } catch (error) {
@@ -478,7 +619,8 @@ io.on("connection", (socket) => {
       socket.emit("delete chat error", { message: error.message });
     }
   });
-
+  
+  // Leave group
   socket.on("leave group", async (data) => {
     try {
       const { chatId } = data;
@@ -488,23 +630,23 @@ io.on("connection", (socket) => {
         socket.emit("leave group error", { message: "User not authenticated" });
         return;
       }
-
+      
       const chat = await Chat.findById(chatId);
       if (!chat) {
         socket.emit("leave group error", { message: "Chat not found" });
         return;
       }
-
+      
       if (!chat.isGroupChat) {
         socket.emit("leave group error", { message: "This is not a group chat" });
         return;
       }
-
+      
       if (!chat.users.includes(userId)) {
         socket.emit("leave group error", { message: "You are not a member of this group" });
         return;
       }
-
+      
       const updatedChat = await Chat.findByIdAndUpdate(
         chatId,
         {
@@ -515,10 +657,13 @@ io.on("connection", (socket) => {
         .populate("users", "-password")
         .populate("groupAdmin", "-password")
         .populate("admins", "name email avatar");
-
+      
       if (updatedChat.users.length === 0) {
         await Message.deleteMany({ chat: chatId });
         await Chat.findByIdAndDelete(chatId);
+        
+        // Delete encryption keys
+        await ChatKey.deleteMany({ chat: chatId });
         
         socket.emit("group left", { chatId, groupDeleted: true });
       } else {
@@ -537,7 +682,8 @@ io.on("connection", (socket) => {
       socket.emit("leave group error", { message: error.message });
     }
   });
-
+  
+  // Block user
   socket.on("block user", async (data) => {
     try {
       const { userId } = data;
@@ -560,7 +706,8 @@ io.on("connection", (socket) => {
       socket.emit("block error", { message: error.message });
     }
   });
-
+  
+  // Unblock user
   socket.on("unblock user", async (data) => {
     try {
       const { userId } = data;
@@ -582,7 +729,8 @@ io.on("connection", (socket) => {
       socket.emit("unblock error", { message: error.message });
     }
   });
-
+  
+  // Archive chat
   socket.on("archive chat", async (data) => {
     try {
       const { chatId } = data;
@@ -610,184 +758,189 @@ io.on("connection", (socket) => {
     }
   });
   
-socket.on("star message", async (data) => {
-  try {
-    const { messageId } = data;
-    const userId = socket.userId;
-    
-    if (!userId) {
-      socket.emit("star error", { message: "User not authenticated" });
-      return;
+  // Star message
+  socket.on("star message", async (data) => {
+    try {
+      const { messageId } = data;
+      const userId = socket.userId;
+      
+      if (!userId) {
+        socket.emit("star error", { message: "User not authenticated" });
+        return;
+      }
+      
+      const message = await Message.findById(messageId);
+      if (!message) {
+        socket.emit("star error", { message: "Message not found" });
+        return;
+      }
+      
+      // Check if already starred
+      const alreadyStarred = message.starredBy.some(star => 
+        star.user.toString() === userId.toString()
+      );
+      
+      if (alreadyStarred) {
+        socket.emit("star error", { message: "Message already starred" });
+        return;
+      }
+      
+      message.starredBy.push({
+        user: userId,
+        starredAt: new Date()
+      });
+      
+      await message.save();
+      await message.populate("starredBy.user", "name avatar");
+      
+      socket.to(message.chat.toString()).emit("message starred", {
+        messageId: message._id,
+        starredBy: message.starredBy
+      });
+      
+      socket.emit("message starred", {
+        messageId: message._id,
+        starredBy: message.starredBy
+      });
+      
+    } catch (error) {
+      console.error("Error in star message socket event:", error);
+      socket.emit("star error", { message: error.message });
     }
-
-    const message = await Message.findById(messageId);
-    if (!message) {
-      socket.emit("star error", { message: "Message not found" });
-      return;
+  });
+  
+  // Unstar message
+  socket.on("unstar message", async (data) => {
+    try {
+      const { messageId } = data;
+      const userId = socket.userId;
+      
+      if (!userId) {
+        socket.emit("unstar error", { message: "User not authenticated" });
+        return;
+      }
+      
+      const message = await Message.findById(messageId);
+      if (!message) {
+        socket.emit("unstar error", { message: "Message not found" });
+        return;
+      }
+      
+      message.starredBy = message.starredBy.filter(star => 
+        star.user.toString() !== userId.toString()
+      );
+      
+      await message.save();
+      
+      socket.to(message.chat.toString()).emit("message unstarred", {
+        messageId: message._id,
+        starredBy: message.starredBy
+      });
+      
+      socket.emit("message unstarred", {
+        messageId: message._id,
+        starredBy: message.starredBy
+      });
+      
+    } catch (error) {
+      console.error("Error in unstar message socket event:", error);
+      socket.emit("unstar error", { message: error.message });
     }
-
-    // Check if already starred
-    const alreadyStarred = message.starredBy.some(star => 
-      star.user.toString() === userId.toString()
-    );
-
-    if (alreadyStarred) {
-      socket.emit("star error", { message: "Message already starred" });
-      return;
+  });
+  
+  // Add reaction
+  socket.on("add reaction", async (data) => {
+    try {
+      const { messageId, emoji } = data;
+      const userId = socket.userId;
+      
+      if (!userId) {
+        socket.emit("reaction error", { message: "User not authenticated" });
+        return;
+      }
+      
+      if (!emoji) {
+        socket.emit("reaction error", { message: "Emoji is required" });
+        return;
+      }
+      
+      const message = await Message.findById(messageId);
+      if (!message) {
+        socket.emit("reaction error", { message: "Message not found" });
+        return;
+      }
+      
+      // Remove existing reaction from same user
+      message.reactions = message.reactions.filter(
+        reaction => reaction.user.toString() !== userId.toString()
+      );
+      
+      // Add new reaction
+      message.reactions.push({
+        user: userId,
+        emoji: emoji,
+        reactedAt: new Date()
+      });
+      
+      await message.save();
+      await message.populate("reactions.user", "name avatar");
+      
+      socket.to(message.chat.toString()).emit("reaction added", {
+        messageId: message._id,
+        reactions: message.reactions
+      });
+      
+      socket.emit("reaction added", {
+        messageId: message._id,
+        reactions: message.reactions
+      });
+      
+    } catch (error) {
+      console.error("Error in add reaction socket event:", error);
+      socket.emit("reaction error", { message: error.message });
     }
-
-    message.starredBy.push({
-      user: userId,
-      starredAt: new Date()
-    });
-
-    await message.save();
-    await message.populate("starredBy.user", "name avatar");
-
-    socket.to(message.chat.toString()).emit("message starred", {
-      messageId: message._id,
-      starredBy: message.starredBy
-    });
-
-    socket.emit("message starred", {
-      messageId: message._id,
-      starredBy: message.starredBy
-    });
-    
-  } catch (error) {
-    console.error("Error in star message socket event:", error);
-    socket.emit("star error", { message: error.message });
-  }
-});
-
-socket.on("unstar message", async (data) => {
-  try {
-    const { messageId } = data;
-    const userId = socket.userId;
-    
-    if (!userId) {
-      socket.emit("unstar error", { message: "User not authenticated" });
-      return;
+  });
+  
+  // Remove reaction
+  socket.on("remove reaction", async (data) => {
+    try {
+      const { messageId } = data;
+      const userId = socket.userId;
+      
+      if (!userId) {
+        socket.emit("reaction error", { message: "User not authenticated" });
+        return;
+      }
+      
+      const message = await Message.findById(messageId);
+      if (!message) {
+        socket.emit("reaction error", { message: "Message not found" });
+        return;
+      }
+      
+      message.reactions = message.reactions.filter(
+        reaction => reaction.user.toString() !== userId.toString()
+      );
+      
+      await message.save();
+      
+      socket.to(message.chat.toString()).emit("reaction removed", {
+        messageId: message._id,
+        reactions: message.reactions
+      });
+      
+      socket.emit("reaction removed", {
+        messageId: message._id,
+        reactions: message.reactions
+      });
+      
+    } catch (error) {
+      console.error("Error in remove reaction socket event:", error);
+      socket.emit("reaction error", { message: error.message });
     }
-
-    const message = await Message.findById(messageId);
-    if (!message) {
-      socket.emit("unstar error", { message: "Message not found" });
-      return;
-    }
-
-    message.starredBy = message.starredBy.filter(star => 
-      star.user.toString() !== userId.toString()
-    );
-
-    await message.save();
-
-    socket.to(message.chat.toString()).emit("message unstarred", {
-      messageId: message._id,
-      starredBy: message.starredBy
-    });
-
-    socket.emit("message unstarred", {
-      messageId: message._id,
-      starredBy: message.starredBy
-    });
-    
-  } catch (error) {
-    console.error("Error in unstar message socket event:", error);
-    socket.emit("unstar error", { message: error.message });
-  }
-});
-
-socket.on("add reaction", async (data) => {
-  try {
-    const { messageId, emoji } = data;
-    const userId = socket.userId;
-    
-    if (!userId) {
-      socket.emit("reaction error", { message: "User not authenticated" });
-      return;
-    }
-
-    if (!emoji) {
-      socket.emit("reaction error", { message: "Emoji is required" });
-      return;
-    }
-
-    const message = await Message.findById(messageId);
-    if (!message) {
-      socket.emit("reaction error", { message: "Message not found" });
-      return;
-    }
-
-    // Remove existing reaction from same user
-    message.reactions = message.reactions.filter(
-      reaction => reaction.user.toString() !== userId.toString()
-    );
-
-    // Add new reaction
-    message.reactions.push({
-      user: userId,
-      emoji: emoji,
-      reactedAt: new Date()
-    });
-
-    await message.save();
-    await message.populate("reactions.user", "name avatar");
-
-    socket.to(message.chat.toString()).emit("reaction added", {
-      messageId: message._id,
-      reactions: message.reactions
-    });
-
-    socket.emit("reaction added", {
-      messageId: message._id,
-      reactions: message.reactions
-    });
-    
-  } catch (error) {
-    console.error("Error in add reaction socket event:", error);
-    socket.emit("reaction error", { message: error.message });
-  }
-});
-
-socket.on("remove reaction", async (data) => {
-  try {
-    const { messageId } = data;
-    const userId = socket.userId;
-    
-    if (!userId) {
-      socket.emit("reaction error", { message: "User not authenticated" });
-      return;
-    }
-
-    const message = await Message.findById(messageId);
-    if (!message) {
-      socket.emit("reaction error", { message: "Message not found" });
-      return;
-    }
-
-    message.reactions = message.reactions.filter(
-      reaction => reaction.user.toString() !== userId.toString()
-    );
-
-    await message.save();
-
-    socket.to(message.chat.toString()).emit("reaction removed", {
-      messageId: message._id,
-      reactions: message.reactions
-    });
-
-    socket.emit("reaction removed", {
-      messageId: message._id,
-      reactions: message.reactions
-    });
-    
-  } catch (error) {
-    console.error("Error in remove reaction socket event:", error);
-    socket.emit("reaction error", { message: error.message });
-  }
-});
-
+  });
+  
+  // Unarchive chat
   socket.on("unarchive chat", async (data) => {
     try {
       const { chatId } = data;
@@ -811,8 +964,8 @@ socket.on("remove reaction", async (data) => {
       socket.emit("unarchive error", { message: error.message });
     }
   });
-
-  // Poll socket events
+  
+  // Poll events
   socket.on("poll voted", async (data) => {
     try {
       const { pollId, poll, chatId } = data;
@@ -821,24 +974,23 @@ socket.on("remove reaction", async (data) => {
         socket.emit("poll error", { message: "Missing poll data" });
         return;
       }
-
-      // Get the chat ID if not provided
+      
       const actualChatId = chatId || poll.chat;
       
       if (actualChatId) {
-        // Broadcast the updated poll to all users in the chat (except sender)
+        // Broadcast the updated poll to all users in the chat
         socket.to(actualChatId).emit("poll voted", { 
           pollId, 
           poll,
           chatId: actualChatId 
         });
-        // Also emit directly to each user's personal room (fallback for users not joined to chat room)
+        
         try {
           const chatDoc = await Chat.findById(actualChatId).select('users participants').lean();
           const users = (chatDoc && (chatDoc.users || chatDoc.participants)) || [];
           users.forEach(user => {
             const uid = user._id ? String(user._id) : String(user);
-            if (uid === socket.userId) return; // skip sender
+            if (uid === socket.userId) return;
             io.to(uid).emit('poll voted', { pollId, poll, chatId: actualChatId });
           });
         } catch (e) {
@@ -851,7 +1003,7 @@ socket.on("remove reaction", async (data) => {
       socket.emit("poll error", { message: error.message });
     }
   });
-
+  
   socket.on("poll remove vote", async (data) => {
     try {
       const { pollId, poll, chatId } = data;
@@ -860,12 +1012,10 @@ socket.on("remove reaction", async (data) => {
         socket.emit("poll error", { message: "Missing poll data" });
         return;
       }
-
-      // Get the chat ID if not provided
+      
       const actualChatId = chatId || poll.chat;
       
       if (actualChatId) {
-        // Broadcast the updated poll to all users in the chat (except sender)
         socket.to(actualChatId).emit("poll remove vote", { 
           pollId, 
           poll,
@@ -889,7 +1039,7 @@ socket.on("remove reaction", async (data) => {
       socket.emit("poll error", { message: error.message });
     }
   });
-
+  
   socket.on("poll closed", async (data) => {
     try {
       const { pollId, poll, chatId } = data;
@@ -898,12 +1048,10 @@ socket.on("remove reaction", async (data) => {
         socket.emit("poll error", { message: "Missing poll data" });
         return;
       }
-
-      // Get the chat ID if not provided
+      
       const actualChatId = chatId || poll.chat;
       
       if (actualChatId) {
-        // Broadcast the closed poll to all users in the chat
         socket.to(actualChatId).emit("poll closed", { 
           pollId, 
           poll,
@@ -927,48 +1075,93 @@ socket.on("remove reaction", async (data) => {
       socket.emit("poll error", { message: error.message });
     }
   });
-
-  //group-socket-events
+  
+  // Group socket events
+  socket.on("join-group", ({ groupId }) => {
+    socket.join(`group_${groupId}`);
+  });
+  
+  socket.on("leave-group", ({ groupId }) => {
+    socket.leave(`group_${groupId}`);
+  });
+  
+  socket.on("member-added", ({ groupId, userId }) => {
+    io.to(`group_${groupId}`).emit("member-added", { userId });
+  });
+  
+  socket.on("member-removed", ({ groupId, userId }) => {
+    io.to(`group_${groupId}`).emit("member-removed", { userId });
+  });
+  
+  socket.on("admin-changed", ({ groupId, newAdminId }) => {
+    io.to(`group_${groupId}`).emit("admin-changed", { newAdminId });
+  });
+  
+  // NEW: Encryption key events
+  socket.on("encryption setup", async (data) => {
+    try {
+      const { chatId, participants } = data;
+      const userId = socket.userId;
+      
+      if (!userId) {
+        socket.emit("encryption error", { message: "User not authenticated" });
+        return;
+      }
+      
+      // Setup encryption for chat
+      const result = await encryptionService.setupChatEncryption(
+        chatId,
+        participants
+      );
+      
+      // Broadcast to all participants
+      const chat = await Chat.findById(chatId);
+      const users = chat.users || chat.participants || [];
+      
+      users.forEach(user => {
+        const uid = user.toString();
+        io.to(uid).emit('encryption enabled', {
+          chatId,
+          message: 'End-to-end encryption enabled for this chat'
+        });
+      });
+      
+      socket.emit("encryption setup complete", result);
+      
+    } catch (error) {
+      console.error("Encryption setup error:", error);
+      socket.emit("encryption error", { message: error.message });
+    }
+  });
+  
+  // Disconnect handler
   socket.on("disconnect", () => {
-    console.log("USER DISCONNECTED", socket.id);
+    console.log("🔌 Socket disconnected:", socket.id);
     try {
       const uid = socket.userId;
       if (uid) {
         const prev = getConnectionCount(uid) || 0;
         const next = removeConnection(uid);
-        console.log(`[SOCKET] disconnect: user=${uid} prevConnections=${prev} nextConnections=${next}`);
+        console.log(`📊 User ${uid} disconnected (connections: ${next})`);
+        
         if (next <= 0) {
           try {
             io.emit('user offline', { userId: uid });
-            console.log(`[SOCKET] broadcast: user offline -> ${uid}`);
+            console.log(`📢 Broadcast: user offline -> ${uid}`);
           } catch (e) {
-            console.error('[SOCKET] error broadcasting user offline', e);
+            console.error('Error broadcasting user offline:', e);
           }
         }
       }
     } catch (e) {
-      console.error('Error handling disconnect online map', e);
+      console.error('Error handling disconnect online map:', e);
     }
   });
-
-  socket.on("join-group", ({ groupId }) => {
-  socket.join(`group_${groupId}`);
 });
 
-socket.on("leave-group", ({ groupId }) => {
-  socket.leave(`group_${groupId}`);
-});
-
-socket.on("member-added", ({ groupId, userId }) => {
-  io.to(`group_${groupId}`).emit("member-added", { userId });
-});
-
-socket.on("member-removed", ({ groupId, userId }) => {
-  io.to(`group_${groupId}`).emit("member-removed", { userId });
-});
-
-socket.on("admin-changed", ({ groupId, newAdminId }) => {
-  io.to(`group_${groupId}`).emit("admin-changed", { newAdminId });
-});
-
+// Start server
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on PORT ${PORT}...`.yellow.bold);
+  console.log(`🔐 Encryption: ${process.env.ENCRYPTION_MASTER_KEY ? 'Enabled' : 'Not configured'}`);
+  console.log(`🌐 Protocol: ${server instanceof https.Server ? 'HTTPS' : 'HTTP'}`);
 });

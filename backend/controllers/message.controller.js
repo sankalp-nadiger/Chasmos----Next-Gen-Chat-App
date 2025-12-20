@@ -5,21 +5,31 @@ import Chat from "../models/chat.model.js";
 import User from "../models/user.model.js";
 import Attachment from "../models/attachment.model.js";
 import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
+import { ChatKey } from "../models/encryption.model.js"; 
+import encryptionService from "../services/encryption.service.js";
 
-// Helper to normalize message timestamp for clients
 const normalizeMessage = (m) => {
   const obj = (m && m.toObject) ? m.toObject() : m;
   obj.timestamp = obj.isScheduled ? obj.scheduledFor : obj.createdAt;
-    console.log("Normalized message:", obj);
   return obj;
-
 };
 
+// Get all messages for a chat
 export const allMessages = asyncHandler(async (req, res) => {
   try {
+    const { chatId } = req.params;
+    
+    // Check if chat is encrypted
+    const chatKey = await ChatKey.findOne({ 
+      chat: chatId, 
+      isActive: true 
+    });
+    
+    const isEncrypted = !!chatKey;
+    
     // Exclude messages that are scheduled and not yet sent
     const messages = await Message.find({
-      chat: req.params.chatId,
+      chat: chatId,
       $or: [
         { isScheduled: { $ne: true } },
         { scheduledSent: true }
@@ -50,28 +60,81 @@ export const allMessages = asyncHandler(async (req, res) => {
       .populate("starredBy.user", "name avatar")
       .populate("reactions.user", "name avatar")
       .sort({ createdAt: 1 });
+    
+    // Process messages for encrypted chats
+    const processedMessages = messages.map(message => {
+      const normalized = normalizeMessage(message);
       
-    // Attach a normalized `timestamp` field so clients can use scheduledFor when appropriate
-    const out = messages.map(normalizeMessage);
-    res.json(out);
+      // If chat is encrypted, hide content from server
+      if (isEncrypted && normalized.isEncrypted) {
+        normalized.content = '[ENCRYPTED]';
+        normalized.encryptedContent = message.encryptedContent || '';
+      }
+      
+      return normalized;
+    });
+    
+    // Add encryption info to response
+    const response = {
+      messages: processedMessages,
+      encryption: {
+        isEncrypted,
+        keyGeneration: chatKey?.generation || 0,
+        algorithm: 'aes-256-gcm'
+      }
+    };
+    
+    res.json(response);
   } catch (error) {
+    console.error('Error fetching messages:', error);
     res.status(400);
     throw new Error(error.message);
   }
 });
 
+// Send message (with encryption support)
 export const sendMessage = asyncHandler(async (req, res) => {
-  const { content, chatId, attachments, type = "text", isScheduled, scheduledFor, userId, poll, repliedTo } = req.body;
-  // normalize isScheduled which may be boolean or string from client
+  const { 
+    content, 
+    chatId, 
+    attachments, 
+    type = "text", 
+    isScheduled, 
+    scheduledFor, 
+    userId, 
+    poll, 
+    repliedTo,
+    // NEW: Encryption fields
+    encryptedContent,
+    encryption
+  } = req.body;
+  
+  // Normalize isScheduled which may be boolean or string from client
   const isScheduledFlag = (isScheduled === true || isScheduled === 'true' || isScheduled === '1' || isScheduled === 1);
-  // normalize scheduledFor into a Date if present
   const scheduledForDate = scheduledFor ? new Date(scheduledFor) : null;
-  console.log("➡️ [SEND MESSAGE] Request received", { chatId, userId, content, attachments, type, isScheduled: isScheduledFlag, scheduledFor: scheduledForDate, poll, repliedTo });
-  if (!content && (!attachments || attachments.length === 0) && !poll) {
+  
+  console.log("➡️ [SEND MESSAGE] Request received", { 
+    chatId, 
+    userId, 
+    content, 
+    encryptedContent: encryptedContent ? '[ENCRYPTED]' : 'none',
+    attachments, 
+    type, 
+    isScheduled: isScheduledFlag, 
+    scheduledFor: scheduledForDate, 
+    poll, 
+    repliedTo 
+  });
+  
+  // Check if we have content (either plaintext or encrypted)
+  const hasContent = content && content.trim().length > 0;
+  const hasEncryptedContent = encryptedContent && encryptedContent.trim().length > 0;
+  
+  if (!hasContent && !hasEncryptedContent && (!attachments || attachments.length === 0) && !poll) {
     console.log("Invalid data passed into request");
     return res.sendStatus(400);
   }
-
+  
   // Validate scheduled message
   if (isScheduledFlag) {
     if (!scheduledForDate || isNaN(scheduledForDate.getTime())) {
@@ -83,9 +146,11 @@ export const sendMessage = asyncHandler(async (req, res) => {
       throw new Error("Scheduled time must be in the future");
     }
   }
-
+  
+  // Check if chat exists or create new one
   let chat = null;
   let createdNewChat = false;
+  
   if (chatId) {
     chat = await Chat.findById(chatId);
     if (chat) {
@@ -94,6 +159,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
       console.log("[sendMessage] No chat found for chatId:", chatId);
     }
   }
+  
   // If chat does not exist, try to create it (for 1-on-1 only)
   if (!chat) {
     console.log("[sendMessage] Attempting to create/access chat for userId:", userId);
@@ -102,6 +168,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
       res.status(400);
       throw new Error("userId is required to create a new chat");
     }
+    
     // Check if chat already exists between these users
     let isChat = await Chat.find({
       isGroupChat: false,
@@ -110,6 +177,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
         { users: { $elemMatch: { $eq: userId } } },
       ],
     });
+    
     if (isChat.length > 0) {
       chat = isChat[0];
       console.log("[sendMessage] Found existing 1-on-1 chat:", chat._id);
@@ -126,7 +194,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
       console.log("[sendMessage] Created new 1-on-1 chat:", chat._id);
     }
   }
-
+  
   // Check if user is blocked in 1-on-1 chat
   if (!chat.isGroupChat) {
     const otherUser = chat.users.find(user => user.toString() !== req.user._id.toString());
@@ -138,7 +206,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
       }
     }
   }
-
+  
   // Normalize and validate repliedTo ids
   let normalizedRepliedTo = Array.isArray(repliedTo) ? repliedTo : repliedTo ? [repliedTo] : [];
   const invalidRepliedTo = [];
@@ -147,44 +215,75 @@ export const sendMessage = asyncHandler(async (req, res) => {
     invalidRepliedTo.push(id);
     return false;
   });
+  
   if (invalidRepliedTo.length) {
     console.warn('[sendMessage] Ignoring invalid repliedTo ids:', invalidRepliedTo);
   }
-
-  var newMessage = {
+  
+  // Check if chat is encrypted
+  const chatKey = await ChatKey.findOne({ chat: chat._id, isActive: true });
+  const isEncrypted = !!chatKey;
+  
+  // Prepare message data
+  const messageData = {
     sender: req.user._id,
-    content: content,
     chat: chat._id,
     type: type,
     attachments: attachments || [],
-    // allow replying to one or multiple messages (only valid ObjectIds)
     repliedTo: normalizedRepliedTo,
     isScheduled: !!isScheduledFlag,
     scheduledFor: isScheduledFlag ? scheduledForDate : null,
     scheduledSent: false,
     poll: poll || null,
   };
-
+  
+  // Handle content based on encryption
+  if (isEncrypted && hasEncryptedContent) {
+    // Store encrypted content
+    messageData.encryptedContent = encryptedContent;
+    messageData.isEncrypted = true;
+    messageData.encryption = encryption || {
+      algorithm: 'aes-256-gcm',
+      keyId: chatKey.participants.find(p => 
+        p.user.toString() === req.user._id.toString()
+      )?.keyId,
+      generation: chatKey.generation
+    };
+    console.log("[sendMessage] Message marked as encrypted");
+  } else if (hasContent) {
+    // Store plaintext content
+    messageData.content = content;
+    messageData.isEncrypted = false;
+  } else if (attachments && attachments.length > 0) {
+    // Message with attachments only
+    messageData.content = '';
+    messageData.isEncrypted = false;
+  }
+  
   try {
-    var message = await Message.create(newMessage);
+    // Create message
+    let message = await Message.create(messageData);
     console.log("[sendMessage] Message created:", message._id);
-
-    // Debug: refetch saved message from DB to verify persisted fields
+    
+    // Debug: refetch saved message from DB
     try {
       const saved = await Message.findById(message._id).lean();
       console.log('[sendMessage] Saved message in DB (raw):', {
         id: saved && saved._id,
         isScheduled: saved && saved.isScheduled,
         scheduledFor: saved && saved.scheduledFor,
+        isEncrypted: saved && saved.isEncrypted,
         createdAt: saved && saved.createdAt
       });
     } catch (err) {
       console.warn('[sendMessage] Failed to fetch saved message for debug:', err && err.message);
     }
-
+    
+    // Populate message
     message = await message.populate("sender", "name avatar");
     message = await message.populate("attachments");
-    // populate replied messages
+    
+    // Populate replied messages
     message = await message.populate({
       path: "repliedTo",
       populate: [
@@ -192,39 +291,64 @@ export const sendMessage = asyncHandler(async (req, res) => {
         { path: "attachments" }
       ]
     });
-    message = await message.populate({
-      path: "poll",
-      populate: [
-        {
-          path: "createdBy",
-          select: "name avatar"
-        },
-        {
-          path: "options.votes.user",
-          select: "name avatar"
-        }
-      ]
-    });
+    
+    // Populate poll if exists
+    if (message.poll) {
+      message = await message.populate({
+        path: "poll",
+        populate: [
+          {
+            path: "createdBy",
+            select: "name avatar"
+          },
+          {
+            path: "options.votes.user",
+            select: "name avatar"
+          }
+        ]
+      });
+    }
+    
     message = await message.populate("chat");
     message = await User.populate(message, {
       path: "chat.users",
       select: "name avatar email",
     });
-
-    // Only update lastMessage if it's not scheduled or if it's being sent now
-    if (!isScheduled) {
+    
+    // Only update lastMessage if it's not scheduled
+    if (!isScheduledFlag) {
       await Chat.findByIdAndUpdate(chat._id, { lastMessage: message });
       console.log("[sendMessage] Updated chat lastMessage:", chat._id);
     }
-
-    // Attach normalized timestamp before sending
+    
+    // Prepare response
     const messageOut = normalizeMessage(message);
-
+    
+    // For encrypted messages, hide content from server response
+    if (isEncrypted && messageOut.isEncrypted) {
+      messageOut.content = '[ENCRYPTED]';
+    }
+    
+    // Add encryption info to response
+    messageOut.encryptionInfo = {
+      isEncrypted,
+      keyGeneration: chatKey?.generation || 0,
+      algorithm: 'aes-256-gcm'
+    };
+    
     // If a new chat was created, return chat info as well
     if (createdNewChat) {
       console.log("[sendMessage] Returning new chat and message");
-      return res.json({ message: messageOut, chat });
+      return res.json({ 
+        message: messageOut, 
+        chat,
+        encryption: {
+          isEncrypted,
+          keyGeneration: chatKey?.generation || 0
+        }
+      });
     }
+    
     res.json(messageOut);
   } catch (error) {
     console.error("[sendMessage] Error creating message:", error);
@@ -233,6 +357,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
   }
 });
 
+// Delete message
 export const deleteMessage = asyncHandler(async (req, res) => {
   const { messageId } = req.params;
   const userId = req.user._id;
@@ -278,7 +403,6 @@ export const deleteMessage = asyncHandler(async (req, res) => {
         await Attachment.findByIdAndDelete(attachment._id);
       } catch (err) {
         console.error(`Failed to delete attachment ${attachment._id}:`, err.message);
-        // Continue with other attachments even if one fails
       }
     }
   }
@@ -295,7 +419,7 @@ export const deleteMessage = asyncHandler(async (req, res) => {
   res.json({ message: "Message deleted successfully" });
 });
 
-
+// Delete messages for me
 export const deleteMessagesForMe = asyncHandler(async (req, res) => {
   const { messageId } = req.params;
   const userId = req.user._id;
@@ -314,12 +438,17 @@ export const deleteMessagesForMe = asyncHandler(async (req, res) => {
   res.json({ message: "Message deleted for you" });
 });
 
+// Edit message
 export const editMessage = asyncHandler(async (req, res) => {
   const { messageId } = req.params;
-  const { content } = req.body;
+  const { content, encryptedContent, encryption } = req.body;
   const userId = req.user._id;
 
-  if (!content || !content.trim()) {
+  // Check if we have content to edit
+  const hasContent = content && content.trim();
+  const hasEncryptedContent = encryptedContent && encryptedContent.trim();
+  
+  if (!hasContent && !hasEncryptedContent) {
     res.status(400);
     throw new Error("Message content is required");
   }
@@ -336,8 +465,22 @@ export const editMessage = asyncHandler(async (req, res) => {
     throw new Error("You can only edit your own messages");
   }
 
-  // Update the message
-  message.content = content.trim();
+  // Check if message is encrypted
+  if (message.isEncrypted) {
+    // Update encrypted message
+    if (hasEncryptedContent) {
+      message.encryptedContent = encryptedContent;
+      message.encryption = encryption || message.encryption;
+    } else {
+      // Trying to edit encrypted message with plaintext - not allowed
+      res.status(400);
+      throw new Error("Cannot edit encrypted message with plaintext");
+    }
+  } else {
+    // Update plaintext message
+    message.content = content.trim();
+  }
+  
   message.isEdited = true;
   message.editedAt = new Date();
 
@@ -346,13 +489,22 @@ export const editMessage = asyncHandler(async (req, res) => {
   // Populate necessary fields
   await message.populate("sender", "name avatar email");
   await message.populate("attachments");
-
-  res.json({
+  
+  // Prepare response
+  const response = {
     message: "Message edited successfully",
     updatedMessage: message
-  });
+  };
+  
+  // Hide encrypted content from server response
+  if (message.isEncrypted) {
+    response.updatedMessage.content = '[ENCRYPTED]';
+  }
+
+  res.json(response);
 });
 
+// Star message
 export const starMessage = asyncHandler(async (req, res) => {
   const { messageId } = req.params;
   const userId = req.user._id;
@@ -380,13 +532,22 @@ export const starMessage = asyncHandler(async (req, res) => {
 
   await message.save();
   await message.populate("starredBy.user", "name avatar");
-
-  res.json({
+  
+  // Prepare response
+  const response = {
     message: "Message starred successfully",
     starredBy: message.starredBy
-  });
+  };
+  
+  // Hide content if encrypted
+  if (message.isEncrypted) {
+    response.updatedMessage = { ...message.toObject(), content: '[ENCRYPTED]' };
+  }
+
+  res.json(response);
 });
 
+// Unstar message
 export const unstarMessage = asyncHandler(async (req, res) => {
   const { messageId } = req.params;
   const userId = req.user._id;
@@ -402,13 +563,22 @@ export const unstarMessage = asyncHandler(async (req, res) => {
   );
 
   await message.save();
-
-  res.json({
+  
+  // Prepare response
+  const response = {
     message: "Message unstarred successfully",
     starredBy: message.starredBy
-  });
+  };
+  
+  // Hide content if encrypted
+  if (message.isEncrypted) {
+    response.updatedMessage = { ...message.toObject(), content: '[ENCRYPTED]' };
+  }
+
+  res.json(response);
 });
 
+// Get starred messages
 export const getStarredMessages = asyncHandler(async (req, res) => {
   const { chatId } = req.params;
   const userId = req.user._id;
@@ -422,11 +592,22 @@ export const getStarredMessages = asyncHandler(async (req, res) => {
     .populate("starredBy.user", "name avatar")
     .sort({ createdAt: -1 });
 
-  // Normalize timestamps so scheduled messages expose `scheduledFor` as `timestamp`
-  const out = messages.map(normalizeMessage);
+  // Normalize timestamps
+  const out = messages.map(message => {
+    const normalized = normalizeMessage(message);
+    
+    // Hide content if encrypted
+    if (message.isEncrypted) {
+      normalized.content = '[ENCRYPTED]';
+    }
+    
+    return normalized;
+  });
+  
   res.json(out);
 });
 
+// Add reaction
 export const addReaction = asyncHandler(async (req, res) => {
   const { messageId } = req.params;
   const { emoji } = req.body;
@@ -457,14 +638,22 @@ export const addReaction = asyncHandler(async (req, res) => {
 
   await message.save();
   await message.populate("reactions.user", "name avatar");
-
-  res.json({
+  
+  // Prepare response
+  const response = {
     message: "Reaction added successfully",
     reactions: message.reactions
-  });
+  };
+  
+  // Hide content if encrypted
+  if (message.isEncrypted) {
+    response.updatedMessage = { ...message.toObject(), content: '[ENCRYPTED]' };
+  }
+
+  res.json(response);
 });
 
-
+// Remove reaction
 export const removeReaction = asyncHandler(async (req, res) => {
   const { messageId } = req.params;
   const userId = req.user._id;
@@ -480,22 +669,34 @@ export const removeReaction = asyncHandler(async (req, res) => {
   );
 
   await message.save();
-
-  res.json({
+  
+  // Prepare response
+  const response = {
     message: "Reaction removed successfully",
     reactions: message.reactions
-  });
+  };
+  
+  // Hide content if encrypted
+  if (message.isEncrypted) {
+    response.updatedMessage = { ...message.toObject(), content: '[ENCRYPTED]' };
+  }
+
+  res.json(response);
 });
 
+// Forward message
 export const forwardMessage = asyncHandler(async (req, res) => {
   console.log("➡️ [FORWARD MESSAGE] Request received");
   console.log("📥 Body:", req.body);
   console.log("👤 User:", req.user?._id);
 
-  const { content, chatId, attachments, type = "text", isForwarded = true, repliedTo } = req.body;
+  const { content, chatId, attachments, type = "text", isForwarded = true, repliedTo, encryptedContent, encryption } = req.body;
 
   // Validate basic input
-  if (!content && (!attachments || attachments.length === 0)) {
+  const hasContent = content && content.trim();
+  const hasEncryptedContent = encryptedContent && encryptedContent.trim();
+  
+  if (!hasContent && !hasEncryptedContent && (!attachments || attachments.length === 0)) {
     console.log("❌ Validation failed: No content or attachments provided");
     return res.sendStatus(400);
   }
@@ -547,7 +748,11 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     }
   }
 
-  // Normalize and validate repliedTo ids for forwarded messages
+  // Check if chat is encrypted
+  const chatKey = await ChatKey.findOne({ chat: chatId, isActive: true });
+  const isEncrypted = !!chatKey;
+
+  // Normalize and validate repliedTo ids
   let normalizedForwardRepliedTo = Array.isArray(repliedTo) ? repliedTo : repliedTo ? [repliedTo] : [];
   const invalidForwardRepliedTo = [];
   normalizedForwardRepliedTo = normalizedForwardRepliedTo.filter((id) => {
@@ -555,13 +760,14 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     invalidForwardRepliedTo.push(id);
     return false;
   });
+  
   if (invalidForwardRepliedTo.length) {
     console.warn('[forwardMessage] Ignoring invalid repliedTo ids:', invalidForwardRepliedTo);
   }
 
+  // Prepare message data
   const newMessage = {
     sender: req.user._id,
-    content: content,
     chat: chatId,
     type: type,
     attachments: attachments || [],
@@ -569,19 +775,39 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     repliedTo: normalizedForwardRepliedTo,
   };
 
-  console.log("📝 Creating message:", newMessage);
+  // Handle content based on encryption
+  if (isEncrypted && hasEncryptedContent) {
+    newMessage.encryptedContent = encryptedContent;
+    newMessage.isEncrypted = true;
+    newMessage.encryption = encryption || {
+      algorithm: 'aes-256-gcm',
+      keyId: chatKey.participants.find(p => 
+        p.user.toString() === req.user._id.toString()
+      )?.keyId,
+      generation: chatKey.generation
+    };
+    console.log("[forwardMessage] Forwarding encrypted message");
+  } else if (hasContent) {
+    newMessage.content = content;
+    newMessage.isEncrypted = false;
+  } else if (attachments && attachments.length > 0) {
+    newMessage.content = '';
+    newMessage.isEncrypted = false;
+  }
+
+  console.log("📝 Creating forwarded message:", { 
+    ...newMessage, 
+    encryptedContent: newMessage.encryptedContent ? '[ENCRYPTED]' : 'none' 
+  });
 
   try {
-    var message = await Message.create(newMessage);
-    console.log("✅ Message created:", message._id);
+    let message = await Message.create(newMessage);
+    console.log("✅ Forwarded message created:", message._id);
 
     message = await message.populate("sender", "name avatar");
-    console.log("📌 Populated sender");
-
     message = await message.populate("attachments");
-    console.log("📎 Populated attachments");
 
-    // populate replied messages if any
+    // Populate replied messages if any
     message = await message.populate({
       path: "repliedTo",
       populate: [
@@ -589,22 +815,31 @@ export const forwardMessage = asyncHandler(async (req, res) => {
         { path: "attachments" }
       ]
     });
-    console.log("📎 Populated repliedTo messages");
 
     message = await message.populate("chat");
-    console.log("💬 Populated chat");
-
     message = await User.populate(message, {
       path: "chat.users",
       select: "name avatar email",
     });
-    console.log("👥 Populated chat users info");
 
     console.log("🆙 Updating chat lastMessage");
     await Chat.findByIdAndUpdate(chatId, { lastMessage: message });
 
-    // Attach normalized timestamp for forwarded message
+    // Prepare response
     const forwardOut = normalizeMessage(message);
+    
+    // Hide encrypted content from server response
+    if (isEncrypted && forwardOut.isEncrypted) {
+      forwardOut.content = '[ENCRYPTED]';
+    }
+    
+    // Add encryption info
+    forwardOut.encryptionInfo = {
+      isEncrypted,
+      keyGeneration: chatKey?.generation || 0,
+      algorithm: 'aes-256-gcm'
+    };
+    
     console.log("🎉 Forward message complete");
     res.json(forwardOut);
 
@@ -615,7 +850,7 @@ export const forwardMessage = asyncHandler(async (req, res) => {
   }
 });
 
-
+// Pin message
 export const pinMessage = asyncHandler(async (req, res) => {
   const { messageId, chatId } = req.body;
   const userId = req.user._id;
@@ -691,12 +926,21 @@ export const pinMessage = asyncHandler(async (req, res) => {
   });
   await chat.populate("pinnedMessages.pinnedBy", "name avatar");
 
+  // Hide content for encrypted messages
+  const pinnedMessages = chat.pinnedMessages.map(pinned => {
+    if (pinned.message && pinned.message.isEncrypted) {
+      pinned.message.content = '[ENCRYPTED]';
+    }
+    return pinned;
+  });
+
   res.json({
     message: "Message pinned successfully",
-    pinnedMessages: chat.pinnedMessages
+    pinnedMessages: pinnedMessages
   });
 });
 
+// Unpin message
 export const unpinMessage = asyncHandler(async (req, res) => {
   const { messageId, chatId } = req.body;
   const userId = req.user._id;
@@ -739,12 +983,21 @@ export const unpinMessage = asyncHandler(async (req, res) => {
   });
   await chat.populate("pinnedMessages.pinnedBy", "name avatar");
 
+  // Hide content for encrypted messages
+  const pinnedMessages = chat.pinnedMessages.map(pinned => {
+    if (pinned.message && pinned.message.isEncrypted) {
+      pinned.message.content = '[ENCRYPTED]';
+    }
+    return pinned;
+  });
+
   res.json({
     message: "Message unpinned successfully",
-    pinnedMessages: chat.pinnedMessages
+    pinnedMessages: pinnedMessages
   });
 });
 
+// Get pinned messages
 export const getPinnedMessages = asyncHandler(async (req, res) => {
   const { chatId } = req.params;
   const userId = req.user._id;
@@ -779,11 +1032,15 @@ export const getPinnedMessages = asyncHandler(async (req, res) => {
     throw new Error("You are not authorized to view pinned messages in this chat");
   }
 
-  // Normalize timestamps on pinned messages' nested message objects
+  // Normalize timestamps and hide encrypted content
   const pinned = (chat.pinnedMessages || []).map(pm => {
     if (pm && pm.message) {
       try {
         pm.message = normalizeMessage(pm.message);
+        // Hide content for encrypted messages
+        if (pm.message.isEncrypted) {
+          pm.message.content = '[ENCRYPTED]';
+        }
       } catch (e) {
         // ignore
       }
@@ -794,7 +1051,7 @@ export const getPinnedMessages = asyncHandler(async (req, res) => {
   res.json(pinned);
 });
 
-// Get media attachments (images, videos) from chats
+// Get media attachments
 export const getMediaAttachments = asyncHandler(async (req, res) => {
   try {
     console.log('📸 [getMediaAttachments] Request received');
@@ -850,7 +1107,6 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
     messages.forEach(message => {
       if (message.attachments && message.attachments.length > 0) {
         message.attachments.forEach(attachment => {
-          // Filter out null attachments (ones that didn't match the populate condition)
           if (attachment && attachment._id && (attachment.mimeType?.startsWith('image/') || attachment.mimeType?.startsWith('video/'))) {
             mediaItems.push({
               _id: attachment._id,
@@ -861,7 +1117,8 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
               createdAt: message.createdAt,
               senderName: message.sender?.name || message.sender?.email,
               chatId: message.chat,
-              messageId: message._id  // Add message ID for navigation
+              messageId: message._id,
+              isEncrypted: message.isEncrypted || false
             });
           }
         });
@@ -876,7 +1133,7 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
   }
 });
 
-// Get link attachments from chats
+// Get link attachments
 export const getLinkAttachments = asyncHandler(async (req, res) => {
   try {
     console.log('🔗 [getLinkAttachments] Request received');
@@ -912,7 +1169,10 @@ export const getLinkAttachments = asyncHandler(async (req, res) => {
     // Find all messages with URLs in content
     const messages = await Message.find({
       chat: { $in: verifiedChatIds },
-      content: { $regex: urlRegex }
+      $or: [
+        { content: { $regex: urlRegex } },
+        { encryptedContent: { $regex: urlRegex } }
+      ]
     })
       .populate('sender', 'name email avatar')
       .sort({ createdAt: -1 })
@@ -921,17 +1181,20 @@ export const getLinkAttachments = asyncHandler(async (req, res) => {
     // Extract URLs from messages
     const linkItems = [];
     messages.forEach(message => {
-      const urls = message.content.match(urlRegex);
+      const text = message.isEncrypted ? message.encryptedContent : message.content;
+      const urls = text?.match(urlRegex);
+      
       if (urls && urls.length > 0) {
         urls.forEach(url => {
           linkItems.push({
             _id: message._id + '_' + url,
             url: url,
-            content: message.content,
+            content: message.isEncrypted ? '[ENCRYPTED]' : text,
             createdAt: message.createdAt,
             senderName: message.sender?.name || message.sender?.email,
             chatId: message.chat,
-            messageId: message._id  // Add message ID for navigation
+            messageId: message._id,
+            isEncrypted: message.isEncrypted || false
           });
         });
       }
@@ -944,7 +1207,7 @@ export const getLinkAttachments = asyncHandler(async (req, res) => {
   }
 });
 
-// Get document attachments from chats
+// Get document attachments
 export const getDocumentAttachments = asyncHandler(async (req, res) => {
   try {
     console.log('📄 [getDocumentAttachments] Request received');
@@ -997,7 +1260,6 @@ export const getDocumentAttachments = asyncHandler(async (req, res) => {
     messages.forEach(message => {
       if (message.attachments && message.attachments.length > 0) {
         message.attachments.forEach(attachment => {
-          // Filter out null attachments (ones that didn't match the populate condition)
           if (attachment && attachment._id && 
               !attachment.mimeType?.startsWith('image/') && 
               !attachment.mimeType?.startsWith('video/')) {
@@ -1010,7 +1272,8 @@ export const getDocumentAttachments = asyncHandler(async (req, res) => {
               createdAt: message.createdAt,
               senderName: message.sender?.name || message.sender?.email,
               chatId: message.chat,
-              messageId: message._id  // Add message ID for navigation
+              messageId: message._id,
+              isEncrypted: message.isEncrypted || false
             });
           }
         });
@@ -1024,7 +1287,7 @@ export const getDocumentAttachments = asyncHandler(async (req, res) => {
   }
 });
 
-// Get scheduled messages for a chat
+// Get scheduled messages
 export const getScheduledMessages = asyncHandler(async (req, res) => {
   const { chatId } = req.params;
   const userId = req.user._id;
@@ -1047,7 +1310,7 @@ export const getScheduledMessages = asyncHandler(async (req, res) => {
 
   const scheduledMessages = await Message.find({
     chat: chatId,
-    sender: userId, // Only show user's own scheduled messages
+    sender: userId,
     isScheduled: true,
     scheduledSent: false,
   })
@@ -1055,12 +1318,22 @@ export const getScheduledMessages = asyncHandler(async (req, res) => {
     .populate("attachments")
     .sort({ scheduledFor: 1 });
 
-  // Ensure `timestamp` field present for scheduled messages
-  const scheduledOut = scheduledMessages.map(normalizeMessage);
+  // Normalize timestamps
+  const scheduledOut = scheduledMessages.map(message => {
+    const normalized = normalizeMessage(message);
+    
+    // Hide content for encrypted messages
+    if (message.isEncrypted) {
+      normalized.content = '[ENCRYPTED]';
+    }
+    
+    return normalized;
+  });
+  
   res.json(scheduledOut);
 });
 
-// Cancel/delete a scheduled message
+// Cancel scheduled message
 export const cancelScheduledMessage = asyncHandler(async (req, res) => {
   const { messageId } = req.params;
   const userId = req.user._id;
@@ -1087,10 +1360,10 @@ export const cancelScheduledMessage = asyncHandler(async (req, res) => {
   res.json({ message: "Scheduled message cancelled successfully" });
 });
 
-// Update scheduled message time
+// Update scheduled message
 export const updateScheduledMessage = asyncHandler(async (req, res) => {
   const { messageId } = req.params;
-  const { scheduledFor, content } = req.body;
+  const { scheduledFor, content, encryptedContent, encryption } = req.body;
   const userId = req.user._id;
 
   const message = await Message.findById(messageId);
@@ -1119,17 +1392,104 @@ export const updateScheduledMessage = asyncHandler(async (req, res) => {
     message.scheduledFor = newScheduledDate;
   }
 
-  if (content !== undefined) {
+  // Handle content update based on encryption
+  if (content !== undefined && !message.isEncrypted) {
     message.content = content;
+  } else if (encryptedContent !== undefined && message.isEncrypted) {
+    message.encryptedContent = encryptedContent;
+    message.encryption = encryption || message.encryption;
   }
 
   await message.save();
 
   await message.populate("sender", "name avatar email");
   await message.populate("attachments");
-
-  res.json({
+  
+  // Prepare response
+  const response = {
     message: "Scheduled message updated successfully",
     updatedMessage: message
+  };
+  
+  // Hide encrypted content from server response
+  if (message.isEncrypted) {
+    response.updatedMessage.content = '[ENCRYPTED]';
+  }
+
+  res.json(response);
+});
+
+// NEW: Get encryption status for chat
+export const getChatEncryptionStatus = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  const userId = req.user._id;
+
+  // Check if user is in chat
+  const chat = await Chat.findById(chatId);
+  if (!chat) {
+    res.status(404);
+    throw new Error("Chat not found");
+  }
+
+  const isUserInChat = chat.users.some(
+    user => user.toString() === userId.toString()
+  ) || chat.participants.some(
+    participant => participant.toString() === userId.toString()
+  );
+
+  if (!isUserInChat) {
+    res.status(403);
+    throw new Error("Not authorized to view encryption status for this chat");
+  }
+
+  // Check encryption status
+  const chatKey = await ChatKey.findOne({ 
+    chat: chatId, 
+    isActive: true 
+  }).populate('participants.user', 'name email');
+
+  if (!chatKey) {
+    return res.json({
+      isEncrypted: false,
+      message: "Chat is not encrypted"
+    });
+  }
+
+  // Get user's specific encryption info
+  const userKeyInfo = chatKey.participants.find(
+    p => p.user.toString() === userId.toString()
+  );
+
+  res.json({
+    isEncrypted: true,
+    keyGeneration: chatKey.generation,
+    algorithm: 'aes-256-gcm',
+    userKeyId: userKeyInfo?.keyId,
+    participants: chatKey.participants.map(p => ({
+      user: p.user,
+      keyId: p.keyId,
+      hasKey: !!p.encryptedSessionKey
+    })),
+    createdAt: chatKey.createdAt,
+    lastRotated: chatKey.updatedAt
   });
+});
+
+// NEW: Get encrypted session key for user
+export const getEncryptedSessionKey = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  const userId = req.user._id;
+
+  try {
+    const result = await encryptionService.getEncryptedSessionKey(chatId, userId);
+    
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error getting encrypted session key:', error);
+    res.status(500);
+    throw new Error('Failed to get encrypted session key');
+  }
 });
