@@ -225,8 +225,110 @@ io.on("connection", (socket) => {
     console.log("User Joined Room: " + room);
   });
   
-  socket.on("typing", (room) => socket.in(room).emit("typing"));
-  socket.on("stop typing", (room) => socket.in(room).emit("stop typing"));
+  socket.on("typing", async (data) => {
+    try {
+      // Accept either a room string or an object { chatId, user }
+      let room = null;
+      let payload = {};
+      if (!data) {
+        return;
+      }
+      if (typeof data === 'string') {
+        room = data;
+        payload = { chatId: room };
+      } else if (typeof data === 'object') {
+        room = data.chatId || data.room || null;
+        payload = { ...(data || {}) };
+      }
+
+      if (!room) return;
+
+      // If caller didn't include user info, try to attach minimal info from socket
+      if (!payload.user && socket.userId) {
+        try {
+          const user = await User.findById(socket.userId).select('_id name avatar');
+          if (user) payload.user = { _id: user._id, name: user.name, avatar: user.avatar };
+          else payload.user = { _id: socket.userId };
+        } catch (e) {
+          payload.user = { _id: socket.userId };
+        }
+      }
+
+      // Emit to sockets that joined the chat room
+      socket.in(String(room)).emit('typing', payload);
+
+      // Also emit to each participant's personal room (fallback)
+      try {
+        const chatDoc = await Chat.findById(String(room)).select('users participants').lean();
+        const members = (chatDoc?.participants && chatDoc.participants.length) ? chatDoc.participants : (chatDoc?.users || []);
+        (members || []).forEach((m) => {
+          try {
+            const uid = String(m._id || m.id || m);
+            if (!uid) return;
+            // don't redundantly emit to the same socket origin
+            if (socket.userId && String(socket.userId) === uid) return;
+            io.to(uid).emit('typing', payload);
+          } catch (e) {
+            console.error('[SOCKET] error emitting typing to personal room', e);
+          }
+        });
+      } catch (e) {
+        console.error('[SOCKET] error finding chat members for typing emit', e);
+      }
+    } catch (e) {
+      console.error('[SOCKET] error broadcasting typing', e);
+    }
+  });
+
+  socket.on("stop typing", async (data) => {
+    try {
+      let room = null;
+      let payload = {};
+      if (!data) return;
+      if (typeof data === 'string') {
+        room = data;
+        payload = { chatId: room };
+      } else if (typeof data === 'object') {
+        room = data.chatId || data.room || null;
+        payload = { ...(data || {}) };
+      }
+
+      if (!room) return;
+
+      if (!payload.user && socket.userId) {
+        try {
+          const user = await User.findById(socket.userId).select('_id name avatar');
+          if (user) payload.user = { _id: user._id, name: user.name, avatar: user.avatar };
+          else payload.user = { _id: socket.userId };
+        } catch (e) {
+          payload.user = { _id: socket.userId };
+        }
+      }
+
+      // Emit to sockets that joined the chat room
+      socket.in(String(room)).emit('stop typing', payload);
+
+      // Also emit to each participant's personal room (fallback)
+      try {
+        const chatDoc = await Chat.findById(String(room)).select('users participants').lean();
+        const members = (chatDoc?.participants && chatDoc.participants.length) ? chatDoc.participants : (chatDoc?.users || []);
+        (members || []).forEach((m) => {
+          try {
+            const uid = String(m._id || m.id || m);
+            if (!uid) return;
+            if (socket.userId && String(socket.userId) === uid) return;
+            io.to(uid).emit('stop typing', payload);
+          } catch (e) {
+            console.error('[SOCKET] error emitting stop typing to personal room', e);
+          }
+        });
+      } catch (e) {
+        console.error('[SOCKET] error finding chat members for stop typing emit', e);
+      }
+    } catch (e) {
+      console.error('[SOCKET] error broadcasting stop typing', e);
+    }
+  });
 
   socket.on("new message", (newMessageRecieved) => {
     (async () => {

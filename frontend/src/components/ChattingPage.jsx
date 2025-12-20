@@ -1469,34 +1469,47 @@ const MessagesArea = ({
             })}
           </AnimatePresence>
 
-          {isTyping[selectedContactId] && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="flex justify-start"
-            >
-              <div
-                className={`max-w-xs px-4 py-2 rounded-lg ${
-                  effectiveTheme.mode === 'dark'
-                    ? 'bg-blue-500/80 backdrop-blur-md text-white'
-                    : 'bg-white/90 backdrop-blur-md text-gray-800 border border-gray-200'
-                }`}
+          {isTyping[selectedContactId] && (() => {
+            const typingUser = typeof isTyping[selectedContactId] === 'object' ? isTyping[selectedContactId] : null;
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="flex justify-start"
               >
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-current rounded-full animate-bounce" />
+                <div className="flex items-end space-x-3">
+                  {typingUser && typingUser.avatar ? (
+                    <img src={typingUser.avatar} alt={typingUser.name || 'User'} className="w-8 h-8 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-400 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
+                      { (typingUser && (typingUser.name || typingUser._id)) ? String((typingUser.name||typingUser._id).charAt(0)).toUpperCase() : 'U' }
+                    </div>
+                  )}
+
                   <div
-                    className="w-2 h-2 bg-current rounded-full animate-bounce"
-                    style={{ animationDelay: "0.2s" }}
-                  />
-                  <div
-                    className="w-2 h-2 bg-current rounded-full animate-bounce"
-                    style={{ animationDelay: "0.4s" }}
-                  />
+                    className={`max-w-xs px-4 py-2 rounded-lg ${
+                      effectiveTheme.mode === 'dark'
+                        ? 'bg-blue-500/80 backdrop-blur-md text-white'
+                        : 'bg-white/90 backdrop-blur-md text-gray-800 border border-gray-200'
+                    }`}
+                  >
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-current rounded-full animate-bounce" />
+                      <div
+                        className="w-2 h-2 bg-current rounded-full animate-bounce"
+                        style={{ animationDelay: "0.2s" }}
+                      />
+                      <div
+                        className="w-2 h-2 bg-current rounded-full animate-bounce"
+                        style={{ animationDelay: "0.4s" }}
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </motion.div>
-          )}
+              </motion.div>
+            );
+          })()}
 
           <div ref={messagesEndRef} />
         </div>
@@ -4488,7 +4501,7 @@ const handleSendMessageFromInput = useCallback(
     socket.on('connect', () => {
       socket.emit('setup', userData);
       setSocketConnected(true);
-      console.log('[SOCKET] Connected to server');
+      console.log('[SOCKET] Connected to server', { id: socket.id });
     });
 
     socket.on('connected', () => setSocketConnected(true));
@@ -4528,6 +4541,69 @@ const handleSendMessageFromInput = useCallback(
         setGroupOnlineCounts(prev => ({ ...(prev || {}), [String(chatId)]: Number(onlineCount || 0) }));
       } catch (e) {
         console.error('Error handling group online count', e);
+      }
+    });
+
+    // General debug: log any incoming socket events (helps diagnose missing listeners)
+    if (socket.onAny) {
+      socket.onAny((event, payload) => {
+        console.log('[SOCKET ANY]', event, payload);
+      });
+    }
+
+    // Typing indicators (payload: { chatId, user: { _id, name, avatar } })
+    socket.on('typing', (payload) => {
+      try {
+        console.log('[SOCKET] typing payload received (frontend):', payload);
+        if (!payload) return;
+        const chatId = payload.chatId || payload.room || payload.chat || null;
+        const user = payload.user || null;
+        if (!chatId) return;
+
+        setIsTyping(prev => ({ ...(prev || {}), [String(chatId)]: user || true }));
+
+        setRecentChats(prev => {
+          if (!prev) return prev;
+          return prev.map(c => {
+            const id = c.chatId || c._id || c.id;
+            if (id && String(id) === String(chatId)) {
+              return { ...c, isTyping: true, typingUser: user };
+            }
+            return c;
+          });
+        });
+      } catch (e) {
+        console.error('Error handling typing event', e);
+      }
+    });
+
+    socket.on('stop typing', (payload) => {
+      try {
+        if (!payload) return;
+        const chatId = payload.chatId || payload.room || payload.chat || null;
+        if (!chatId) return;
+
+        setIsTyping(prev => {
+          const copy = { ...(prev || {}) };
+          delete copy[String(chatId)];
+          return copy;
+        });
+
+        setRecentChats(prev => {
+          if (!prev) return prev;
+          return prev.map(c => {
+            const id = c.chatId || c._id || c.id;
+            if (id && String(id) === String(chatId)) {
+              const copy = { ...c };
+              copy.isTyping = false;
+              delete copy.typingUser;
+              return copy;
+            }
+            return c;
+          });
+        });
+      } catch (e) {
+        console.error('Error handling stop typing event', e);
       }
     });
 
@@ -4735,6 +4811,13 @@ const handleSendMessageFromInput = useCallback(
         console.error('Error handling chat deleted socket event', e);
       }
     });
+
+    // Debug: log when client joins a chat room
+    const origEmit = socket.emit.bind(socket);
+    socket.emit = function(event, ...args) {
+      try { console.log('[SOCKET EMIT]', event, args && args.length ? args[0] : undefined); } catch(e){}
+      return origEmit(event, ...args);
+    };
 
     socket.on('pin message', ({ chatId, pinnedMessages: updatedPinnedMessages }) => {
       try {
@@ -7862,6 +7945,8 @@ useEffect(() => {
                 selectedReplies={selectedReplies}
                 effectiveTheme={effectiveTheme}
                 isGroupChat={selectedContact?.isGroup || selectedContact?.isGroupChat || false}
+                socket={socketRef.current}
+                currentUser={_localUser}
               />
             </>
           ) : !isMobileView ? (

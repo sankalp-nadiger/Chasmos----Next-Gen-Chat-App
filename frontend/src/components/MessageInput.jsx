@@ -10,7 +10,9 @@ const MessageInput = React.memo(({
   onSendMessage, 
   selectedContact,
   effectiveTheme,
-  isGroupChat = false
+  isGroupChat = false,
+  socket = null,
+  currentUser = null,
 }) => {
   const [messageInput, setMessageInput] = useState("");
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
@@ -25,6 +27,8 @@ const MessageInput = React.memo(({
   const videoInputRef = useRef(null);
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const typingTimeoutRef = useRef(null);
+  const isTypingSentRef = useRef(false);
 
   const handleCreatePoll = useCallback(async (pollData) => {
     try {
@@ -66,8 +70,35 @@ const MessageInput = React.memo(({
   }, [selectedContact, onSendMessage]);
 
   const handleInputChange = useCallback((e) => {
-    setMessageInput(e.target.value);
-  }, []);
+    const val = e.target.value;
+    setMessageInput(val);
+
+    try {
+      const chatId = selectedContact?.chatId || selectedContact?.id || selectedContact?._id;
+      if (!socket || !chatId) return;
+
+      // Emit typing once, then debounce stop typing
+      if (!isTypingSentRef.current) {
+        const userPayload = currentUser ? { _id: currentUser._id || currentUser.id, name: currentUser.name, avatar: currentUser.avatar } : { _id: null };
+        try { console.log('[MessageInput] emitting typing', { chatId, user: userPayload }); } catch(e){}
+        socket.emit('typing', { chatId, user: userPayload });
+        isTypingSentRef.current = true;
+      }
+
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        try {
+          const userPayload = currentUser ? { _id: currentUser._id || currentUser.id, name: currentUser.name, avatar: currentUser.avatar } : { _id: null };
+          try { console.log('[MessageInput] emitting stop typing', { chatId, user: userPayload }); } catch(e){}
+          socket.emit('stop typing', { chatId, user: userPayload });
+        } catch (e) {}
+        isTypingSentRef.current = false;
+        typingTimeoutRef.current = null;
+      }, 1400);
+    } catch (e) {
+      // ignore
+    }
+  }, [selectedContact, socket, currentUser]);
 
   const handleSendClick = useCallback(async (isScheduled = false) => {
     if (uploading) return;
@@ -234,6 +265,19 @@ const MessageInput = React.memo(({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showAttachmentMenu]);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        try {
+          const chatId = selectedContact?.chatId || selectedContact?.id || selectedContact?._id;
+          const userPayload = currentUser ? { _id: currentUser._id || currentUser.id, name: currentUser.name, avatar: currentUser.avatar } : { _id: null };
+          if (socket && chatId) socket.emit('stop typing', { chatId, user: userPayload });
+        } catch (e) {}
+      }
+    };
+  }, [socket, selectedContact, currentUser]);
 
   return (
     <div className={`${effectiveTheme.secondary} p-4 relative`}>

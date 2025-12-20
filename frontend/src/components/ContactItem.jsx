@@ -123,7 +123,7 @@ const avatarFallbackText =
           </div>
           
           <div className="flex items-center gap-2 min-w-0">
-            {lastMsgHasAttachments && (
+            {!contact.isTyping && lastMsgHasAttachments && (
               <div className="flex-shrink-0">
                 {(() => {
                   if (attachmentMime.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp)$/i.test(attachmentMime || attachmentFileName || lastMsgText)) {
@@ -142,8 +142,8 @@ const avatarFallbackText =
 
             <p className={`text-sm truncate ${effectiveTheme.textSecondary || "text-gray-500"}`}>
               {contact.isTyping ? (
-                "Typing..."
-              ) : (
+                  <span className="text-green-500 font-medium">Typing...</span>
+                ) : (
                 lastMsgHasAttachments ? (
                   lastMsgText ? `${lastMsgText}` : "Attachment"
                 ) : (

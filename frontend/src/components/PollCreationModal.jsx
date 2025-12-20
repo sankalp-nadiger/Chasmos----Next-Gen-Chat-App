@@ -81,13 +81,15 @@ const PollCreationModal = ({
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className={`relative ${effectiveTheme.secondary} rounded-lg shadow-2xl w-full max-w-md border ${effectiveTheme.border}`}
+            className={`relative ${effectiveTheme.secondary} rounded-lg shadow-2xl w-full max-w-md border ${effectiveTheme.border} ${effectiveTheme.mode !== 'dark' ? 'bg-white/90' : ''}`}
           >
-            {/* White background overlay behind the cosmos background for day mode */}
-            <div className="absolute inset-0 rounded-lg bg-white z-0 pointer-events-none" />
-            {/* Cosmos background in day mode, subtle overlay */}
+            {/* Background overlay behind the cosmos background for light mode only */}
+            {effectiveTheme.mode !== 'dark' && (
+              <div className="absolute inset-0 rounded-lg bg-white z-0 pointer-events-none" />
+            )}
+            {/* Cosmos background (theme follows effectiveTheme.mode) */}
             <div className="absolute inset-0 rounded-lg z-10 pointer-events-none overflow-hidden">
-              <CosmosBackground theme="light" opacity={0.22} />
+              <CosmosBackground theme={effectiveTheme.mode === 'dark' ? 'dark' : 'light'} opacity={effectiveTheme.mode === 'dark' ? 0.14 : 0.22} />
             </div>
             <div className="relative z-20">
             {/* Header */}
