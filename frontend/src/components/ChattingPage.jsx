@@ -84,6 +84,7 @@ import PinnedMessagesBar from "./PinnedMessagesBar";
 import DeleteMessageModal from "./DeleteMessageModal";
 import UserProfileModal from "./UserProfileModal";
 import GroupInfoModal from "./GroupInfoModal";
+import MessageNotificationContainer from "./MessageNotification";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
@@ -699,7 +700,7 @@ const MessageBubble = React.memo(
   initial={{ opacity: 0 }}
   animate={{ opacity: 1 }}
   transition={{ delay: 0.1 }}
-  className={isShortMessage ? 'flex items-end gap-2' : ''}
+  className={`${isShortMessage ? 'flex items-end gap-2' : ''} ${!isOwnMessage && !message.isRead ? 'text-blue-500 font-medium' : ''}`}
 >
   {isEditing ? (
     <div className="w-full">
@@ -1697,6 +1698,10 @@ const confirmDeleteChat = async () => {
   // Hovered message date label (single place below header)
   const [hoverDateLabel, setHoverDateLabel] = useState("");
   const hoverClearTimeoutRef = useRef(null);
+
+  // In-app notifications state
+  const [notifications, setNotifications] = useState([]);
+  const notificationIdCounter = useRef(0);
 
   // Centralized hover handler: shows label and auto-clears after timeout
   const handleHoverDateChange = useCallback((label) => {
@@ -3109,6 +3114,15 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
           console.log('📝 Created contactForUI from existing chat:', contactForUI, 'from chat:', chat);
           setSelectedContact(contactForUI);
 
+          // Clear unread count for this chat
+          setRecentChats((prev) => 
+            prev.map((c) => 
+              (c.chatId === normalizedChatId || c.id === normalizedChatId) 
+                ? { ...c, unreadCount: 0 } 
+                : c
+            )
+          );
+
           // Join socket room
           if (socketRef.current && socketRef.current.emit) {
             socketRef.current.emit('join chat', normalizedChatId);
@@ -3128,7 +3142,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               content: m.content || m.text || '',
               sender: m.sender,
               timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-              isRead: m.isRead || false,
+              isRead: true,
               attachments: m.attachments || [],
               isForwarded: m.isForwarded || false,
               isEdited: m.isEdited || false,
@@ -3221,6 +3235,15 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
         };
 
         setSelectedContact(contactForUI);
+
+        // Clear unread count for this chat
+        setRecentChats((prev) => 
+          prev.map((c) => 
+            (c.chatId === normalizedChatId || c.id === normalizedChatId) 
+              ? { ...c, unreadCount: 0 } 
+              : c
+          )
+        );
 
         // Join socket room
         if (socketRef.current && socketRef.current.emit) {
@@ -4646,6 +4669,113 @@ const handleSendMessageFromInput = useCallback(
           repliedTo: normalizedRepliedTo,
         };
 
+        // Determine sender info for notifications
+        const senderName = (newMessage.sender && typeof newMessage.sender === 'object') 
+          ? (newMessage.sender.name || newMessage.sender.username || 'Someone') 
+          : 'Someone';
+        
+        const senderAvatar = (newMessage.sender && typeof newMessage.sender === 'object')
+          ? (newMessage.sender.pic || newMessage.sender.avatar)
+          : null;
+        
+        const messageText = formatted.content || 
+          (formatted.attachments && formatted.attachments.length ? 
+            `📎 ${formatted.attachments[0]?.fileName || 'Attachment'}` : 
+            'New message');
+
+        // Check if message is for current open chat
+        const isCurrentChat = selectedContact && (
+          String(selectedContact.id) === String(key) || 
+          String(selectedContact.chatId) === String(key)
+        );
+
+        console.log('🔍 Notification check:', {
+          isCurrentChat,
+          selectedContactId: selectedContact?.id,
+          selectedContactChatId: selectedContact?.chatId,
+          messageKey: key,
+          willShowNotification: !isCurrentChat
+        });
+
+        // Show notifications when chat is not currently open
+        if (!isCurrentChat) {
+          console.log('🧪 INSIDE !isCurrentChat block - notification code SHOULD run');
+          
+          // Check notification settings
+          const notificationsEnabled = localStorage.getItem('notificationsEnabled');
+          const soundEnabled = localStorage.getItem('soundEnabled');
+          const showNotifications = notificationsEnabled === null || JSON.parse(notificationsEnabled) === true;
+          const playSound = soundEnabled === null || JSON.parse(soundEnabled) === true;
+          
+          console.log('Settings check:', { showNotifications, playSound });
+          console.log('🧪 Notification API exists?', 'Notification' in window);
+          console.log('🧪 Permission status:', typeof Notification !== 'undefined' ? Notification.permission : 'N/A');
+          
+          const currentUnread = recentChats.find(c => c.chatId === key || c.id === key)?.unreadCount || 0;
+          console.log('📢 Showing notifications:', { 
+            senderName, 
+            messageText, 
+            chatId: key, 
+            currentUnread, 
+            tabVisible: document.visibilityState,
+            notificationSupport: 'Notification' in window,
+            permission: typeof Notification !== 'undefined' ? Notification.permission : 'N/A'
+          });
+          
+          // Always show in-app notification if notifications are enabled
+          if (showNotifications) {
+            setNotifications(prev => {
+              const newNotif = {
+                id: `notif-${Date.now()}-${notificationIdCounter.current++}`,
+                chatId: key,
+                senderName,
+                avatar: senderAvatar,
+                message: messageText,
+                unreadCount: currentUnread + 1,
+                timestamp: Date.now()
+              };
+              console.log('✅ In-app notification created:', newNotif);
+              return [...prev, newNotif];
+            });
+          }
+          
+          console.log('After setNotifications - now testing browser notification');
+          
+          // Only show browser notification if notifications are enabled in settings
+          if (showNotifications) {
+            // Browser notification
+            if ("Notification" in window && Notification.permission === "granted") {
+              try {
+                const notification = new Notification(senderName, {
+                  body: messageText,
+                  icon: senderAvatar || "/icon.png",
+                  tag: `chat-${key}`,
+                  requireInteraction: false,
+                  silent: !playSound // Silent if sound is disabled
+                });
+
+              notification.onclick = (event) => {
+                event.preventDefault();
+                window.focus();
+                const chat = recentChats.find(c => 
+                  String(c.chatId) === String(key) || 
+                  String(c.id) === String(key)
+                );
+                if (chat) {
+                  handleOpenChat(chat);
+                }
+                notification.close();
+              };
+                
+            } catch (error) {
+              console.error('Error creating notification:', error);
+            }
+          }
+        } else {
+          console.log('Notifications disabled in settings');
+        }
+        }
+
         const populateRepliedFromServer = async (chatId, repliedArray) => {
           try {
             const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
@@ -4709,7 +4839,20 @@ const handleSendMessageFromInput = useCallback(
           attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
           timestamp: formatted.timestamp,
         });
-        setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
+        
+        // Only increment unread count if this chat is not currently open (reuse isCurrentChat from above)
+        if (!isCurrentChat) {
+          setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
+        } else {
+          // If chat is currently open, mark the message as read
+          setMessages((prev) => {
+            const chatMessages = prev[key] || [];
+            const updatedMessages = chatMessages.map(m => 
+              String(m.id) === String(formatted.id) ? { ...m, isRead: true } : m
+            );
+            return { ...prev, [key]: updatedMessages };
+          });
+        }
         updateContactPreview(key, preview, hasAttachment, {
           attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
           attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
@@ -7987,6 +8130,72 @@ useEffect(() => {
           null}
         </div>
       </div>
+
+      {/* Message Notification Container */}
+      <MessageNotificationContainer
+        notifications={notifications}
+        onClose={(notifId) => {
+          setNotifications(prev => prev.filter(n => n.id !== notifId));
+        }}
+        onReply={async (chatId, replyText) => {
+          try {
+            // Send quick reply
+            const token = localStorage.getItem("token") || localStorage.getItem("chasmos_auth_token");
+            if (!token) return;
+
+            const payload = {
+              content: replyText,
+              chatId: chatId,
+            };
+
+            const res = await fetch(`${API_BASE_URL}/api/message`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify(payload),
+            });
+
+            if (res.ok) {
+              const sentMsg = await res.json();
+              
+              // Clear unread count for this chat
+              setRecentChats((prev) => 
+                prev.map((c) => 
+                  (String(c.chatId) === String(chatId) || String(c.id) === String(chatId)) 
+                    ? { ...c, unreadCount: 0 } 
+                    : c
+                )
+              );
+              
+              // Mark all messages in this chat as read
+              setMessages((prev) => {
+                const chatMessages = prev[chatId] || [];
+                const updatedMessages = chatMessages.map(m => ({ ...m, isRead: true }));
+                return { ...prev, [chatId]: updatedMessages };
+              });
+              
+              toast.success("Reply sent!");
+            }
+          } catch (error) {
+            console.error("Error sending quick reply:", error);
+            toast.error("Failed to send reply");
+          }
+        }}
+        onOpen={(notification) => {
+          // Open the chat when notification is clicked
+          const chat = recentChats.find(c => 
+            String(c.chatId) === String(notification.chatId) || 
+            String(c.id) === String(notification.chatId)
+          );
+          if (chat) {
+            handleOpenChat(chat);
+          }
+          // Remove this notification
+          setNotifications(prev => prev.filter(n => n.id !== notification.id));
+        }}
+      />
     </>
   );
 }

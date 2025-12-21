@@ -138,7 +138,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
       }
 
       const data = await response.json();
-      console.log(`Received ${data.length} items for ${activeTab}`);
+      console.log(`Received ${data.length} items for ${activeTab}`, data);
       
       switch (activeTab) {
         case 'media':
@@ -416,13 +416,13 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
       {/* Detail View Modal */}
       <AnimatePresence>
         {detailView && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setDetailView(null)}>
+          <div className={`fixed inset-0 z-[60] flex items-center justify-center p-4 ${effectiveTheme.mode === 'dark' ? 'bg-black/70 backdrop-blur-sm' : 'bg-white/90'}`} onClick={() => setDetailView(null)}>
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
               onClick={(e) => e.stopPropagation()}
-              className={`w-full max-w-4xl max-h-[90vh] ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-2xl overflow-hidden flex flex-col`}
+              className={`w-full max-w-4xl max-h-[90vh] ${effectiveTheme.mode === 'dark' ? effectiveTheme.secondary : 'bg-white'} border ${effectiveTheme.border} rounded-lg shadow-2xl overflow-hidden flex flex-col`}
             >
               {/* Detail View Header */}
               <div className={`flex items-center justify-between p-4 border-b ${effectiveTheme.border}`}>
@@ -438,8 +438,15 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                 </button>
               </div>
 
+              {/* Sender Info Below Navbar */}
+              <div className={`px-6 pt-4 pb-2`}>
+                <p className={`text-sm font-medium ${effectiveTheme.text}`}>
+                  Sent by: {detailView.senderName || detailView.capturedByName || 'Unknown'}
+                </p>
+              </div>
+
               {/* Detail View Content */}
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="flex-1 overflow-y-auto px-6 pb-6">
                 {/* Preview Section */}
                 <div className="mb-6 flex justify-center">
                   {detailView.mimeType?.startsWith('image/') || detailView.type === 'screenshot' ? (
@@ -470,13 +477,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
 
                 {/* Information Section */}
                 <div className={`${effectiveTheme.mode === 'dark' ? 'bg-gray-800' : 'bg-gray-50'} rounded-lg p-4 space-y-3`}>
-                  {/* File Name */}
-                  <div>
-                    <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>File Name</p>
-                    <p className={`text-sm ${effectiveTheme.text} break-all`}>{detailView.fileName}</p>
-                  </div>
-
-                  {/* Caption/Content */}
+                  {/* Caption */}
                   {detailView.content && detailView.content.trim() !== '' && (
                     <div>
                       <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>Caption</p>
@@ -484,12 +485,10 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                     </div>
                   )}
 
-                  {/* Sender */}
+                  {/* File Name */}
                   <div>
-                    <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>Sent By</p>
-                    <p className={`text-sm ${effectiveTheme.text}`}>
-                      {detailView.senderName || detailView.capturedByName || 'Unknown'}
-                    </p>
+                    <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>File Name</p>
+                    <p className={`text-sm ${effectiveTheme.text} break-all`}>{detailView.fileName}</p>
                   </div>
 
                   {/* Date */}
