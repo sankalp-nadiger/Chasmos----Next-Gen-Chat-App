@@ -1,11 +1,29 @@
 /* eslint-disable no-unused-vars */
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
-import { Phone, Lock, Image, Users, Eye, EyeOff, Mail, User, Check, ArrowLeft, X, Camera } from "lucide-react";
+import { Phone, Lock, Image, Users, Eye, EyeOff, Mail, User, Check, ArrowLeft, X, Camera, Briefcase } from "lucide-react";
+const MAX_BIO_LENGTH = 100;
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
 const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+
+// ✅ Business Categories
+const BUSINESS_CATEGORIES = [
+  { id: "restaurants", label: "Restaurant" },
+  { id: "retail", label: "Retail Store" },
+  { id: "ecommerce", label: "E-commerce" },
+  { id: "technology", label: "Technology" },
+  { id: "education", label: "Education" },
+  { id: "healthcare", label: "Healthcare" },
+  { id: "finance", label: "Finance" },
+  { id: "real-estate", label: "Real Estate" },
+  { id: "travel", label: "Travel & Tourism" },
+  { id: "entertainment", label: "Entertainment" },
+  { id: "marketing", label: "Marketing & Advertising" },
+  { id: "freelancer", label: "Freelancer / Consultant" },
+  { id: "other", label: "Other" },
+];
 
 const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) => {
   // Auto-populate avatar from Google data (checks .avatar or .picture)
@@ -16,7 +34,11 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
     phoneNumber: "",
     password: "", 
     confirmPassword: "", 
-    enableGoogleContacts: false
+    enableGoogleContacts: false,
+    bio: "", // ✅ Add bio
+    isBusiness: false, // ✅ Add business toggle
+    businessCategory: "", // ✅ Add business category
+    customBusinessCategory: "", // ✅ Add custom category
   });
   
   const [showPassword, setShowPassword] = useState(false);
@@ -47,6 +69,22 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
         return;
       }
     }
+
+    // ✅ Business validation
+    if (formData.isBusiness) {
+      if (!formData.bio || !formData.bio.trim()) {
+        setError("Please provide a bio for your business");
+        return;
+      }
+      if (!formData.businessCategory) {
+        setError("Please select a business category");
+        return;
+      }
+      if (formData.businessCategory === "other" && !formData.customBusinessCategory.trim()) {
+        setError("Please specify your business category");
+        return;
+      }
+    }
     
     setIsLoading(true);
 
@@ -72,6 +110,19 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
         }
       }
 
+      // ✅ Calculate final business category
+      let finalBusinessCategory = null;
+      if (formData.isBusiness) {
+        if (formData.businessCategory === "other") {
+          finalBusinessCategory = formData.customBusinessCategory.trim();
+        } else {
+          const selected = BUSINESS_CATEGORIES.find(
+            (c) => c.id === formData.businessCategory
+          );
+          finalBusinessCategory = selected?.label || null;
+        }
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/auth/google/complete-signup`, {
         method: 'POST',
         headers: {
@@ -83,7 +134,10 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
           phoneNumber: formData.phoneNumber,
           password: formData.password,
           enableGoogleContacts: formData.enableGoogleContacts,
-          avatar: finalAvatarUrl
+          avatar: finalAvatarUrl,
+          bio: formData.bio || undefined, // ✅ Include bio
+          isBusiness: formData.isBusiness, // ✅ Include business flag
+          businessCategory: finalBusinessCategory, // ✅ Include final category label
         }),
       });
 
@@ -219,6 +273,100 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
                         </div>
                         <p className="text-xs text-gray-500">Linked to Google account.</p>
                     </div>
+
+                    {/* ✅ BUSINESS ACCOUNT TOGGLE */}
+                    <div className={`p-4 rounded-xl border ${formData.isBusiness ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : currentTheme.border} transition-all cursor-pointer`}
+                        onClick={() => setFormData(prev => ({ 
+                          ...prev, 
+                          isBusiness: !prev.isBusiness,
+                          businessCategory: "",
+                          customBusinessCategory: "",
+                          bio: ""
+                        }))}
+                    >
+                        <div className="flex items-center space-x-3">
+                            <div className={`flex-shrink-0 w-6 h-6 rounded border flex items-center justify-center transition-colors ${formData.isBusiness ? 'bg-blue-500 border-blue-500' : 'border-gray-400 bg-transparent'}`}>
+                                {formData.isBusiness && <Check className="w-4 h-4 text-white" />}
+                            </div>
+                            <div className="flex-1 text-left">
+                                <p className={`font-medium ${currentTheme.text} flex items-center gap-2`}>
+                                    <Briefcase className="w-4 h-4 text-blue-500" /> Business Account
+                                </p>
+                                <p className={`text-xs ${currentTheme.textSecondary}`}>Register as a business or organization</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* ✅ BUSINESS CATEGORY DROPDOWN */}
+                    {formData.isBusiness && (
+                      <div className="space-y-2">
+                        <label className={`block text-sm font-medium ${currentTheme.text}`}>Business Category</label>
+                        <select
+                          required
+                          value={formData.businessCategory}
+                          onChange={(e) => setFormData(prev => ({ 
+                            ...prev, 
+                            businessCategory: e.target.value,
+                            customBusinessCategory: ""
+                          }))}
+                          className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${currentTheme.text}`}
+                        >
+                          <option value="">Select category</option>
+                          {BUSINESS_CATEGORIES.map((cat) => (
+                            <option key={cat.id} value={cat.id}>
+                              {cat.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {/* ✅ CUSTOM CATEGORY TEXTAREA */}
+                    {formData.isBusiness && formData.businessCategory === "other" && (
+                      <div className="space-y-2">
+                        <label className={`block text-sm font-medium ${currentTheme.text}`}>Specify Category</label>
+                        <textarea
+                          required
+                          placeholder="Enter your business category"
+                          value={formData.customBusinessCategory}
+                          onChange={(e) => setFormData(prev => ({ 
+                            ...prev, 
+                            customBusinessCategory: e.target.value 
+                          }))}
+                          className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${currentTheme.text} resize-none`}
+                          rows="2"
+                        />
+                      </div>
+                    )}
+
+                    {/* ✅ BIO TEXTAREA (required for business) */}
+                    <div className="space-y-2">
+        <label className={`block text-sm font-medium ${currentTheme.text}`}>
+          {formData.isBusiness ? "About Company" : "Bio"}
+          <span className={`ml-2 text-xs ${currentTheme.textSecondary}`}>
+            ({formData.bio.length}/{MAX_BIO_LENGTH})
+          </span>
+        </label>
+        <textarea
+          placeholder={formData.isBusiness ? "Brief description of your company" : "Tell us about yourself"}
+          value={formData.bio}
+          onChange={(e) => {
+            const text = e.target.value;
+            if (text.length <= MAX_BIO_LENGTH) {
+              setFormData(p => ({ ...p, bio: text }));
+            }
+          }}
+          className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 ${currentTheme.text} resize-none`}
+          rows="3"
+          maxLength={MAX_BIO_LENGTH}
+          required
+        />
+        {formData.bio.length >= MAX_BIO_LENGTH && (
+          <p className="text-xs text-orange-500">
+            Maximum character limit reached
+          </p>
+        )}
+      </div>
                 </div>
             </motion.div>
 

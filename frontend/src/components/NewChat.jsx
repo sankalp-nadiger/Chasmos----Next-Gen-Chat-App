@@ -383,6 +383,7 @@ const NewChat = ({
           title: b.title,
           business: b.businessName,
           location: b.location,
+           bio: b.bio || "",
           businessCategory: b.businessCategory,
           isOnline: b.isOnline,
           type: "business",
@@ -703,30 +704,62 @@ const NewChat = ({
       ),
     [registeredUsers, searchTerm]
   );
+// Add this helper function at the top of NewChat component
+const getBusinessCategoriesWithCustom = (businessUsers, businessCategoryCounts) => {
+  const baseCategories = [...businessCategories];
+  
+  // Find all custom categories (not in base list)
+  const customCategories = new Set();
+  businessUsers.forEach(user => {
+    if (user.businessCategory) {
+      const isBaseCategory = businessCategories.some(
+        cat => cat.label === user.businessCategory || cat.id === user.businessCategory
+      );
+      if (!isBaseCategory) {
+        customCategories.add(user.businessCategory);
+      }
+    }
+  });
+  
+  // Add custom categories with a generic icon
+  customCategories.forEach(customCat => {
+    baseCategories.push({
+      id: customCat.toLowerCase().replace(/\s+/g, '-'),
+      name: customCat,
+      label: customCat,
+      icon: Briefcase, // Default icon for custom categories
+      color: 'bg-gradient-to-br from-gray-500 to-gray-600', // Default color
+    });
+  });
+  
+  return baseCategories;
+};
+  
+const filteredBusinessContacts = useMemo(() => {
+  if (!selectedBusinessCategory) return [];
 
-  const filteredBusinessContacts = useMemo(() => {
-    if (!selectedBusinessCategory) return [];
+  // Self business first
+  const self = businessUsers.find(
+    (b) =>
+      (b.businessCategory === selectedBusinessCategory.id ||
+       b.businessCategory === selectedBusinessCategory.label) &&
+      b.email?.toLowerCase() === currentUserEmail.toLowerCase()
+  );
 
-    // Self business first
-    const self = businessUsers.find(
-      (b) =>
-        b.businessCategory === selectedBusinessCategory.id &&
-        b.email?.toLowerCase() === currentUserEmail.toLowerCase()
-    );
+  const others = businessUsers.filter(
+    (b) =>
+      (b.businessCategory === selectedBusinessCategory.id ||
+       b.businessCategory === selectedBusinessCategory.label) &&
+      b.email?.toLowerCase() !== currentUserEmail.toLowerCase() &&
+      (
+        b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        b.business?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        b.title?.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+  );
 
-    const others = businessUsers.filter(
-      (b) =>
-        b.businessCategory === selectedBusinessCategory.id &&
-        b.email?.toLowerCase() !== currentUserEmail.toLowerCase() &&
-        (
-          b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          b.business?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          b.title?.toLowerCase().includes(searchTerm.toLowerCase())
-        )
-    );
-
-    return self ? [self, ...others] : others;
-  }, [businessUsers, selectedBusinessCategory, searchTerm, currentUserEmail]);
+  return self ? [self, ...others] : others;
+}, [businessUsers, selectedBusinessCategory, searchTerm, currentUserEmail]);
 
   // =========================
   // CHAT START
@@ -1039,51 +1072,59 @@ const NewChat = ({
         )}
 
         {/* Business Directory Section */}
-        {activeSection === "business" && (
-          <div className="h-full overflow-y-auto p-4">
-            {!selectedBusinessCategory ? (
-              <div>
-                <div className="flex items-center space-x-2 mb-4">
-                  <Briefcase
-                    className={`w-5 h-5 ${effectiveTheme.textSecondary || "text-gray-500"}`}
-                  />
-                  <h3 className={`font-medium ${effectiveTheme.text || "text-gray-900"}`}>
-                    Business Categories
-                  </h3>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {businessCategories
-                    .filter((c) => businessCategoryCounts[c.id] > 0)
-                    .map((category) => (
-                      <motion.div
-                        key={category.id}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => handleBusinessCategoryClick(category)}
-                        className={`${effectiveTheme.secondary || "bg-gray-50"} border ${
-                          effectiveTheme.border || "border-gray-200"
-                        } rounded-lg p-4 cursor-pointer hover:shadow-md transition-all duration-200`}
-                      >
-                        <div
-                          className={`w-12 h-12 ${category.color} rounded-lg flex items-center justify-center mb-3`}
-                        >
-                          <category.icon className="w-6 h-6 text-white" />
-                        </div>
-                        <h4
-                          className={`font-semibold ${effectiveTheme.text || "text-gray-900"} mb-1`}
-                        >
-                          {category.label}
-                        </h4>
-                        <p
-                          className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"} mt-2`}
-                        >
-                          {businessCategoryCounts[category.id]} businesses
-                        </p>
-                      </motion.div>
-                    ))}
-                </div>
-              </div>
-            ) : (
+{activeSection === "business" && (
+  <div className="h-full overflow-y-auto p-4">
+    {!selectedBusinessCategory ? (
+      <div>
+        <div className="flex items-center space-x-2 mb-4">
+          <Briefcase
+            className={`w-5 h-5 ${effectiveTheme.textSecondary || "text-gray-500"}`}
+          />
+          <h3 className={`font-medium ${effectiveTheme.text || "text-gray-900"}`}>
+            Business Categories
+          </h3>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {getBusinessCategoriesWithCustom(businessUsers, businessCategoryCounts)
+            .filter((c) => {
+              // Check if category has users by label or id
+              const countByLabel = businessCategoryCounts[c.label] || 0;
+              const countById = businessCategoryCounts[c.id] || 0;
+              return countByLabel > 0 || countById > 0;
+            })
+            .map((category) => {
+              const count = businessCategoryCounts[category.label] || businessCategoryCounts[category.id] || 0;
+              return (
+                <motion.div
+                  key={category.id}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleBusinessCategoryClick(category)}
+                  className={`${effectiveTheme.secondary || "bg-gray-50"} border ${
+                    effectiveTheme.border || "border-gray-200"
+                  } rounded-lg p-4 cursor-pointer hover:shadow-md transition-all duration-200`}
+                >
+                  <div
+                    className={`w-12 h-12 ${category.color} rounded-lg flex items-center justify-center mb-3`}
+                  >
+                    <category.icon className="w-6 h-6 text-white" />
+                  </div>
+                  <h4
+                    className={`font-semibold ${effectiveTheme.text || "text-gray-900"} mb-1`}
+                  >
+                    {category.label}
+                  </h4>
+                  <p
+                    className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"} mt-2`}
+                  >
+                    {count} businesses
+                  </p>
+                </motion.div>
+              );
+            })}
+        </div>
+      </div>
+    )  : (
               <div>
                 <div className="flex items-center space-x-2 mb-4">
                   <button
@@ -1286,60 +1327,89 @@ const ContactItem = ({
         hover:${effectiveTheme.hover || "bg-gray-100"}`}
       >
         {/* LEFT */}
-        <div className="flex items-center gap-3" onClick={handleOpenChat}>
-          <div className="relative">
+        <div className="flex items-center gap-3 flex-1 min-w-0" onClick={handleOpenChat}>
+          <div className="relative flex-shrink-0">
             <img
               src={
                 contact.avatar ||
                 "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
               }
               className="w-12 h-12 rounded-full object-cover"
+              alt={contact.name}
             />
             {contact.isOnline && (
               <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
             )}
           </div>
-          <div>
-            <h3 className="font-semibold truncate">
+          
+          <div className="flex-1 min-w-0">
+            {/* Name */}
+            <h3 className={`font-semibold truncate ${effectiveTheme.text || "text-gray-900"}`}>
               {contact.name}
               {isSelf && (
                 <span className="text-xs text-blue-500 ml-1">(You)</span>
               )}
             </h3>
-            {isBusiness && contact.title && (
-              <p className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"} truncate`}>
-                {contact.title}
+
+            {/* Bio for Business Users */}
+           {isBusiness && (
+  <>
+    {contact.bio ? (
+      <p
+        className={`text-sm ${effectiveTheme.textSecondary || "text-gray-600"} mt-1`}
+        style={{
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          lineHeight: '1.4em',
+          maxHeight: '2.8em',
+        }}
+      >
+        {contact.bio}
+      </p>
+    ) : contact.businessCategory ? (
+      <div className="flex items-center space-x-1 mt-1">
+        <Briefcase
+          className={`w-3 h-3 ${effectiveTheme.textSecondary || "text-gray-500"}`}
+        />
+        <span
+          className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"}`}
+        >
+          {contact.businessCategory}
+        </span>
+      </div>
+    ) : null}
+  </>
+)}
+
+
+            {/* Online Status for Non-Business */}
+         {showLastSeen && (
+  <span className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"}`}>
+    {contact.isOnline
+      ? "Online"
+      : isBusiness
+        ? "Currently unavailable"
+        : "Offline"}
+  </span>
+)}
+
+
+
+            {/* Email/Phone for Non-Business
+            {!isBusiness && (contact.email || contact.phoneNumber) && (
+              <p className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"} mt-1 truncate`}>
+                {contact.email || contact.phoneNumber}
               </p>
-            )}
-            {isBusiness && contact.business && (
-              <div className="flex items-center space-x-2 mt-1">
-                <span className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"} truncate`}>
-                  {contact.business}
-                </span>
-                {contact.location && (
-                  <>
-                    <span className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"}`}>•</span>
-                    <div className="flex items-center space-x-1">
-                      <MapPin className={`w-3 h-3 ${effectiveTheme.textSecondary || "text-gray-500"}`} />
-                      <span className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"} truncate`}>
-                        {contact.location}
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-            {showLastSeen && !isBusiness && (
-              <span className="text-xs text-gray-500">
-                {contact.isOnline ? "Online" : "Offline"}
-              </span>
-            )}
+            )} */}
           </div>
         </div>
 
         {/* LEFT ACTION (for contacts list) */}
         {leftActionType && (
-          <div className="flex items-center mr-3">
+          <div className="flex items-center mr-3 flex-shrink-0">
             {leftActionType === "chat" && (
               <button
                 onClick={(e) => {
@@ -1370,7 +1440,7 @@ const ContactItem = ({
 
         {/* RIGHT ICONS */}
         {!hideRightActions && (
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 flex-shrink-0">
             {isBusiness || chatStatus === "accepted" || isMyEmailAcceptedByContact ? (
               <button
                 onClick={(e) => {
