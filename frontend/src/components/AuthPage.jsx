@@ -13,12 +13,14 @@ import {
   EyeOff,
   Lock,
   Phone,
-  ArrowRight
+  ArrowRight,
+  Camera
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { useTheme } from '../context/ThemeContext';
 import Logo from './Logo';
 import GoogleSignupComplete from './GoogleSignupComplete.jsx';
+import GoogleLoginButton from './GoogleLoginButton.jsx';
 import imageCompression from "browser-image-compression";
 import { supabase } from '../supabaseClient';
 
@@ -42,40 +44,7 @@ const BUSINESS_CATEGORIES = [
   { id: "other", label: "Other" },
 ];
 
-const GoogleLoginButton = ({ onSuccess, onError }) => {
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    document.body.appendChild(script);
-    
-    script.onload = () => {
-      window.google?.accounts.id.initialize({
-        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-        callback: onSuccess,
-      });
-      
-      window.google?.accounts.id.renderButton(
-        document.getElementById('googleLoginButton'),
-        { 
-          theme: 'outline',
-          size: 'large',
-          width: '100%',
-          text: 'continue_with'
-        }
-      );
-    };
-    
-    return () => {
-      if (document.body.contains(script)) {
-        document.body.removeChild(script);
-      }
-    };
-  }, [onSuccess]);
-  
-  return <div id="googleLoginButton"></div>;
-};
+// Use shared GoogleLoginButton component (supports auth-code flow)
 
 // Features data
 const appFeatures = [
@@ -97,7 +66,7 @@ const appFeatures = [
     id: 3,
     title: "Screenshot Detection",
     description: "Automatically detect and organize screenshots for easy reference and sharing",
-    icon: Shield,
+    icon: Camera,
     color: "from-green-500 to-emerald-500",
   },
 ];
@@ -241,6 +210,7 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
 
   const handleGoogleLogin = useCallback(
     async (googleResponse) => {
+      console.log('AuthPage.handleGoogleLogin: googleResponse', googleResponse);
       setError("");
       setIsLoading(true);
       try {
@@ -248,15 +218,14 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
           ? { code: googleResponse.code }
           : { idToken: googleResponse.credential };
 
+        console.log('AuthPage.handleGoogleLogin: sending payload to server', bodyPayload);
         const res = await fetch(`${API_BASE_URL}/api/auth/google`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify(bodyPayload),
-        });
-        
-        const data = await res.json();
+        });        const data = await res.json();
 
         if (!res.ok) {
           throw new Error(data.message || "Google login failed");
@@ -269,6 +238,20 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
             avatar: data.avatar || data.googleData?.picture || data.googleData?.avatar,
             raw: data,
           });
+          return;
+        }
+
+        // If backend requires Google consent to obtain tokens, redirect user to consent flow
+        if (data?.needsGoogleConnect && data.googleConnectUrl) {
+          // Persist basic login details so callback can continue the session
+          try {
+            const userData = data.user || data;
+            localStorage.setItem('userInfo', JSON.stringify(userData));
+            localStorage.setItem('chasmos_user_data', JSON.stringify(userData));
+            localStorage.setItem('token', data.token || data.accessToken || "");
+          } catch (e) {}
+          // Redirect to Google's OAuth consent to capture refresh token
+          window.location.href = data.googleConnectUrl;
           return;
         }
 
@@ -308,6 +291,17 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
 
         if (!response.ok) {
           throw new Error(data.message || "Login failed");
+        }
+
+        // If server asks user to connect Google for contacts (no refresh token), redirect
+        if (data?.needsGoogleConnect && data.googleConnectUrl) {
+          try {
+            localStorage.setItem("userInfo", JSON.stringify(data));
+            localStorage.setItem("chasmos_user_data", JSON.stringify(data));
+            localStorage.setItem("token", data.token);
+          } catch (e) {}
+          window.location.href = data.googleConnectUrl;
+          return;
         }
 
         localStorage.setItem("userInfo", JSON.stringify(data));
@@ -835,6 +829,7 @@ const AuthPage = ({ onAuthenticated }) => {
           avatar: data.picture
         });
       } else {
+        // For existing users, proceed with login
         localStorage.setItem('userInfo', JSON.stringify(data));
         localStorage.setItem('chasmos_user_data', JSON.stringify(data));
         localStorage.setItem('token', data.token);

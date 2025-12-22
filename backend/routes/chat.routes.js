@@ -7,6 +7,7 @@ import {
   // removeFromGroup,
   // addToGroup,
   getRecentChats,
+  fetchPreviousChats,
   deleteChat,
    getGroupChatById,
   // leaveGroup,
@@ -22,6 +23,7 @@ const router = express.Router();
 router.route("/").post(protect, accessChat);
 router.route("/").get(protect, fetchChats);
 router.route("/recent").get(protect, getRecentChats);
+router.route("/previous").get(protect, fetchPreviousChats);
  router.route("/group").post(protect, createGroupChat);
 // router.route("/rename").put(protect, renameGroup);
 // router.route("/settings").put(protect, updateGroupSettings);

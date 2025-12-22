@@ -14,25 +14,95 @@ const err = (res, message, code = 400) =>
 // ----------------------------
 export const createGroup = async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { 
+      name, 
+      description, 
+      avatarBase64,
+      inviteLink,
+      inviteEnabled,
+      permissions = {},
+      features = {}
+    } = req.body;
+    
     const adminId = req.user._id;
 
+    console.log("📥 Received group creation request:");
+    console.log("- Name:", name);
+    console.log("- inviteEnabled:", inviteEnabled, typeof inviteEnabled);
+    console.log("- Permissions:", permissions);
+    console.log("- Features:", features);
+
     if (!name) return err(res, "Group name is required");
+
+    // Handle avatar upload if provided
+    let avatarUrl = "";
+    if (avatarBase64) {
+      try {
+        avatarUrl = avatarBase64;
+      } catch (uploadError) {
+        console.error("Avatar upload failed:", uploadError);
+      }
+    }
+
+    // Generate invite link if enabled
+    let finalInviteLink = "";
+    if (inviteEnabled) {
+      if (inviteLink) {
+        finalInviteLink = inviteLink;
+      } else {
+        const token = crypto.randomBytes(16).toString("hex");
+        finalInviteLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/invite/group-${token}`;
+      }
+    }
 
     const chat = await Chat.create({
       isGroupChat: true,
       participants: [adminId]
     });
 
-    const group = await Group.create({
-      name,
+    // ✅ Create group with all settings - EXPLICIT VALUES
+    const groupData = {
+      name: name.trim(),
       description: description || "",
+      avatar: avatarUrl,
+      icon: avatarUrl,
       participants: [adminId],
       admin: adminId,
+      admins: [adminId],
       chat: chat._id,
-    });
+      inviteLink: finalInviteLink,
+      inviteEnabled: inviteEnabled === true, // Explicit boolean
+      
+      // ✅ Save permissions with explicit boolean conversion
+      permissions: {
+        allowCreatorAdmin: permissions.allowCreatorAdmin === true || permissions.allowCreatorAdmin === undefined,
+        allowOthersAdmin: permissions.allowOthersAdmin === true,
+        allowMembersAdd: permissions.allowMembersAdd === true || permissions.allowMembersAdd === undefined,
+      },
+      
+      // ✅ Save features with explicit boolean conversion
+      features: {
+        media: features.media === true || features.media === undefined,
+        gallery: features.gallery === true || features.gallery === undefined,
+        docs: features.docs === true || features.docs === undefined,
+        polls: features.polls === true || features.polls === undefined,
+      },
+    };
 
-    // Emit socket event to participants so other connected users update immediately
+    console.log("💾 Saving group with data:");
+    console.log("- inviteEnabled:", groupData.inviteEnabled, typeof groupData.inviteEnabled);
+    console.log("- Permissions:", groupData.permissions);
+    console.log("- Features:", groupData.features);
+
+    const group = await Group.create(groupData);
+
+    console.log("✅ Group saved to database:");
+    console.log("- ID:", group._id);
+    console.log("- inviteEnabled:", group.inviteEnabled, typeof group.inviteEnabled);
+    console.log("- Permissions:", group.permissions);
+    console.log("- Features:", group.features);
+
+    // Emit socket event to participants
     try {
       const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
       const io = getSocketIOInstance();
@@ -42,17 +112,22 @@ export const createGroup = async (req, res) => {
         chat: group.chat,
         chatId: group.chat,
         name: group.name,
+        description: group.description,
         participants: group.participants || [],
         admin: group.admin,
+        admins: group.admins,
+        avatar: group.avatar,
+        inviteLink: group.inviteLink,
+        inviteEnabled: group.inviteEnabled,
+        permissions: group.permissions,
+        features: group.features,
       };
-      console.log('[group.controller] Emitting group created', { ioAvailable: !!io, groupId: String(group._id) });
+      
       if (io && Array.isArray(payload.participants)) {
-        // emit to each participant personal room
         payload.participants.forEach(p => {
-          try { io.to(String(p)).emit('group created', payload); } catch (e) { console.error('emit group created to participant failed', e); }
+          try { io.to(String(p)).emit('group created', payload); } catch (e) {}
         });
-        // also emit to chat room id
-        try { io.to(String(group.chat)).emit('group created', payload); } catch (e) { console.error('emit group created to chat room failed', e); }
+        try { io.to(String(group.chat)).emit('group created', payload); } catch (e) {}
       }
     } catch (e) {
       console.error('group.controller: failed to emit group created', e);
@@ -60,6 +135,7 @@ export const createGroup = async (req, res) => {
 
     return ok(res, { message: "Group created", group });
   } catch (error) {
+    console.error("❌ Create group error:", error);
     err(res, error.message, 500);
   }
 };
@@ -191,15 +267,17 @@ export const addAdmin = async (req, res) => {
     if (group.admin.toString() !== userId.toString())
       return err(res, "Only group admin can promote", 403);
 
-    group.admin = newAdminId;
-    await group.save();
+    // Add to admins array if not already there
+    if (!group.admins.includes(newAdminId)) {
+      group.admins.push(newAdminId);
+      await group.save();
+    }
 
-    return ok(res, { message: "Admin updated", group });
+    return ok(res, { message: "Admin added", group });
   } catch (error) {
     err(res, error.message, 500);
   }
 };
-
 
 
 // ----------------------------
@@ -209,6 +287,7 @@ export const exitGroup = async (req, res) => {
   try {
     const { groupId } = req.body;
     const userId = req.user._id;
+    console.log("User", userId, "is exiting group", groupId);
 
     const group = await Group.findById(groupId);
     if (!group) return err(res, "Group not found");
@@ -265,10 +344,20 @@ export const getGroupInfo = async (req, res) => {
     const { groupId } = req.params;
 
     const group = await Group.findById(groupId)
-      .populate("participants", "_id name avatar")
-      .populate("admin", "_id name avatar");
+      .populate("participants", "_id name avatar email username")
+      .populate("admin", "_id name avatar email username")
+      .populate("admins", "_id name avatar email username");
 
     if (!group) return err(res, "Group not found", 404);
+
+    console.log("📤 Sending group info:", {
+      _id: group._id,
+      name: group.name,
+      inviteEnabled: group.inviteEnabled,
+      inviteLink: group.inviteLink,
+      permissions: group.permissions,
+      features: group.features
+    });
 
     const responseGroup = {
       _id: group._id,
@@ -276,14 +365,32 @@ export const getGroupInfo = async (req, res) => {
       description: group.description,
       isGroup: true,
       chat: group.chat,
-      icon: group.icon || "",
+      icon: group.icon || group.avatar || "",
+      avatar: group.avatar || group.icon || "",
       participants: group.participants || [],
-      admins: [group.admin] || [],
+      admins: group.admins || [group.admin],
       groupAdmin: group.admin || null,
+      admin: group.admin || null,
+      
+      // ✅ Explicitly include settings
+      inviteLink: group.inviteLink || "",
+      inviteEnabled: Boolean(group.inviteEnabled),
+      permissions: {
+        allowCreatorAdmin: group.permissions?.allowCreatorAdmin !== false,
+        allowOthersAdmin: Boolean(group.permissions?.allowOthersAdmin),
+        allowMembersAdd: group.permissions?.allowMembersAdd !== false,
+      },
+      features: {
+        media: group.features?.media !== false,
+        gallery: group.features?.gallery !== false,
+        docs: group.features?.docs !== false,
+        polls: group.features?.polls !== false,
+      },
     };
 
     return ok(res, responseGroup);
   } catch (error) {
+    console.error("Get group info error:", error);
     err(res, error.message, 500);
   }
 };

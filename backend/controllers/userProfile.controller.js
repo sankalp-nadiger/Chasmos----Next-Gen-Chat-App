@@ -19,7 +19,9 @@ export const getUserProfile = async (req, res) => {
       name: user.name,
       email: user.email,
       phoneNumber: user.phoneNumber,
-      avatar: user.avatar,
+      // Prefer DB avatar; fall back to common alternate fields if present (pic/picture), then default
+      avatar:
+        user.avatar || user.picture || user.pic || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
       bio: user.bio,
       createdAt: user.createdAt,
       isOnline: user.isOnline

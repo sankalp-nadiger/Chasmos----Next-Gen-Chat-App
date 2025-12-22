@@ -84,6 +84,7 @@ import PinnedMessagesBar from "./PinnedMessagesBar";
 import DeleteMessageModal from "./DeleteMessageModal";
 import UserProfileModal from "./UserProfileModal";
 import GroupInfoModal from "./GroupInfoModal";
+import MessageNotificationContainer from "./MessageNotification";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
@@ -699,7 +700,7 @@ const MessageBubble = React.memo(
   initial={{ opacity: 0 }}
   animate={{ opacity: 1 }}
   transition={{ delay: 0.1 }}
-  className={isShortMessage ? 'flex items-end gap-2' : ''}
+  className={`${isShortMessage ? 'flex items-end gap-2' : ''} ${!isOwnMessage && message.status !== 'read' ? 'text-blue-500 font-medium' : ''}`}
 >
   {isEditing ? (
     <div className="w-full">
@@ -766,8 +767,19 @@ const MessageBubble = React.memo(
   }`}>
                   {formatMessageTime(message.isScheduled ? message.scheduledFor : message.timestamp)}
                   {message.isEdited && <span className="text-[10px] italic opacity-60">edited</span>}
-                  {message.isRead ? (
-                    <img src={doubleCheckIcon} alt="read" className="w-4 h-4 flex-shrink-0" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
+                  {message.status === 'read' ? (
+                    <img src={doubleCheckIcon} alt="read" className="w-4 h-4 flex-shrink-0" style={{ filter: 'invert(31%) sepia(83%) saturate(4514%) hue-rotate(184deg) brightness(92%) contrast(88%)', marginBottom: '1px' }} />
+                  ) : message.status === 'delivered' ? (
+                    <img
+                      src={doubleCheckIcon}
+                      alt="delivered"
+                      className="w-4 h-4 opacity-80 flex-shrink-0"
+                      style={
+                        effectiveTheme.mode === 'dark'
+                          ? { filter: 'invert(70%) sepia(20%) saturate(600%) hue-rotate(190deg) brightness(90%)', marginBottom: '1px' }
+                          : { filter: 'grayscale(100%) brightness(70%)', marginBottom: '1px' }
+                      }
+                    />
                   ) : (
                     <Check className="w-4 h-4 opacity-75 flex-shrink-0" />
                   )}
@@ -809,8 +821,19 @@ const MessageBubble = React.memo(
                   transition={{ delay: 0.4, type: "spring", stiffness: 400 }}
                   className="flex-shrink-0 ml-1"
                 >
-                  {message.isRead ? (
-                    <img src={doubleCheckIcon} alt="read" className="w-4 h-4" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
+                  {message.status === 'read' ? (
+                    <img src={doubleCheckIcon} alt="read" className="w-4 h-4" style={{ filter: 'invert(31%) sepia(83%) saturate(4514%) hue-rotate(184deg) brightness(92%) contrast(88%)', marginBottom: '1px' }} />
+                  ) : message.status === 'delivered' ? (
+                    <img
+                      src={doubleCheckIcon}
+                      alt="delivered"
+                      className="w-4 h-4 opacity-80"
+                      style={
+                        effectiveTheme.mode === 'dark'
+                          ? { filter: 'invert(70%) sepia(20%) saturate(600%) hue-rotate(190deg) brightness(90%)', marginBottom: '1px' }
+                          : { filter: 'grayscale(100%) brightness(70%)', marginBottom: '1px' }
+                      }
+                    />
                   ) : (
                     <Check className="w-4 h-4 opacity-75 text-white" />
                   )}
@@ -1590,6 +1613,45 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Listen for Google sync messages from the OAuth popup and react accordingly.
+  React.useEffect(() => {
+    const handler = (e) => {
+      try {
+        const d = e?.data;
+        if (!d || (d.type !== 'google_sync' && d.type !== 'google_sync_token')) return;
+
+        // If token message received, persist it and refresh contacts
+        if (d.type === 'google_sync_token' && d.token) {
+          try { localStorage.setItem('token', d.token); } catch (err) {}
+          // If app exposes refresh function, call it. Use custom event to trigger UI updates.
+          // Navigate back to the calling route (or /chats) then reload so contacts appear
+          const dest = d.origin || '/chats';
+          try { navigate(dest); } catch (err) {}
+          setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 350);
+          window.dispatchEvent(new CustomEvent('chasmos:google-sync-success', { detail: { token: d.token } }));
+        }
+
+        if (d.type === 'google_sync' && d.success) {
+          // If token provided in the message, persist it
+          if (d.token) {
+            try { localStorage.setItem('token', d.token); } catch (err) {}
+          }
+          // Navigate to the calling route (or /chats) then reload to show synced contacts
+          const destSuccess = d.origin || '/chats';
+          try { navigate(destSuccess); } catch (err) {}
+          setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 350);
+          // request a UI refresh — other parts of the app can listen for this event
+          window.dispatchEvent(new CustomEvent('chasmos:google-sync-success', { detail: { token: d.token } }));
+        }
+      } catch (err) {
+        console.error('Message handler error', err);
+      }
+    };
+
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [navigate]);
+
   // const [selectedContact, setSelectedContact] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [chatSearchTerm, setChatSearchTerm] = useState("");
@@ -1680,13 +1742,15 @@ const [selectedContact, setSelectedContact] = useState(null);
   // --- Delete Chat Modal State ---
 const [showDeleteChatModal, setShowDeleteChatModal] = useState(false);
 const [chatToDelete, setChatToDelete] = useState(null);
+const [keepMediaOnDelete, setKeepMediaOnDelete] = useState(false);
 
 // Confirm delete chat handler
 const confirmDeleteChat = async () => {
   if (chatToDelete) {
-    await handleDeleteChat(chatToDelete);
+    await handleDeleteChat(chatToDelete, keepMediaOnDelete);
     setShowDeleteChatModal(false);
     setChatToDelete(null);
+    setKeepMediaOnDelete(false);
   }
 };
 
@@ -1697,6 +1761,10 @@ const confirmDeleteChat = async () => {
   // Hovered message date label (single place below header)
   const [hoverDateLabel, setHoverDateLabel] = useState("");
   const hoverClearTimeoutRef = useRef(null);
+
+  // In-app notifications state
+  const [notifications, setNotifications] = useState([]);
+  const notificationIdCounter = useRef(0);
 
   // Centralized hover handler: shows label and auto-clears after timeout
   const handleHoverDateChange = useCallback((label) => {
@@ -2029,12 +2097,14 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
   }, []);
 
   // Delete chat handler (lifted here so it has access to state setters)
-  const handleDeleteChat = async (contact) => {
+  const handleDeleteChat = async (contact, keepMedia = false) => {
     const chatId = contact?.id || contact?._id || selectedContact?.id || selectedContact?._id;
     if (!chatId) return;
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/chat/${chatId}`, {
+      // include keepMedia flag as query param when provided
+      const qs = keepMedia ? '?keepMedia=true' : '';
+      const res = await fetch(`${API_BASE_URL}/api/chat/${chatId}${qs}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -2665,7 +2735,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             sender: m.sender,
             // prefer backend-provided `timestamp` (normalized to scheduledFor when applicable)
             timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: sent.status || (sent.isRead ? 'read' : 'sent'),
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
             isForwarded: m.isForwarded || false,
@@ -2717,7 +2787,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             sender: m.sender,
             // prefer backend-provided `timestamp` (normalized to scheduledFor when applicable)
             timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: m.status || (m.isRead ? 'read' : 'sent'),
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
             isForwarded: m.isForwarded || false,
@@ -2852,7 +2922,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               sender: m.sender,
               // Prefer normalized `timestamp` from backend (uses scheduledFor when applicable)
               timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-              isRead: true,
+              status: m.status || (m.isRead ? 'read' : 'sent'),
               attachments: Array.isArray(m.attachments) ? m.attachments : [],
               isSystemMessage: m.type === 'system',
               isForwarded: m.isForwarded || false,
@@ -3104,10 +3174,28 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             avatar: chat.avatar,
             participants: chat.participants || [],
             isGroup: chat.isGroup || chat.isGroupChat || false,
+            // set presence flag immediately based on known onlineUsers set
+            isOnline: (function() {
+              try {
+                const isGroup = chat.isGroup || chat.isGroupChat || false;
+                if (isGroup) return false;
+                const other = chat.userId || chat.id || chat.participantId || (chat.participants && chat.participants[0]?._id);
+                return other ? onlineUsers.has(String(other)) : false;
+              } catch (e) { return false; }
+            })(),
           };
 
           console.log('📝 Created contactForUI from existing chat:', contactForUI, 'from chat:', chat);
           setSelectedContact(contactForUI);
+
+          // Clear unread count for this chat
+          setRecentChats((prev) => 
+            prev.map((c) => 
+              (c.chatId === normalizedChatId || c.id === normalizedChatId) 
+                ? { ...c, unreadCount: 0 } 
+                : c
+            )
+          );
 
           // Join socket room
           if (socketRef.current && socketRef.current.emit) {
@@ -3128,7 +3216,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               content: m.content || m.text || '',
               sender: m.sender,
               timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-              isRead: m.isRead || false,
+              status: m.status || (m.isRead ? 'read' : 'sent'),
               attachments: m.attachments || [],
               isForwarded: m.isForwarded || false,
               isEdited: m.isEdited || false,
@@ -3222,6 +3310,15 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
 
         setSelectedContact(contactForUI);
 
+        // Clear unread count for this chat
+        setRecentChats((prev) => 
+          prev.map((c) => 
+            (c.chatId === normalizedChatId || c.id === normalizedChatId) 
+              ? { ...c, unreadCount: 0 } 
+              : c
+          )
+        );
+
         // Join socket room
         if (socketRef.current && socketRef.current.emit) {
           socketRef.current.emit("join chat", normalizedChatId);
@@ -3243,7 +3340,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             content: m.content || m.text || "",
             sender: m.sender,
             timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: m.status || (m.isRead ? 'read' : 'sent'),
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
             isForwarded: m.isForwarded || false,
@@ -3614,6 +3711,22 @@ const refreshRecentChats = useCallback(async () => {
   }
 }, [API_BASE_URL]);
 
+  // Listen for successful google sync events (dispatched from the oauth popup message handler)
+  React.useEffect(() => {
+    const onSync = (e) => {
+      try {
+        // optionally use token from detail
+        const token = e?.detail?.token;
+        if (token) localStorage.setItem('token', token);
+        refreshRecentChats();
+      } catch (err) {
+        console.error('Error handling google-sync-success event', err);
+      }
+    };
+    window.addEventListener('chasmos:google-sync-success', onSync);
+    return () => window.removeEventListener('chasmos:google-sync-success', onSync);
+  }, [refreshRecentChats]);
+
 
 // Fetch recent chats on mount
 // Improved loading logic: hide spinner after both fetch and min time
@@ -3828,6 +3941,9 @@ useEffect(() => {
                 hasAttachment: !!hasAttachment,
                 ...(hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {}),
                 ...(hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {}),
+                ...(meta.name ? { name: meta.name } : {}),
+                ...(meta.avatar ? { avatar: meta.avatar } : {}),
+                ...(meta.userId ? { userId: meta.userId } : {}),
               })
             : c
         );
@@ -3837,8 +3953,12 @@ useEffect(() => {
           {
             id: chatId,
             chatId,
-            name: selectedContact?.name || '',
-            avatar: selectedContact?.avatar || '/default-avatar.png',
+            // associate a userId for one-to-one chats when provided so presence/status works
+            userId: meta.userId || null,
+            // Prefer explicit meta.name/meta.avatar when provided (server or message payload),
+            // otherwise fall back to currently selected contact or a default.
+            name: meta.name || selectedContact?.name || '',
+            avatar: meta.avatar || selectedContact?.avatar || '/default-avatar.png',
             lastMessage: preview,
             hasAttachment: !!hasAttachment,
             timestamp: useTs,
@@ -3915,7 +4035,7 @@ const handleSendMessageFromInput = useCallback(
           content: payload.content || payload.text || '',
           sender: payload.sender?._id || payload.sender || 'me',
           timestamp: new Date(payload.timestamp || payload.scheduledFor || payload.createdAt || Date.now()).getTime(),
-          isRead: true,
+          status: payload.status || (payload.isRead ? 'read' : 'sent'),
           attachments: payload.attachments || payload.files || [],
           repliedTo: payload.repliedTo || [],
         };
@@ -3949,13 +4069,13 @@ const handleSendMessageFromInput = useCallback(
         let chatId = getChatId(payload);
         let userId = payload.userId;
 
-        const localMessage = {
+          const localMessage = {
           id: Date.now(),
           type: 'text',
           content: payload.content,
           sender: 'me',
           timestamp: Date.now(),
-          isRead: true,
+          status: 'sent',
         };
 
         if (!token) {
@@ -4077,13 +4197,18 @@ const handleSendMessageFromInput = useCallback(
             content: sent.content || sent.text || payload.content,
             sender: sent.sender?._id || sent.sender || 'me',
             timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: sent.status || (sent.isRead ? 'read' : 'sent'),
             repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
           };
 
           appendMessage(chatId, formatted);
           onClearReplySelection && onClearReplySelection();
-          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
+          if (socketRef.current?.emit) {
+            try {
+              console.log('[SOCKET OUT] emit new message', { chatId, messageId: formatted.id });
+              socketRef.current.emit('new message', sent);
+            } catch (e) { console.error('Error emitting new message', e); }
+          }
 
           updateRecentChat(chatId, payload.content, false);
           updateContactPreview(chatId, payload.content, false);
@@ -4106,6 +4231,7 @@ const handleSendMessageFromInput = useCallback(
           content: payload.text || '',
           sender: 'me',
           timestamp: Date.now(),
+          status: 'sent',
           attachments: payload.attachments,
         };
 
@@ -4234,7 +4360,7 @@ const handleSendMessageFromInput = useCallback(
             content: sent.content || sent.text || payload.text || '',
             sender: sent.sender?._id || sent.sender || 'me',
             timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
-            isRead: true,
+              status: sent.status || (sent.isRead ? 'read' : 'sent'),
             attachments: sent.attachments || payload.attachments,
             repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
           };
@@ -4276,7 +4402,7 @@ const handleSendMessageFromInput = useCallback(
           content: messageText,
           sender: 'me',
           timestamp: Date.now(),
-          isRead: true,
+          status: 'sent',
         };
 
         if (!token) {
@@ -4379,7 +4505,7 @@ const handleSendMessageFromInput = useCallback(
             content: sent.content || sent.text || messageText,
             sender: sent.sender?._id || sent.sender || 'me',
             timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: sent.status || (sent.isRead ? 'read' : 'sent'),
             repliedTo: sent.repliedTo || selectedReplies || [],
           };
 
@@ -4407,7 +4533,7 @@ const handleSendMessageFromInput = useCallback(
           content: payload.content || '📊 Poll',
           sender: 'me',
           timestamp: Date.now(),
-          isRead: true,
+          status: 'sent',
           poll: null, // Will be populated from server
         };
 
@@ -4462,7 +4588,7 @@ const handleSendMessageFromInput = useCallback(
             content: sent.content || payload.content || '📊 Poll',
             sender: sent.sender?._id || sent.sender || 'me',
             timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: sent.status || (sent.isRead ? 'read' : 'sent'),
             poll: fullPoll,
             repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
           };
@@ -4492,9 +4618,11 @@ const handleSendMessageFromInput = useCallback(
       socketRef.current = null;
     }
     const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+    const savedToken = localStorage.getItem('token') || (userData && userData.token) || '';
     const socket = io(API_BASE_URL, {
       transports: ['websocket'],
       withCredentials: true,
+      auth: { token: savedToken },
     });
     socketRef.current = socket;
 
@@ -4550,6 +4678,66 @@ const handleSendMessageFromInput = useCallback(
         console.log('[SOCKET ANY]', event, payload);
       });
     }
+
+    // Listen for delivery/read updates from server
+    socket.on('message-delivered', (payload) => {
+      try {
+        console.log('[SOCKET IN] message-delivered', payload);
+        // Support two payload shapes:
+        // 1) { messageId, chatId, deliveredBy, updatedDeliveredBy }
+        // 2) { delivered: [ { messageId, deliveredBy, chatId? } ] }
+        if (!payload) return;
+        const handleMark = (msgEntry) => {
+          const mid = msgEntry && (msgEntry.messageId || msgEntry.message_id);
+          const chatId = msgEntry && (msgEntry.chatId || payload.chatId || '');
+          if (!mid) return;
+          const key = String(chatId || '');
+          setMessages(prev => {
+            const copy = { ...(prev || {}) };
+            if (!copy[key]) return prev;
+            copy[key] = copy[key].map(m => (String(m.id) === String(mid) || String(m._id) === String(mid) ? { ...m, status: 'delivered' } : m));
+            return copy;
+          });
+        };
+
+        if (Array.isArray(payload.delivered) && payload.delivered.length) {
+          payload.delivered.forEach(handleMark);
+        } else if (payload.messageId) {
+          handleMark(payload);
+        }
+      } catch (e) {
+        console.error('Error handling message-delivered', e);
+      }
+    });
+
+    socket.on('message-read', (payload) => {
+      try {
+        console.log('[SOCKET IN] message-read', payload);
+        const { chatId, updatedIds, reader } = payload || {};
+        const key = String(chatId || (payload && payload.chatId) || '');
+        setMessages(prev => {
+          const copy = { ...(prev || {}) };
+          if (!copy[key]) return prev;
+          if (Array.isArray(updatedIds) && updatedIds.length) {
+            copy[key] = copy[key].map(m => (updatedIds.includes(m.id) || updatedIds.includes(m._id) ? { ...m, status: 'read' } : m));
+          } else if (reader) {
+            // No explicit IDs provided: in 1:1 flows we may receive reader info only.
+            // Only mark messages sent by the current user as 'read' (others' clients shouldn't auto-blue everything)
+            try {
+              copy[key] = copy[key].map(m => (String(m.sender) === String(currentUserId) ? { ...m, status: 'read' } : m));
+            } catch (e) {
+              copy[key] = copy[key].map(m => m);
+            }
+          } else {
+            // Unknown payload shape: do not change all messages to 'read'
+            return prev;
+          }
+          return copy;
+        });
+      } catch (e) {
+        console.error('Error handling message-read', e);
+      }
+    });
 
     // Typing indicators (payload: { chatId, user: { _id, name, avatar } })
     socket.on('typing', (payload) => {
@@ -4611,6 +4799,7 @@ const handleSendMessageFromInput = useCallback(
       try {
         const chatId = newMessage.chat?._id || newMessage.chat;
         const senderId = newMessage.sender?._id || newMessage.sender;
+        const isFromMe = String(senderId) === String(currentUserId);
         const key = String(chatId || senderId);
         const attachments = Array.isArray(newMessage.attachments) ? newMessage.attachments : [];
         const inferredType = newMessage.type || (attachments.length ? (
@@ -4639,12 +4828,120 @@ const handleSendMessageFromInput = useCallback(
           sender: (newMessage.sender && typeof newMessage.sender === 'object') ? newMessage.sender : (newMessage.sender?._id || newMessage.sender),
           // prefer server-provided normalized timestamp, then scheduledFor, then createdAt
           timestamp: newMessage.timestamp ? new Date(newMessage.timestamp).getTime() : (newMessage.scheduledFor ? new Date(newMessage.scheduledFor).getTime() : new Date(newMessage.createdAt || Date.now()).getTime()),
-          isRead: false,
+          // message status: prefer server-provided `status`, fallback to legacy `isRead`
+          status: newMessage.status || (newMessage.isRead ? 'read' : 'sent'),
           attachments: attachments,
           isSystemMessage: newMessage.type === 'system',
           poll: newMessage.poll || null,
           repliedTo: normalizedRepliedTo,
         };
+
+        // Determine sender info for notifications
+        const senderName = (newMessage.sender && typeof newMessage.sender === 'object') 
+          ? (newMessage.sender.name || newMessage.sender.username || 'Someone') 
+          : 'Someone';
+        
+        const senderAvatar = (newMessage.sender && typeof newMessage.sender === 'object')
+          ? (newMessage.sender.pic || newMessage.sender.avatar)
+          : null;
+        
+        const messageText = formatted.content || 
+          (formatted.attachments && formatted.attachments.length ? 
+            `📎 ${formatted.attachments[0]?.fileName || 'Attachment'}` : 
+            'New message');
+
+        // Check if message is for current open chat
+        const isCurrentChat = selectedContact && (
+          String(selectedContact.id) === String(key) || 
+          String(selectedContact.chatId) === String(key)
+        );
+
+        console.log('🔍 Notification check:', {
+          isCurrentChat,
+          selectedContactId: selectedContact?.id,
+          selectedContactChatId: selectedContact?.chatId,
+          messageKey: key,
+          willShowNotification: !isCurrentChat
+        });
+
+        // Show notifications when chat is not currently open
+        if (!isCurrentChat) {
+          console.log('🧪 INSIDE !isCurrentChat block - notification code SHOULD run');
+          
+          // Check notification settings
+          const notificationsEnabled = localStorage.getItem('notificationsEnabled');
+          const soundEnabled = localStorage.getItem('soundEnabled');
+          const showNotifications = notificationsEnabled === null || JSON.parse(notificationsEnabled) === true;
+          const playSound = soundEnabled === null || JSON.parse(soundEnabled) === true;
+          
+          console.log('Settings check:', { showNotifications, playSound });
+          console.log('🧪 Notification API exists?', 'Notification' in window);
+          console.log('🧪 Permission status:', typeof Notification !== 'undefined' ? Notification.permission : 'N/A');
+          
+          const currentUnread = recentChats.find(c => c.chatId === key || c.id === key)?.unreadCount || 0;
+          console.log('📢 Showing notifications:', { 
+            senderName, 
+            messageText, 
+            chatId: key, 
+            currentUnread, 
+            tabVisible: document.visibilityState,
+            notificationSupport: 'Notification' in window,
+            permission: typeof Notification !== 'undefined' ? Notification.permission : 'N/A'
+          });
+          
+          // Always show in-app notification if notifications are enabled
+          if (showNotifications) {
+            setNotifications(prev => {
+              const newNotif = {
+                id: `notif-${Date.now()}-${notificationIdCounter.current++}`,
+                chatId: key,
+                senderName,
+                avatar: senderAvatar,
+                message: messageText,
+                unreadCount: currentUnread + 1,
+                timestamp: Date.now()
+              };
+              console.log('✅ In-app notification created:', newNotif);
+              return [...prev, newNotif];
+            });
+          }
+          
+          console.log('After setNotifications - now testing browser notification');
+          
+          // Only show browser notification if notifications are enabled in settings
+          if (showNotifications) {
+            // Browser notification
+            if ("Notification" in window && Notification.permission === "granted") {
+              try {
+                const notification = new Notification(senderName, {
+                  body: messageText,
+                  icon: senderAvatar || "/icon.png",
+                  tag: `chat-${key}`,
+                  requireInteraction: false,
+                  silent: !playSound // Silent if sound is disabled
+                });
+
+              notification.onclick = (event) => {
+                event.preventDefault();
+                window.focus();
+                const chat = recentChats.find(c => 
+                  String(c.chatId) === String(key) || 
+                  String(c.id) === String(key)
+                );
+                if (chat) {
+                  handleOpenChat(chat);
+                }
+                notification.close();
+              };
+                
+            } catch (error) {
+              console.error('Error creating notification:', error);
+            }
+          }
+        } else {
+          console.log('Notifications disabled in settings');
+        }
+        }
 
         const populateRepliedFromServer = async (chatId, repliedArray) => {
           try {
@@ -4704,12 +5001,50 @@ const handleSendMessageFromInput = useCallback(
         
         const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
         const hasAttachment = Boolean(formatted.attachments && formatted.attachments.length);
+        // Determine a userId to attach when this is a 1:1 chat (so the UI can compute presence)
+        const metaUserId = (!newMessage.chat || (newMessage.chat && !newMessage.chat.isGroupChat)) ? (senderId || undefined) : undefined;
+
         updateRecentChat(key, preview, hasAttachment, {
           attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
           attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
           timestamp: formatted.timestamp,
+          // pass sender info (when available) so new recent-chat entries show correct avatar/name
+          name: (newMessage.sender && typeof newMessage.sender === 'object') ? (newMessage.sender.name || newMessage.sender.username) : undefined,
+          avatar: (newMessage.sender && typeof newMessage.sender === 'object') ? (newMessage.sender.avatar || newMessage.sender.pic) : undefined,
+          userId: metaUserId,
         });
-        setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
+        
+        // Emit delivered ack (recipient client's socket acknowledges receipt)
+        try {
+          if (!isFromMe && socketRef.current?.emit) {
+            console.log('[SOCKET OUT] emit message-delivered', { messageId: newMessage._id || newMessage.id, chatId: key });
+            socketRef.current.emit('message-delivered', { messageId: newMessage._id || newMessage.id, chatId: key });
+          }
+        } catch (e) { console.error('Error emitting message-delivered', e); }
+
+        // Only increment unread count if this chat is not currently open
+        if (!isCurrentChat) {
+          setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
+        } else {
+          // If chat is currently open and this message is NOT from me, mark the message as read
+          if (!isFromMe) {
+            // emit message-read so server and sender are notified
+            try {
+              if (socketRef.current?.emit) {
+                console.log('[SOCKET OUT] emit message-read', { chatId: key });
+                socketRef.current.emit('message-read', { chatId: key });
+              }
+            } catch (e) { console.error('Error emitting message-read', e); }
+
+            setMessages((prev) => {
+              const chatMessages = prev[key] || [];
+              const updatedMessages = chatMessages.map(m => 
+                String(m.id) === String(formatted.id) ? { ...m, status: 'read' } : m
+              );
+              return { ...prev, [key]: updatedMessages };
+            });
+          }
+        }
         updateContactPreview(key, preview, hasAttachment, {
           attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
           attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
@@ -4941,6 +5276,31 @@ const handleSendMessageFromInput = useCallback(
       } catch (err) {}
     };
   }, [API_BASE_URL, selectedContact]);
+
+  // When user opens a conversation, emit message-read and mark local messages read
+  useEffect(() => {
+    try {
+      if (!selectedContact) return;
+      const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
+      if (!chatId) return;
+      if (socketRef.current?.emit) {
+        try {
+          console.log('[SOCKET OUT] emit message-read on open', { chatId });
+          socketRef.current.emit('message-read', { chatId });
+        } catch (e) { console.error('Error emitting message-read on open', e); }
+      }
+      // Mark local messages in this chat as read (only messages sent by others)
+      setMessages(prev => {
+        if (!prev) return prev;
+        const copy = { ...(prev || {}) };
+        const arr = copy[String(chatId)] || [];
+        copy[String(chatId)] = (arr || []).map(m => (String(m.sender) !== String(currentUserId) ? { ...m, status: 'read' } : m));
+        return copy;
+      });
+    } catch (e) {
+      console.error('Error emitting message-read on open', e);
+    }
+  }, [selectedContact]);
 
   const handleBackToContacts = useCallback(() => {
     if (isMobileView) {
@@ -5467,9 +5827,27 @@ const handleCreateGroup = useCallback(() => {
     }
   }, [isMobileView]);
 
-  const handleInviteUser = useCallback(() => {
+  const handleInviteUser = useCallback(async () => {
     console.log("Invite user clicked");
     setShowFloatingMenu(false);
+
+    const message = "Join Chasmos to enjoy the next-gen chat app and have a seamless experience of connecting with people worldwide. If you're a business then make your business visible allowing people to approach you.\n\nhttps://chasmos.netlify.app";
+
+    try {
+      if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(message);
+      } else {
+        const el = document.createElement('textarea');
+        el.value = message;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      }
+      console.log('Invite copied to clipboard');
+    } catch (err) {
+      console.error('Failed to copy invite message', err);
+    }
   }, []);
 
   const handleCloseGroupCreation = useCallback(() => {
@@ -5561,7 +5939,7 @@ const handleCreateGroup = useCallback(() => {
                   sender: m.sender,
                   // prefer backend-provided `timestamp` (normalized to scheduledFor when applicable)
                   timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-                  isRead: m.isRead || false,
+                  status: m.status || (m.isRead ? 'read' : 'sent'),
                   attachments: Array.isArray(m.attachments) ? m.attachments : [],
                   isSystemMessage: m.type === 'system',
                   isForwarded: m.isForwarded || false,
@@ -6262,7 +6640,13 @@ useEffect(() => {
               <Trash2 className="w-6 h-6 text-red-500" />
               Delete Chat
             </h2>
-              <p className={`mb-6 ${effectiveTheme.textSecondary}`}>Are you sure you want to delete this chat? This will remove the chat for everyone if you are allowed. This action cannot be undone.</p>
+              <p className={`mb-4 ${effectiveTheme.textSecondary}`}>
+                This will clear out all messages for you in this chat, but the chat and messages will still be available to the other user.
+              </p>
+              <div className="mb-4 flex items-center gap-3">
+                <input id="keepMedia" type="checkbox" checked={keepMediaOnDelete} onChange={(e) => setKeepMediaOnDelete(e.target.checked)} />
+                <label htmlFor="keepMedia" className={`${effectiveTheme.textSecondary}`}>Keep attachments & screenshots from this chat in the media gallery</label>
+              </div>
             <div className="flex gap-3 justify-end">
               <button
                 className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition"
@@ -7987,6 +8371,72 @@ useEffect(() => {
           null}
         </div>
       </div>
+
+      {/* Message Notification Container */}
+      <MessageNotificationContainer
+        notifications={notifications}
+        onClose={(notifId) => {
+          setNotifications(prev => prev.filter(n => n.id !== notifId));
+        }}
+        onReply={async (chatId, replyText) => {
+          try {
+            // Send quick reply
+            const token = localStorage.getItem("token") || localStorage.getItem("chasmos_auth_token");
+            if (!token) return;
+
+            const payload = {
+              content: replyText,
+              chatId: chatId,
+            };
+
+            const res = await fetch(`${API_BASE_URL}/api/message`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify(payload),
+            });
+
+            if (res.ok) {
+              const sentMsg = await res.json();
+              
+              // Clear unread count for this chat
+              setRecentChats((prev) => 
+                prev.map((c) => 
+                  (String(c.chatId) === String(chatId) || String(c.id) === String(chatId)) 
+                    ? { ...c, unreadCount: 0 } 
+                    : c
+                )
+              );
+              
+              // Mark messages from others in this chat as read
+              setMessages((prev) => {
+                const chatMessages = prev[chatId] || [];
+                const updatedMessages = chatMessages.map(m => (String(m.sender) !== String(currentUserId) ? { ...m, status: 'read' } : m));
+                return { ...prev, [chatId]: updatedMessages };
+              });
+              
+              toast.success("Reply sent!");
+            }
+          } catch (error) {
+            console.error("Error sending quick reply:", error);
+            toast.error("Failed to send reply");
+          }
+        }}
+        onOpen={(notification) => {
+          // Open the chat when notification is clicked
+          const chat = recentChats.find(c => 
+            String(c.chatId) === String(notification.chatId) || 
+            String(c.id) === String(notification.chatId)
+          );
+          if (chat) {
+            handleOpenChat(chat);
+          }
+          // Remove this notification
+          setNotifications(prev => prev.filter(n => n.id !== notification.id));
+        }}
+      />
     </>
   );
 }

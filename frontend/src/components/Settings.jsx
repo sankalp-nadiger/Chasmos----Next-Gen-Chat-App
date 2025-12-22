@@ -21,8 +21,15 @@ import Logo from "./Logo";
 import CosmosBackground from "./CosmosBg";
 
 const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
-  const [notifications, setNotifications] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [notifications, setNotifications] = useState(() => {
+    const saved = localStorage.getItem('notificationsEnabled');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('soundEnabled');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+  const [googleContactsSyncEnabled, setGoogleContactsSyncEnabled] = useState(false);
   const [language, setLanguage] = useState("English");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -43,6 +50,9 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
           const data = await response.json();
           setNotifications(data.notifications);
           setSoundEnabled(data.sound);
+          if (data.googleContactsSyncEnabled !== undefined) {
+            setGoogleContactsSyncEnabled(data.googleContactsSyncEnabled);
+          }
         }
       } catch (error) {
         console.error('Error loading settings:', error);
@@ -83,12 +93,19 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
 
   const handleNotificationsChange = (value) => {
     setNotifications(value);
+    localStorage.setItem('notificationsEnabled', JSON.stringify(value));
     updateSettings('notifications', value);
   };
 
   const handleSoundChange = (value) => {
     setSoundEnabled(value);
+    localStorage.setItem('soundEnabled', JSON.stringify(value));
     updateSettings('sound', value);
+  };
+
+  const handleGoogleContactsSyncChange = (value) => {
+    setGoogleContactsSyncEnabled(value);
+    updateSettings('googleContactsSyncEnabled', value);
   };
 
 
@@ -111,6 +128,15 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
       type: "toggle",
       value: soundEnabled,
       onChange: handleSoundChange,
+    },
+    {
+      id: "googleContactsSync",
+      title: "Google Contacts Sync On Login",
+      description: "Sync your Google contacts on login",
+      icon: Globe,
+      type: "toggle",
+      value: googleContactsSyncEnabled,
+      onChange: handleGoogleContactsSyncChange,
     },
   ];
 
@@ -230,32 +256,9 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
               About
             </h3>
             <div className={`${effectiveTheme.secondary} rounded-lg border ${effectiveTheme.border} p-4`}>
-              <div className="flex items-center space-x-3 mb-4">
-                <div className={`w-12 h-12 rounded-lg ${effectiveTheme.accent} flex items-center justify-center`}>
-                  <svg
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      fill="currentColor"
-                      className="text-blue-500"
-                    />
-                    <path
-                      d="M17.5 15.5C17.25 15.25 16.8125 15.0625 16.375 14.875C15.9375 14.6875 15.5625 14.5 15.0625 14.1875C14.5625 13.875 14.1875 13.625 13.8125 13.3125C13.4375 13 13.0625 12.5625 12.75 12.0625C12.5 11.5625 12.25 11.0625 12 10.5625C11.75 10.0625 11.5 9.5625 11.25 9.0625C11 8.5625 10.75 8.125 10.5 7.625C10.25 7.125 10 6.625 9.75 6.125C9.5 5.625 9.25 5.1875 9 4.6875C8.75 4.1875 8.5 3.75 8.25 3.25C8 2.75 7.75 2.25 7.5 1.75C7.25 1.25 7 0.75 6.75 0.25C6.5 0.25 6.25 0.5 6 0.75C5.75 1 5.5 1.25 5.25 1.5C5 1.75 4.75 2 4.5 2.25C4.25 2.5 4 2.75 3.75 3C3.5 3.25 3.25 3.5 3 3.75C2.75 4 2.5 4.25 2.25 4.5C2 4.75 1.75 5 1.5 5.25C1.25 5.5 1 5.75 0.75 6C0.5 6.25 0.25 6.5 0.25 6.75L0.25 6.75Z"
-                      fill="white"
-                    />
-                  </svg>
-                </div>
-                <div>
-                  <h4 className={`font-semibold ${effectiveTheme.text}`}>Chasmos</h4>
-                  <p className={`text-sm ${effectiveTheme.textSecondary}`}>Version 1.0.0</p>
-                </div>
+              <div className="flex flex-col items-center mb-4">
+                <Logo className="w-32 h-32 mb-2" />
+                <p className={`text-sm ${effectiveTheme.textSecondary}`}>Version 1.0.0</p>
               </div>
               
               <div className="space-y-2 text-sm">
@@ -277,9 +280,6 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
 
           {/* Footer */}
           <div className="mt-6 mb-8 text-center">
-            <p className={`text-xs ${effectiveTheme.textSecondary}`}>
-              Made with ❤️ by Chasmos Team
-            </p>
           </div>
         </div>
       </div>

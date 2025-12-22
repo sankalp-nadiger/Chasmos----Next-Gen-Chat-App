@@ -13,6 +13,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
   const [showFilter, setShowFilter] = useState(false);
   const [selectedChats, setSelectedChats] = useState([]);
   const [availableChats, setAvailableChats] = useState([]);
+  const [previousChats, setPreviousChats] = useState([]);
   const [detailView, setDetailView] = useState(null); // For showing detail view of selected item
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
@@ -39,36 +40,76 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
         }
 
         const chatsData = await response.json();
+
+        // Also fetch previously-deleted (soft-deleted) chats for this user
+        let prevData = [];
+        try {
+          const prevResp = await fetch(`${API_BASE_URL}/api/chat/previous`, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+          });
+          if (prevResp && prevResp.ok) {
+            prevData = await prevResp.json();
+          }
+        } catch (e) {
+          console.warn('Failed to fetch previous chats', e);
+        }
         
         // Transform chats into the format needed for the component
         const transformedChats = chatsData.map(chat => {
-          // For 1-on-1 chats, get the other user's info
           const currentUserId = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}')._id;
           let chatName = 'Unknown';
           let chatAvatar = null;
-          
-          if (!chat.isGroupChat && chat.users && chat.users.length > 0) {
-            const otherUser = chat.users.find(user => 
-              String(user._id || user.id) !== String(currentUserId)
-            );
+
+          // If controller returned otherUser (formatted), prefer that
+          if (!chat.isGroupChat && chat.otherUser) {
+            chatName = chat.otherUser.username || chat.otherUser.email || 'Unknown';
+            chatAvatar = chat.otherUser.avatar || null;
+          } else if (!chat.isGroupChat && chat.users && chat.users.length > 0) {
+            const otherUser = chat.users.find(user => String(user._id || user.id) !== String(currentUserId));
             if (otherUser) {
               chatName = otherUser.name || otherUser.email || 'Unknown';
               chatAvatar = otherUser.avatar;
             }
           } else if (chat.isGroupChat) {
-            chatName = chat.chatName || 'Group Chat';
-            chatAvatar = chat.groupAvatar;
+            chatName = chat.chatName || chat.name || 'Group Chat';
+            chatAvatar = chat.groupSettings?.avatar || chat.groupAvatar || chat.avatar || chat.icon || null;
           }
 
+          const idVal = chat.chatId || chat._id || chat.id || null;
+
           return {
-            id: chat._id,
+            id: idVal,
             name: chatName,
             avatar: chatAvatar
           };
-        });
+        }).filter(c => c.id);
 
         setAvailableChats(transformedChats);
-        setSelectedChats(transformedChats.map(c => c.id)); // Select all by default
+        setPreviousChats((prevData || []).map(chat => {
+          const currentUserId = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}')._id;
+          let chatName = 'Unknown';
+          let chatAvatar = null;
+
+          // Prefer formatted otherUser from controller when available
+          if (!chat.isGroupChat && chat.otherUser) {
+            chatName = chat.otherUser.username || chat.otherUser.email || 'Unknown';
+            chatAvatar = chat.otherUser.avatar || null;
+          } else if (!chat.isGroupChat && chat.users && chat.users.length > 0) {
+            const otherUser = chat.users.find(user => String(user._id || user.id) !== String(currentUserId));
+            if (otherUser) {
+              chatName = otherUser.name || otherUser.email || 'Unknown';
+              chatAvatar = otherUser.avatar;
+            }
+          } else if (chat.isGroupChat) {
+            chatName = chat.chatName || chat.name || 'Group Chat';
+            chatAvatar = chat.groupSettings?.avatar || chat.groupAvatar || chat.avatar || chat.icon || null;
+          }
+
+          const idVal = chat.chatId || chat._id || chat.id || null;
+          return { id: idVal, name: chatName, avatar: chatAvatar };
+        }).filter(c => c.id));
+
+        setSelectedChats(transformedChats.map(c => c.id)); // Select available chats by default
       } catch (error) {
         console.error('Error fetching recent chats:', error);
         setError('Failed to load chats');
@@ -98,7 +139,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
         return;
       }
 
-      const chatIds = selectedChats.join(',');
+      const chatIds = (selectedChats || []).filter(Boolean).map(id => String(id)).join(',');
       console.log('Fetching data for chats:', chatIds);
       
       let endpoint = '';
@@ -138,7 +179,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
       }
 
       const data = await response.json();
-      console.log(`Received ${data.length} items for ${activeTab}`);
+      console.log(`Received ${data.length} items for ${activeTab}`, data);
       
       switch (activeTab) {
         case 'media':
@@ -173,7 +214,10 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
   };
 
   const selectAllChats = () => {
-    setSelectedChats(availableChats.map(c => c.id));
+    setSelectedChats([...
+      (availableChats || []).map(c => c.id),
+      (previousChats || []).map(c => c.id)
+    ].flat().filter(Boolean));
   };
 
   const deselectAllChats = () => {
@@ -196,6 +240,41 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
       console.error('Download failed:', err);
       alert('Failed to download file');
     }
+  };
+
+  // Helper function to get current user ID
+  const getCurrentUserId = () => {
+    const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+    return userData._id || userData.id;
+  };
+
+  // Helper function to check if sender is current user
+  const isSenderCurrentUser = (item) => {
+    const currentUserId = getCurrentUserId();
+    const senderId = item.sender?._id || item.sender?.id || item.sender || item.capturedBy?._id || item.capturedBy?.id || item.capturedBy;
+    return String(senderId) === String(currentUserId);
+  };
+
+  // Helper function to get sender display name
+  const getSenderDisplayName = (item) => {
+    if (isSenderCurrentUser(item)) {
+      return 'You';
+    }
+    return item.senderName || item.capturedByName || 'Unknown';
+  };
+
+  // Helper function to get chat name
+  const getChatName = (item) => {
+    const chatId = item.chat?._id || item.chat?.id || item.chat || item.chatId;
+    const chat = availableChats.find(c => String(c.id) === String(chatId));
+    return chat ? chat.name : '';
+  };
+
+  // Helper function to format sender info with chat name
+  const formatSenderInfo = (item) => {
+    const senderName = getSenderDisplayName(item);
+    const chatName = getChatName(item);
+    return chatName ? `${senderName} in ${chatName}` : senderName;
   };
 
   const renderMediaGrid = () => {
@@ -296,7 +375,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                     {new Date(item.createdAt).toLocaleString()}
                   </span>
                   <span className={effectiveTheme.textSecondary}>
-                    From: {item.senderName || 'Unknown'}
+                    From: {formatSenderInfo(item)}
                   </span>
                 </div>
               </div>
@@ -343,7 +422,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                     {new Date(item.createdAt).toLocaleString()}
                   </span>
                   <span className={effectiveTheme.textSecondary}>
-                    From: {item.senderName || 'Unknown'}
+                    From: {formatSenderInfo(item)}
                   </span>
                 </div>
               </div>
@@ -402,7 +481,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                 <Camera className="w-3 h-3 text-yellow-400" />
                 <p className="text-xs text-yellow-400 font-medium">Screenshot</p>
               </div>
-              <p className="text-xs text-white truncate">By: {item.capturedByName || 'Unknown'}</p>
+              <p className="text-xs text-white truncate">By: {formatSenderInfo(item)}</p>
               <p className="text-xs text-gray-300">{new Date(item.createdAt).toLocaleDateString()}</p>
             </div>
           </motion.div>
@@ -416,13 +495,13 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
       {/* Detail View Modal */}
       <AnimatePresence>
         {detailView && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setDetailView(null)}>
+          <div className={`fixed inset-0 z-[60] flex items-center justify-center p-4 ${effectiveTheme.mode === 'dark' ? 'bg-black/70 backdrop-blur-sm' : 'bg-white/90'}`} onClick={() => setDetailView(null)}>
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
               onClick={(e) => e.stopPropagation()}
-              className={`w-full max-w-4xl max-h-[90vh] ${effectiveTheme.secondary} border ${effectiveTheme.border} rounded-lg shadow-2xl overflow-hidden flex flex-col`}
+              className={`w-full max-w-4xl max-h-[90vh] ${effectiveTheme.mode === 'dark' ? effectiveTheme.secondary : 'bg-white'} border ${effectiveTheme.border} rounded-lg shadow-2xl overflow-hidden flex flex-col`}
             >
               {/* Detail View Header */}
               <div className={`flex items-center justify-between p-4 border-b ${effectiveTheme.border}`}>
@@ -438,8 +517,15 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                 </button>
               </div>
 
+              {/* Sender Info Below Navbar */}
+              <div className={`px-6 pt-4 pb-2`}>
+                <p className={`text-sm font-medium ${effectiveTheme.text}`}>
+                  Sent by: {formatSenderInfo(detailView)}
+                </p>
+              </div>
+
               {/* Detail View Content */}
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="flex-1 overflow-y-auto px-6 pb-6">
                 {/* Preview Section */}
                 <div className="mb-6 flex justify-center">
                   {detailView.mimeType?.startsWith('image/') || detailView.type === 'screenshot' ? (
@@ -470,13 +556,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
 
                 {/* Information Section */}
                 <div className={`${effectiveTheme.mode === 'dark' ? 'bg-gray-800' : 'bg-gray-50'} rounded-lg p-4 space-y-3`}>
-                  {/* File Name */}
-                  <div>
-                    <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>File Name</p>
-                    <p className={`text-sm ${effectiveTheme.text} break-all`}>{detailView.fileName}</p>
-                  </div>
-
-                  {/* Caption/Content */}
+                  {/* Caption */}
                   {detailView.content && detailView.content.trim() !== '' && (
                     <div>
                       <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>Caption</p>
@@ -484,12 +564,10 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                     </div>
                   )}
 
-                  {/* Sender */}
+                  {/* File Name */}
                   <div>
-                    <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>Sent By</p>
-                    <p className={`text-sm ${effectiveTheme.text}`}>
-                      {detailView.senderName || detailView.capturedByName || 'Unknown'}
-                    </p>
+                    <p className={`text-xs font-medium ${effectiveTheme.textSecondary} uppercase mb-1`}>File Name</p>
+                    <p className={`text-sm ${effectiveTheme.text} break-all`}>{detailView.fileName}</p>
                   </div>
 
                   {/* Date */}
@@ -632,14 +710,58 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                         className="w-4 h-4"
                       />
                       <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold ${effectiveTheme.mode === 'dark' ? 'bg-gray-700' : 'bg-gray-300'} ${effectiveTheme.text}`}>
-                          {chat.name.charAt(0).toUpperCase()}
-                        </div>
+                        {chat.avatar ? (
+                          <img
+                            src={chat.avatar}
+                            alt={chat.name}
+                            className="w-8 h-8 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold ${effectiveTheme.mode === 'dark' ? 'bg-gray-700' : 'bg-gray-300'} ${effectiveTheme.text}`}>
+                            {chat.name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
                         <span className={`text-sm truncate ${effectiveTheme.text}`}>{chat.name}</span>
                       </div>
                     </label>
                   ))}
                 </div>
+
+                {/* Previous (soft-deleted) chats section */}
+                {previousChats && previousChats.length > 0 && (
+                  <div className="mt-3">
+                    <h4 className={`px-2 mb-2 text-sm font-medium ${effectiveTheme.textSecondary}`}>Previous Chats</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
+                      {previousChats.map(chat => (
+                        <label
+                          key={chat.id}
+                          className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer ${selectedChats.includes(chat.id) ? (effectiveTheme.mode === 'dark' ? 'bg-blue-900/20' : 'bg-blue-50') : (effectiveTheme.mode === 'dark' ? 'bg-gray-800' : 'bg-gray-100')} hover:shadow transition-all opacity-90`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedChats.includes(chat.id)}
+                            onChange={() => toggleChatSelection(chat.id)}
+                            className="w-4 h-4"
+                          />
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            {chat.avatar ? (
+                              <img
+                                src={chat.avatar}
+                                alt={chat.name}
+                                className="w-8 h-8 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold ${effectiveTheme.mode === 'dark' ? 'bg-gray-700' : 'bg-gray-300'} ${effectiveTheme.text}`}>
+                                {chat.name.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <span className={`text-sm truncate ${effectiveTheme.text}`}>{chat.name}</span>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}

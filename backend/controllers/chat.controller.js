@@ -4,6 +4,7 @@ import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
 import Group from "../models/group.model.js";
 import Attachment from "../models/attachment.model.js";
+import Screenshot from "../models/screenshot.model.js";
 import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
 import path from "path";
 import { getSocketIOInstance } from "../services/scheduledMessageCron.js";
@@ -82,6 +83,8 @@ export const fetchChats = asyncHandler(async (req, res) => {
     const results = await Chat.find({ 
       users: { $elemMatch: { $eq: userId } },
       _id: { $nin: archivedChatIds },
+      // Exclude chats the current user has soft-deleted
+      deletedBy: { $not: { $elemMatch: { $eq: userId } } },
       $or: [
         { isGroupChat: true },
         { 
@@ -130,7 +133,6 @@ export const fetchChats = asyncHandler(async (req, res) => {
       return chat;
     });
 
-    console.log(results);
     res.status(200).send(normalized);
   } catch (error) {
     res.status(400);
@@ -501,7 +503,9 @@ export const getRecentChats = async (req, res) => {
 
     const chats = await Chat.find({ 
       participants: userId,
-      _id: { $nin: archivedChatIds }
+      _id: { $nin: archivedChatIds },
+      // Exclude chats the current user has soft-deleted
+      deletedBy: { $not: { $elemMatch: { $eq: userId } } }
     })
       .sort({ updatedAt: -1 })
       .populate('participants', '_id name email avatar')
@@ -591,13 +595,112 @@ export const getRecentChats = async (req, res) => {
 
       return chatData;
     });
-    console.log("Recent chats fetched:", formattedChats);
     res.status(200).json(formattedChats);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to fetch recent chats" });
   }
 };
+
+// Fetch chats that the current user has previously deleted (soft-deleted)
+export const fetchPreviousChats = asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Find chats where the user is a participant and has soft-deleted the chat
+    const chats = await Chat.find({ 
+      participants: userId,
+      deletedBy: { $elemMatch: { $eq: userId } }
+    })
+      .sort({ updatedAt: -1 })
+      .populate('participants', '_id name email avatar')
+      .populate('users', '_id name email avatar')
+      .populate('admins', '_id name email avatar')
+      .populate('groupAdmin', '_id name email avatar')
+      .populate({ path: 'lastMessage', populate: { path: 'attachments' } })
+      .populate({ path: 'lastMessage.sender', select: '_id email name' })
+      .lean();
+
+    const formattedChats = (chats || []).map((chat) => {
+      const otherUser =
+        (Array.isArray(chat.participants) &&
+          chat.participants.find((p) => String(p._id) !== String(userId))) ||
+        (Array.isArray(chat.participants) ? chat.participants[0] : null);
+
+      let unread = 0;
+      if (typeof chat.unreadCount === "number") {
+        unread = chat.unreadCount;
+      } else if (chat.unreadCount && typeof chat.unreadCount === "object") {
+        unread = chat.unreadCount[String(userId)] || chat.unreadCount[userId] || 0;
+      }
+
+      let previewTimestamp = chat.updatedAt || chat.timestamp;
+      if (chat.lastMessage) {
+        const lm = chat.lastMessage;
+        previewTimestamp = (lm.isScheduled && lm.scheduledSent && lm.scheduledFor) ? lm.scheduledFor : (lm.createdAt || lm.updatedAt || previewTimestamp);
+      }
+
+      let lastMessageText = "";
+      if (chat.lastMessage) {
+        const msg = chat.lastMessage;
+        if (msg.type === 'system') {
+          lastMessageText = "";
+        } else {
+          const text = (msg.content || msg.text || "").toString().trim();
+          const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+          if (text && text.length > 0) {
+            const preview = text.split(/\s+/).slice(0, 8).join(" ");
+            lastMessageText = hasAttachments ? `${preview} 📎` : preview;
+          } else if (hasAttachments) {
+            const att = msg.attachments[0];
+            let filename = att.fileName || att.file_name || att.filename || "";
+            if (!filename && att.fileUrl) {
+              try {
+                filename = path.basename(new URL(att.fileUrl).pathname);
+              } catch (e) {
+                filename = path.basename(att.fileUrl || "");
+              }
+            }
+            filename = filename.replace(/^[\d\-:.]+_/, "");
+            lastMessageText = filename || "Attachment";
+          }
+        }
+      }
+
+      const chatData = {
+        chatId: chat._id,
+        lastMessage: lastMessageText || "Say hi!",
+        timestamp: previewTimestamp,
+        unreadCount: unread,
+        isGroupChat: !!chat.isGroupChat,
+        chatName: chat.chatName,
+      };
+
+      if (chat.isGroupChat) {
+        chatData.users = chat.users || chat.participants || [];
+        chatData.admins = chat.admins || [];
+        chatData.groupAdmin = chat.groupAdmin || null;
+        chatData.groupSettings = chat.groupSettings || {};
+      } else {
+        chatData.participants = chat.participants;
+        chatData.otherUser = {
+          id: otherUser?._id ? String(otherUser._id) : null,
+          username: otherUser?.name || otherUser?.email || null,
+          email: otherUser?.email || null,
+          avatar: otherUser?.avatar || null,
+          isOnline: !!otherUser?.isOnline,
+        };
+      }
+
+      return chatData;
+    });
+
+    res.status(200).json(formattedChats);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to fetch previous chats" });
+  }
+});
 
 export const deleteChat = asyncHandler(async (req, res) => {
   console.log("Delete chat request received");
@@ -611,7 +714,15 @@ export const deleteChat = asyncHandler(async (req, res) => {
     throw new Error("Chat not found");
   }
 
-  if (chat.isGroupChat) {
+  // Normalize isGroupChat checks to handle boolean, string or numeric values
+  // Treat as group chat only when flagged AND has more than 2 users.
+  const rawIsGroup = (chat.isGroupChat === true || chat.isGroupChat === 'true' || chat.isGroupChat === 1 || chat.isGroupChat === '1');
+  const participantCount = (Array.isArray(chat.users) && chat.users.length) || (Array.isArray(chat.participants) && chat.participants.length) || 0;
+  const isGroupChatFlag = rawIsGroup && participantCount > 2;
+
+  console.log(`[deleteChat] chatId=${chatId} rawIsGroup=${rawIsGroup} participantCount=${participantCount} isGroupChatFlag=${isGroupChatFlag}`);
+
+  if (isGroupChatFlag) {
     // Compare ObjectIds as strings to avoid type mismatch
     if (!chat.admins.map(String).includes(String(userId))) {
       console.log("User is not admin, cannot delete group chat");
@@ -682,60 +793,84 @@ export const deleteChat = asyncHandler(async (req, res) => {
       throw new Error("Not authorized to delete this chat");
     }
 
-    // Get all messages with attachments
-    const messages = await Message.find({ chat: chatId }).populate('attachments');
-    
-    // Delete all attachments
-    for (const message of messages) {
-      if (message.attachments && message.attachments.length > 0) {
-        for (const attachment of message.attachments) {
-          try {
-            // Extract file path from URL for deletion
-            if (attachment.fileUrl) {
-              const urlParts = attachment.fileUrl.split('/');
-              const bucketIndex = urlParts.findIndex(part => part === 'storage');
-              if (bucketIndex !== -1 && urlParts[bucketIndex + 2]) {
-                const bucket = urlParts[bucketIndex + 2];
-                const filePath = urlParts.slice(bucketIndex + 3).join('/');
-                
-                // Delete file from Supabase storage
-                await deleteFileFromSupabase(filePath, bucket);
-              }
-            }
-            
-            // Delete attachment document from database
-            await Attachment.findByIdAndDelete(attachment._id);
-          } catch (err) {
-            console.error(`Failed to delete attachment ${attachment._id}:`, err.message);
-            // Continue with other attachments even if one fails
-          }
+    // Soft-delete for 1-on-1 chats: mark messages as deleted for this user
+    // and add this user to the chat's deletedBy array so the chat is hidden for them only.
+    // If `keepMedia=true` is passed as a query param, do NOT add the user to `deletedFor`
+    // for messages that contain attachments (to keep them visible in media galleries).
+    try {
+      const keepMedia = String(req.query.keepMedia || '').toLowerCase() === 'true';
+
+      // Always mark all messages as deletedFor this user (soft-delete)
+      try {
+        await Message.updateMany(
+          { chat: chatId },
+          { $addToSet: { deletedFor: userId } }
+        );
+      } catch (mErr) {
+        console.warn('[deleteChat] Failed to mark messages deletedFor user:', mErr && mErr.message);
+      }
+
+      // If the user requested to keep media, add them to `keepFor` on messages that have attachments
+      if (keepMedia) {
+        try {
+          await Message.updateMany(
+            { chat: chatId, attachments: { $exists: true, $ne: [] } },
+            { $addToSet: { keepFor: userId } }
+          );
+        } catch (kErr) {
+          console.warn('[deleteChat] Failed to add user to keepFor for messages with attachments:', kErr && kErr.message);
         }
       }
-    }
 
-    await Message.deleteMany({ chat: chatId });
-    await Chat.findByIdAndDelete(chatId);
-    console.log("Chat deleted successfully");
-    // Emit socket event to participants so they can remove the chat from UI
-    try {
-      const io = getSocketIOInstance();
-      if (io) {
-        try { io.to(String(chatId)).emit('chat deleted', { chatId: String(chatId) }); } catch (e) { console.error('emit chat deleted to room failed', e); }
-        const participants = chat.participants && chat.participants.length ? chat.participants : chat.users || [];
-        (participants || []).forEach(p => {
-          const uid = p && (p._id ? String(p._id) : (typeof p === 'string' ? p : (p.toString && p.toString())));
-          if (uid) {
-            try { io.to(uid).emit('chat deleted', { chatId: String(chatId) }); } catch (e) { console.error('emit chat deleted to user failed', uid, e); }
-          }
-        });
+      // Always mark screenshots as deletedFor this user
+      try {
+        await Screenshot.updateMany(
+          { chat: chatId },
+          { $addToSet: { deletedFor: userId } }
+        );
+      } catch (sErr) {
+        console.warn('[deleteChat] Failed to mark screenshots deletedFor user:', sErr && sErr.message);
       }
-    } catch (e) {
-      console.error('Failed to emit chat deleted event:', e);
+
+      // If keepMedia is requested, also add user to keepFor on screenshots so they remain visible in media gallery
+      if (keepMedia) {
+        try {
+          await Screenshot.updateMany(
+            { chat: chatId },
+            { $addToSet: { keepFor: userId } }
+          );
+        } catch (kSErr) {
+          console.warn('[deleteChat] Failed to add user to keepFor for screenshots:', kSErr && kSErr.message);
+        }
+      }
+
+      await Chat.findByIdAndUpdate(
+        chatId,
+        { $addToSet: { deletedBy: userId }, $set: { deletedAt: new Date() } },
+        { new: true }
+      );
+
+      console.log("Chat soft-deleted for user:", String(userId));
+
+      // Notify only the requesting user so their UI can remove the chat locally
+      try {
+        const io = getSocketIOInstance();
+        if (io) {
+          try { io.to(String(userId)).emit('chat deleted', { chatId: String(chatId) }); } catch (e) { console.error('emit chat deleted to requester failed', e); }
+        }
+      } catch (e) {
+        console.error('Failed to emit chat deleted event:', e);
+      }
+
+      res.status(200).json({
+        message: "Chat deleted for you",
+        chatId: chatId
+      });
+    } catch (err) {
+      console.error('Failed to soft-delete chat:', err);
+      res.status(500);
+      throw new Error('Failed to delete chat');
     }
-    res.status(200).json({
-      message: "Chat deleted successfully",
-      chatId: chatId
-    });
   }
 });
 
