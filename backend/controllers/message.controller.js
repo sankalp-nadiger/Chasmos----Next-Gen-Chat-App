@@ -10,7 +10,6 @@ import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
 const normalizeMessage = (m) => {
   const obj = (m && m.toObject) ? m.toObject() : m;
   obj.timestamp = obj.isScheduled ? obj.scheduledFor : obj.createdAt;
-    console.log("Normalized message:", obj);
   return obj;
 
 };
@@ -66,7 +65,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
   const isScheduledFlag = (isScheduled === true || isScheduled === 'true' || isScheduled === '1' || isScheduled === 1);
   // normalize scheduledFor into a Date if present
   const scheduledForDate = scheduledFor ? new Date(scheduledFor) : null;
-  console.log("➡️ [SEND MESSAGE] Request received", { chatId, userId, content, attachments, type, isScheduled: isScheduledFlag, scheduledFor: scheduledForDate, poll, repliedTo });
+  //console.log("➡️ [SEND MESSAGE] Request received", { chatId, userId, content, attachments, type, isScheduled: isScheduledFlag, scheduledFor: scheduledForDate, poll, repliedTo });
   if (!content && (!attachments || attachments.length === 0) && !poll) {
     console.log("Invalid data passed into request");
     return res.sendStatus(400);
@@ -1135,4 +1134,87 @@ export const updateScheduledMessage = asyncHandler(async (req, res) => {
     message: "Scheduled message updated successfully",
     updatedMessage: message
   });
+});
+
+// Update message delivery status (recipient acknowledges receipt -> 'delivered')
+export const updateMessageStatus = asyncHandler(async (req, res) => {
+  const { messageId } = req.body;
+  const userId = req.user._id;
+
+  if (!messageId) {
+    res.status(400);
+    throw new Error('messageId is required');
+  }
+
+  const message = await Message.findById(messageId).populate('chat');
+  if (!message) {
+    res.status(404);
+    throw new Error('Message not found');
+  }
+
+  const chat = await Chat.findById(message.chat);
+  if (!chat) {
+    res.status(404);
+    throw new Error('Chat not found');
+  }
+
+  // Only update delivered for 1-on-1 chats. For group chats we rely on readBy and markAsRead.
+  if (!chat.isGroupChat) {
+    // Ensure only the recipient (not the sender) can mark delivered
+    if (message.sender.toString() === userId.toString()) {
+      return res.json({ message: 'Sender cannot mark own message delivered', updated: false });
+    }
+
+    if (message.status !== 'delivered' && message.status !== 'read') {
+      message.status = 'delivered';
+      await message.save();
+    }
+  }
+
+  res.json({ message: 'Status updated', status: message.status });
+});
+
+// Mark messages in a chat as read by the current user
+export const markAsRead = asyncHandler(async (req, res) => {
+  const { chatId } = req.body;
+  const userId = req.user._id;
+
+  if (!chatId) {
+    res.status(400);
+    throw new Error('chatId is required');
+  }
+
+  const chat = await Chat.findById(chatId).lean();
+  if (!chat) {
+    res.status(404);
+    throw new Error('Chat not found');
+  }
+
+  if (chat.isGroupChat) {
+    // For group chats: add user to readBy for unread messages, and set status to 'read' when everyone has read
+    const msgs = await Message.find({ chat: chatId, $or: [ { readBy: { $exists: false } }, { readBy: { $nin: [userId] } } ] });
+    const updated = [];
+    for (const m of msgs) {
+      if (!m.readBy) m.readBy = [];
+      if (!m.readBy.map(r => String(r)).includes(String(userId))) {
+        m.readBy.push(userId);
+      }
+      // If all users have read, mark message status as 'read'
+      const uniqueReaders = (m.readBy || []).map(r => String(r));
+      const participantIds = (chat.participants && chat.participants.length) ? chat.participants.map(p => String(p)) : (chat.users || []).map(u => String(u));
+      const allRead = participantIds.every(pid => uniqueReaders.includes(pid));
+      if (allRead) m.status = 'read';
+      await m.save();
+      updated.push(m._id);
+    }
+
+    return res.json({ message: 'Group messages marked read', updatedCount: updated.length, updatedIds: updated });
+  } else {
+    // 1-on-1 chats: mark all messages in chat not sent by current user as 'read'
+    const result = await Message.updateMany(
+      { chat: chatId, sender: { $ne: userId }, status: { $ne: 'read' } },
+      { $set: { status: 'read' } }
+    );
+    return res.json({ message: 'Messages marked read', modifiedCount: result.nModified || result.modifiedCount || 0 });
+  }
 });

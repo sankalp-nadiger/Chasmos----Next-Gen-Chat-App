@@ -15,7 +15,6 @@ export const getSocketIOInstance = () => ioInstance;
 // Function to send scheduled messages
 const sendScheduledMessages = async () => {
   try {
-    console.log('🔍 [CRON] Checking for scheduled messages...');
     
     const now = new Date();
     
@@ -30,7 +29,6 @@ const sendScheduledMessages = async () => {
       .populate('chat');
 
     if (dueMessages.length === 0) {
-      console.log('✅ [CRON] No scheduled messages due at this time');
       return;
     }
 

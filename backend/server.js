@@ -29,6 +29,8 @@ import { notFound, errorHandler } from "./middleware/error.middleware.js";
 import cors from 'cors';
 import { setSocketIOInstance } from "./services/scheduledMessageCron.js";
 import { initScheduledMessageCron } from "./services/scheduledMessageCron.js";
+import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
 import {
   addConnection,
   removeConnection,
@@ -110,25 +112,39 @@ io.on("connection", (socket) => {
   console.log("Connected to socket.io");
   
   socket.on("setup", async (userData) => {
-    const uid = userData?._id || userData?.id || userData;
+    let uid = userData?._id || userData?.id || userData;
+    // If no uid in payload, try to decode token provided in socket handshake auth
+    if (!uid) {
+      try {
+        const token = socket.handshake?.auth?.token || (socket.handshake?.headers && (socket.handshake.headers.authorization || '').split(' ')[1]);
+        if (token) {
+          const decoded = jwt.verify(token, process.env.JWT_SECRET);
+          uid = decoded?.id || decoded?._id || decoded?.userId || decoded?.id;
+        }
+      } catch (e) {
+        // token invalid or missing
+      }
+    }
+
     if (!uid) {
       console.log('[SOCKET] setup called with no uid, sending connected ack');
       socket.emit('connected');
       return;
     }
+
     socket.join(uid);
     socket.userId = String(uid);
 
     // increment connection count for this user
     const prev = getConnectionCount(socket.userId) || 0;
     const newCount = addConnection(socket.userId);
-    console.log(`[SOCKET] setup: user=${socket.userId} prevConnections=${prev} newConnections=${newCount} totalOnlineUsers=${getOnlineList().length}`);
+    //console.log(`[SOCKET] setup: user=${socket.userId} prevConnections=${prev} newConnections=${newCount} totalOnlineUsers=${getOnlineList().length}`);
 
     // emit to others that this user is online only when first connection
     if (prev === 0) {
       try {
         io.emit('user online', { userId: socket.userId });
-        console.log(`[SOCKET] broadcast: user online -> ${socket.userId}`);
+        //console.log(`[SOCKET] broadcast: user online -> ${socket.userId}`);
       } catch (e) {
         console.error('[SOCKET] error broadcasting user online', e);
       }
@@ -138,7 +154,7 @@ io.on("connection", (socket) => {
     try {
       const onlineList = getOnlineList();
       socket.emit('online users', onlineList);
-      console.log(`[SOCKET] sent online users list (${onlineList.length}) to ${socket.userId}`);
+      //console.log(`[SOCKET] sent online users list (${onlineList.length}) to ${socket.userId}`);
     } catch (e) {
       console.error('[SOCKET] error emitting online users list', e);
     }
@@ -211,10 +227,53 @@ io.on("connection", (socket) => {
           }
         });
 
-        console.log(`[SOCKET] broadcasted online users list to ${otherUserIds.size} other chat participant(s) for user ${uid}`);
+        //console.log(`[SOCKET] broadcasted online users list to ${otherUserIds.size} other chat participant(s) for user ${uid}`);
       }
     } catch (e) {
       console.error('[SOCKET] error finding chats to broadcast online users list', e);
+    }
+
+    // Mark undelivered messages as delivered for this returning connection
+    try {
+      const userIdStr = String(socket.userId);
+      const chatIds = (await Chat.find({ $or: [{ users: userIdStr }, { participants: userIdStr }] }).select('_id').lean()).map(c => String(c._id));
+      if (chatIds.length > 0) {
+        const undelivered = await Message.find({ chat: { $in: chatIds }, sender: { $ne: userIdStr }, deliveredBy: { $ne: userIdStr } });
+        const notifyMap = new Map();
+        for (const msg of undelivered) {
+          msg.deliveredBy = msg.deliveredBy || [];
+          try {
+            msg.deliveredBy.push(mongoose.Types.ObjectId(userIdStr));
+          } catch (e) {
+            msg.deliveredBy.push(userIdStr);
+          }
+          // If all non-sender participants have delivered, set status to delivered
+          try {
+            const chatDoc = await Chat.findById(msg.chat).select('users participants').lean();
+            const members = (chatDoc?.users || chatDoc?.participants || []).map(m => String(m && (m._id || m.id || m))).filter(Boolean).filter(id => id !== String(msg.sender));
+            const allDelivered = members.every(m => msg.deliveredBy.map(String).includes(String(m)));
+            if (allDelivered) msg.status = 'delivered';
+          } catch (e) {}
+          try {
+            const before = (msg.deliveredBy || []).map(d => String(d));
+            await msg.save();
+            const after = (msg.deliveredBy || []).map(d => String(d));
+            console.log('[SOCKET] marked undelivered->delivered persisted', { messageId: msg._id, before, after, status: msg.status });
+          } catch (saveErr) {
+            console.error('[SOCKET] error saving undelivered message', saveErr);
+          }
+          notifyMap.set(String(msg.sender), (notifyMap.get(String(msg.sender)) || []).concat(msg));
+        }
+        // Emit delivered updates to senders' personal rooms
+        for (const [senderId, msgs] of notifyMap.entries()) {
+          const payload = msgs.map(m => ({ messageId: m._id, chatId: m.chat, deliveredBy: (m.deliveredBy || []).map(d => String(d)) }));
+          try {
+            io.to(senderId).emit('message-delivered', { delivered: payload });
+          } catch (e) {}
+        }
+      }
+    } catch (e) {
+      console.error('[SOCKET] error marking undelivered messages as delivered on setup', e);
     }
 
     socket.emit("connected");
@@ -1038,7 +1097,7 @@ socket.on("remove reaction", async (data) => {
       if (uid) {
         const prev = getConnectionCount(uid) || 0;
         const next = removeConnection(uid);
-        console.log(`[SOCKET] disconnect: user=${uid} prevConnections=${prev} nextConnections=${next}`);
+        //console.log(`[SOCKET] disconnect: user=${uid} prevConnections=${prev} nextConnections=${next}`);
         if (next <= 0) {
           try {
             io.emit('user offline', { userId: uid });
@@ -1072,5 +1131,188 @@ socket.on("member-removed", ({ groupId, userId }) => {
 socket.on("admin-changed", ({ groupId, newAdminId }) => {
   io.to(`group_${groupId}`).emit("admin-changed", { newAdminId });
 });
+
+
+  // Message delivered: recipient client acknowledges receipt (1-on-1 delivered)
+  socket.on("message-delivered", async (data) => {
+    try {
+      const { messageId } = data || {};
+      let userId = socket.userId;
+      // if socket.userId not set (e.g., setup not received yet), try to decode token from handshake
+      if (!userId) {
+        try {
+          const token = socket.handshake?.auth?.token || (socket.handshake?.headers && (socket.handshake.headers.authorization || '').split(' ')[1]);
+          if (token) {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            userId = decoded?.id || decoded?._id || decoded?.userId || decoded?.id;
+            if (userId) socket.userId = String(userId);
+          }
+        } catch (e) {}
+      }
+      console.log('[SOCKET IN] message-delivered received from', userId, 'payload:', data);
+      if (!userId) return socket.emit('message-delivered-error', { message: 'Not authenticated' });
+      if (!messageId) return socket.emit('message-delivered-error', { message: 'messageId required' });
+
+      const message = await Message.findById(messageId);
+      if (!message) return socket.emit('message-delivered-error', { message: 'Message not found' });
+
+      const chat = await Chat.findById(message.chat);
+      if (!chat) return socket.emit('message-delivered-error', { message: 'Chat not found' });
+
+      // For both 1:1 and group chats: persist per-user delivery using `deliveredBy`.
+      try {
+        if (!message.deliveredBy) message.deliveredBy = [];
+        const alreadyDelivered = message.deliveredBy.map(d => String(d)).includes(String(userId));
+        if (!alreadyDelivered) {
+          try {
+            message.deliveredBy.push(mongoose.Types.ObjectId(String(userId)));
+          } catch (e) {
+            // fallback to pushing raw value
+            message.deliveredBy.push(userId);
+          }
+        }
+
+        // Determine participant IDs for this chat
+        let participantIds = (chat.participants && chat.participants.length) ? chat.participants.map(p => String(p)) : (chat.users || []).map(u => String(u));
+        // Exclude sender from participant list when computing delivered/read-all
+        participantIds = participantIds.filter(pid => pid !== String(message.sender));
+        const uniqueDeliverers = (message.deliveredBy || []).map(d => String(d));
+
+        // If everyone has delivered (or for 1:1 the recipient delivered), mark delivered
+        if (participantIds.length > 0 && participantIds.every(pid => uniqueDeliverers.includes(pid))) {
+          if (message.status !== 'delivered' && message.status !== 'read') {
+            message.status = 'delivered';
+          }
+        }
+
+        try {
+          const before = message.deliveredBy.map(d => String(d));
+          await message.save();
+          const after = message.deliveredBy.map(d => String(d));
+          console.log('[SOCKET] message-delivered persisted', { messageId: message._id, before, after, status: message.status });
+
+          // Notify senders/personal rooms so their UI can show double tick
+          try {
+            const payload = { messageId: message._id, chatId: message.chat, deliveredBy: String(userId), updatedDeliveredBy: after };
+            console.log('[SOCKET OUT] emitting message-delivered to sender', String(message.sender), payload);
+            io.to(String(message.sender)).emit('message-delivered', payload);
+          } catch (e) { console.error('Error emitting message-delivered to sender', e); }
+        } catch (saveErr) {
+          console.error('Error saving message after marking deliveredBy:', saveErr);
+        }
+      } catch (e) {
+        console.error('Error persisting deliveredBy for message', e);
+      }
+
+      socket.emit('message-delivered-ack', { messageId });
+    } catch (e) {
+      console.error('Error in message-delivered socket handler', e);
+      socket.emit('message-delivered-error', { message: e.message });
+    }
+  });
+
+  // Message read: when a user opens a chat or reads messages
+  socket.on('message-read', async (data) => {
+    try {
+      const { chatId } = data || {};
+      let userId = socket.userId;
+      // if socket.userId not set (e.g., setup not received yet), try to decode token from handshake
+      if (!userId) {
+        try {
+          const token = socket.handshake?.auth?.token || (socket.handshake?.headers && (socket.handshake.headers.authorization || '').split(' ')[1]);
+          if (token) {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            userId = decoded?.id || decoded?._id || decoded?.userId || decoded?.id;
+            if (userId) socket.userId = String(userId);
+          }
+        } catch (e) {}
+      }
+      console.log('[SOCKET IN] message-read received from', userId, 'payload:', data);
+      if (!userId) return socket.emit('message-read-error', { message: 'Not authenticated' });
+      if (!chatId) return socket.emit('message-read-error', { message: 'chatId required' });
+
+      const chat = await Chat.findById(chatId).lean();
+      if (!chat) return socket.emit('message-read-error', { message: 'Chat not found' });
+
+      if (chat.isGroupChat) {
+        // Add user to readBy for unread messages; set status to 'read' if everyone has read
+        const msgs = await Message.find({ chat: chatId, $or: [ { readBy: { $exists: false } }, { readBy: { $nin: [userId] } } ] });
+        const updatedIds = [];
+        for (const m of msgs) {
+          if (!m.readBy) m.readBy = [];
+          if (!m.readBy.map(r => String(r)).includes(String(userId))) {
+            m.readBy.push(userId);
+          }
+          let participantIds = (chat.participants && chat.participants.length) ? chat.participants.map(p => String(p)) : (chat.users || []).map(u => String(u));
+          participantIds = participantIds.filter(pid => pid !== String(m.sender));
+          const uniqueReaders = (m.readBy || []).map(r => String(r));
+          if (participantIds.every(pid => uniqueReaders.includes(pid))) {
+            m.status = 'read';
+          }
+          await m.save();
+          updatedIds.push(m._id);
+        }
+
+        // notify participants so UI can show blue ticks where appropriate
+        try {
+          console.log('[SOCKET OUT] emitting message-read to chat room', chatId, { reader: userId, updatedIds });
+          socket.to(chatId).emit('message-read', { chatId, reader: userId, updatedIds });
+        } catch (e) { console.error('emit chat room message-read error', e); }
+        try {
+          const participantIds = (chat.participants && chat.participants.length) ? chat.participants.map(p => String(p)) : (chat.users || []).map(u => String(u));
+          participantIds.forEach(pid => {
+            if (pid === String(userId)) return;
+            try {
+              console.log('[SOCKET OUT] emitting message-read to personal room', pid, { chatId, reader: userId, updatedIds });
+              io.to(pid).emit('message-read', { chatId, reader: userId, updatedIds });
+            } catch (e) { console.error('Error emitting message-read to personal room', e); }
+          });
+        } catch (e) {
+          console.error('Error broadcasting message-read to personal rooms', e);
+        }
+      } else {
+        // 1-on-1: use readBy array for consistency with group logic
+        const msgs = await Message.find({ chat: chatId, $or: [ { readBy: { $exists: false } }, { readBy: { $nin: [userId] } } ] });
+        const updatedIds = [];
+        for (const m of msgs) {
+          if (!m.readBy) m.readBy = [];
+          if (!m.readBy.map(r => String(r)).includes(String(userId))) {
+            m.readBy.push(userId);
+            let participantIds = (chat.participants && chat.participants.length) ? chat.participants.map(p => String(p)) : (chat.users || []).map(u => String(u));
+            participantIds = participantIds.filter(pid => pid !== String(m.sender));
+            const uniqueReaders = (m.readBy || []).map(r => String(r));
+            if (participantIds.every(pid => uniqueReaders.includes(pid))) {
+              m.status = 'read';
+            }
+            await m.save();
+            updatedIds.push(m._id);
+          }
+        }
+
+        // notify participants so UI can show blue ticks where appropriate (for 1:1, this will notify the other user)
+        try {
+          console.log('[SOCKET OUT] emitting message-read to chat room (1:1)', chatId, { reader: userId, updatedIds });
+          socket.to(chatId).emit('message-read', { chatId, reader: userId, updatedIds });
+        } catch (e) { console.error('emit chat room message-read error (1:1)', e); }
+        try {
+          const participantIds = (chat.participants && chat.participants.length) ? chat.participants.map(p => String(p)) : (chat.users || []).map(u => String(u));
+          participantIds.forEach(pid => {
+            if (pid === String(userId)) return;
+            try {
+              console.log('[SOCKET OUT] emitting message-read to personal room (1:1)', pid, { chatId, reader: userId, updatedIds });
+              io.to(pid).emit('message-read', { chatId, reader: userId, updatedIds });
+            } catch (e) { console.error('Error emitting message-read to personal room (1:1)', e); }
+          });
+        } catch (e) {
+          console.error('Error broadcasting message-read to personal rooms (1:1)', e);
+        }
+      }
+
+      socket.emit('message-read-ack', { chatId });
+    } catch (e) {
+      console.error('Error in message-read socket handler', e);
+      socket.emit('message-read-error', { message: e.message });
+    }
+  });
 
 });

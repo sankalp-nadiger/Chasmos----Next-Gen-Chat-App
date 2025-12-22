@@ -39,7 +39,8 @@ export const handleGoogleAuth = asyncHandler(async (req, res) => {
       _id: user._id,
       name: user.name,
       email: user.email,
-      avatar: user.avatar,
+      // Prefer stored DB avatar, otherwise use Google's picture from token payload
+      avatar: user.avatar || avatar || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
       phoneNumber: user.phoneNumber,
       isAdmin: user.isAdmin,
       isBusiness: user.isBusiness,

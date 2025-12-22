@@ -53,6 +53,8 @@ const Profile = ({ onClose, effectiveTheme }) => {
     joinedDate: "",
     avatar: null, // Can be File or URL
   });
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  const [removedAvatar, setRemovedAvatar] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -74,9 +76,33 @@ const Profile = ({ onClose, effectiveTheme }) => {
           : "Hey there! I am using Chasmos.",
       location: userData.location || "Not specified",
       joinedDate: formatJoinedDate(userData.createdAt),
-      avatar: userData.avatar || null,
+      // Priority: DB avatar (saved on our backend) -> Google picture -> other common keys -> null
+      avatar:
+        userData.avatar ||
+        userData.picture ||
+        userData.pic ||
+        userData.googleData?.picture ||
+        userData.googleProfile?.picture ||
+        null,
     });
   }, [refreshKey]);
+
+  // Reset avatar error when avatar source changes
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+    // If avatar is set again, clear removed flag
+    if (profileData.avatar) setRemovedAvatar(false);
+  }, [profileData.avatar]);
+
+  const getInitials = (name) => {
+    if (!name || typeof name !== 'string') return '';
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return '';
+    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+    const first = parts[0].charAt(0).toUpperCase();
+    const last = parts[parts.length - 1].charAt(0).toUpperCase();
+    return `${first}${last}`;
+  };
 
   // Handle input changes
   const handleInputChange = (field, value) => {
@@ -104,6 +130,7 @@ const handleAvatarUpload = () => {
         ...prev,
         avatar: reader.result, // ✅ BASE64 STRING
       }));
+      setRemovedAvatar(false);
     };
 
     reader.readAsDataURL(file);
@@ -124,6 +151,11 @@ const handleSave = async () => {
       name: profileData.name,
       bio: profileData.bio,
     };
+
+    // If user removed their avatar, tell backend to clear it
+    if (removedAvatar) {
+      payload.clearAvatar = true;
+    }
 
     // ✅ send base64 ONLY if changed
     if (profileData.avatar?.startsWith("data:image")) {
@@ -227,20 +259,63 @@ const handleSave = async () => {
             {/* Avatar */}
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.3 }} className="flex flex-col items-center mb-8">
               <div className="relative mb-4">
-                <motion.div whileHover={{ scale: 1.05 }} className="w-32 h-32 rounded-full bg-gradient-to-br from-blue-400 via-purple-500 to-pink-500 p-1 shadow-lg">
-                  <div className="w-full h-full rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-5xl font-bold overflow-hidden">
-                    {profileData.avatar ? (
-                      <img src={profileData.avatar instanceof File ? URL.createObjectURL(profileData.avatar) : profileData.avatar} alt="Profile" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="uppercase">{profileData.name.charAt(0)}</span>
+                <motion.div whileHover={{ scale: 1.05 }} className="w-32 h-32 rounded-full bg-gradient-to-br from-blue-400 via-purple-500 to-pink-500 p-1 shadow-lg relative">
+                  <div className="w-full h-full rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-5xl font-bold overflow-hidden relative">
+                    {/* Always render initials as the visual fallback */}
+                    <span className="uppercase z-0">{getInitials(profileData.name)}</span>
+
+                    {/* Render image on top when available; hide it on load error so initials remain visible */}
+                    {profileData.avatar && ((typeof profileData.avatar === 'string' && profileData.avatar.trim() !== '') || profileData.avatar instanceof File) && (
+                      <img
+                        src={profileData.avatar instanceof File ? URL.createObjectURL(profileData.avatar) : profileData.avatar}
+                        alt="Profile"
+                        className="w-full h-full object-cover absolute inset-0 z-10"
+                        style={{ display: avatarLoadFailed ? 'none' : 'block' }}
+                        onLoad={() => setAvatarLoadFailed(false)}
+                        onError={(e) => {
+                          setAvatarLoadFailed(true);
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
                     )}
+
+                    {/* Avatar action controls (overlayed) - positioned left & right, shown on hover or when editing */}
+                    <div
+                      className="absolute inset-0 flex items-end justify-between px-2 pb-2 z-20"
+                      style={{
+                        opacity: isEditing ? 1 : 0,
+                        transition: 'opacity 120ms ease-in-out',
+                        pointerEvents: isEditing ? 'auto' : 'none',
+                      }}
+                    >
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => {
+                          setProfileData(prev => ({ ...prev, avatar: null }));
+                          setRemovedAvatar(true);
+                          setAvatarLoadFailed(false);
+                        }}
+                        className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center text-white hover:bg-red-600 transition-colors shadow-lg"
+                        title="Remove picture"
+                        aria-label="Remove picture"
+                      >
+                        <X className="w-4 h-4" />
+                      </motion.button>
+
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={handleAvatarUpload}
+                        className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white hover:bg-blue-600 transition-colors shadow-lg"
+                        title="Upload new picture"
+                        aria-label="Upload new picture"
+                      >
+                        <Camera className="w-5 h-5" />
+                      </motion.button>
+                    </div>
                   </div>
                 </motion.div>
-                {isEditing && (
-                  <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={handleAvatarUpload} className="absolute bottom-2 right-2 w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white hover:bg-blue-600 transition-colors shadow-lg">
-                    <Camera className="w-5 h-5" />
-                  </motion.button>
-                )}
               </div>
               <motion.h3 initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }} className={`text-2xl font-bold ${effectiveTheme.text} mb-1`}>
                 {profileData.name}

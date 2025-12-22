@@ -700,7 +700,7 @@ const MessageBubble = React.memo(
   initial={{ opacity: 0 }}
   animate={{ opacity: 1 }}
   transition={{ delay: 0.1 }}
-  className={`${isShortMessage ? 'flex items-end gap-2' : ''} ${!isOwnMessage && !message.isRead ? 'text-blue-500 font-medium' : ''}`}
+  className={`${isShortMessage ? 'flex items-end gap-2' : ''} ${!isOwnMessage && message.status !== 'read' ? 'text-blue-500 font-medium' : ''}`}
 >
   {isEditing ? (
     <div className="w-full">
@@ -767,8 +767,19 @@ const MessageBubble = React.memo(
   }`}>
                   {formatMessageTime(message.isScheduled ? message.scheduledFor : message.timestamp)}
                   {message.isEdited && <span className="text-[10px] italic opacity-60">edited</span>}
-                  {message.isRead ? (
-                    <img src={doubleCheckIcon} alt="read" className="w-4 h-4 flex-shrink-0" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
+                  {message.status === 'read' ? (
+                    <img src={doubleCheckIcon} alt="read" className="w-4 h-4 flex-shrink-0" style={{ filter: 'invert(31%) sepia(83%) saturate(4514%) hue-rotate(184deg) brightness(92%) contrast(88%)', marginBottom: '1px' }} />
+                  ) : message.status === 'delivered' ? (
+                    <img
+                      src={doubleCheckIcon}
+                      alt="delivered"
+                      className="w-4 h-4 opacity-80 flex-shrink-0"
+                      style={
+                        effectiveTheme.mode === 'dark'
+                          ? { filter: 'invert(70%) sepia(20%) saturate(600%) hue-rotate(190deg) brightness(90%)', marginBottom: '1px' }
+                          : { filter: 'grayscale(100%) brightness(70%)', marginBottom: '1px' }
+                      }
+                    />
                   ) : (
                     <Check className="w-4 h-4 opacity-75 flex-shrink-0" />
                   )}
@@ -810,8 +821,19 @@ const MessageBubble = React.memo(
                   transition={{ delay: 0.4, type: "spring", stiffness: 400 }}
                   className="flex-shrink-0 ml-1"
                 >
-                  {message.isRead ? (
-                    <img src={doubleCheckIcon} alt="read" className="w-4 h-4" style={{ filter: 'invert(64%) sepia(91%) saturate(473%) hue-rotate(182deg) brightness(101%) contrast(96%)', marginBottom: '1px' }} />
+                  {message.status === 'read' ? (
+                    <img src={doubleCheckIcon} alt="read" className="w-4 h-4" style={{ filter: 'invert(31%) sepia(83%) saturate(4514%) hue-rotate(184deg) brightness(92%) contrast(88%)', marginBottom: '1px' }} />
+                  ) : message.status === 'delivered' ? (
+                    <img
+                      src={doubleCheckIcon}
+                      alt="delivered"
+                      className="w-4 h-4 opacity-80"
+                      style={
+                        effectiveTheme.mode === 'dark'
+                          ? { filter: 'invert(70%) sepia(20%) saturate(600%) hue-rotate(190deg) brightness(90%)', marginBottom: '1px' }
+                          : { filter: 'grayscale(100%) brightness(70%)', marginBottom: '1px' }
+                      }
+                    />
                   ) : (
                     <Check className="w-4 h-4 opacity-75 text-white" />
                   )}
@@ -2670,7 +2692,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             sender: m.sender,
             // prefer backend-provided `timestamp` (normalized to scheduledFor when applicable)
             timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: sent.status || (sent.isRead ? 'read' : 'sent'),
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
             isForwarded: m.isForwarded || false,
@@ -2722,7 +2744,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             sender: m.sender,
             // prefer backend-provided `timestamp` (normalized to scheduledFor when applicable)
             timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: m.status || (m.isRead ? 'read' : 'sent'),
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
             isForwarded: m.isForwarded || false,
@@ -2857,7 +2879,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               sender: m.sender,
               // Prefer normalized `timestamp` from backend (uses scheduledFor when applicable)
               timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-              isRead: true,
+              status: m.status || (m.isRead ? 'read' : 'sent'),
               attachments: Array.isArray(m.attachments) ? m.attachments : [],
               isSystemMessage: m.type === 'system',
               isForwarded: m.isForwarded || false,
@@ -3142,7 +3164,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               content: m.content || m.text || '',
               sender: m.sender,
               timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-              isRead: true,
+              status: m.status || (m.isRead ? 'read' : 'sent'),
               attachments: m.attachments || [],
               isForwarded: m.isForwarded || false,
               isEdited: m.isEdited || false,
@@ -3266,7 +3288,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             content: m.content || m.text || "",
             sender: m.sender,
             timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: m.status || (m.isRead ? 'read' : 'sent'),
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
             isForwarded: m.isForwarded || false,
@@ -3938,7 +3960,7 @@ const handleSendMessageFromInput = useCallback(
           content: payload.content || payload.text || '',
           sender: payload.sender?._id || payload.sender || 'me',
           timestamp: new Date(payload.timestamp || payload.scheduledFor || payload.createdAt || Date.now()).getTime(),
-          isRead: true,
+          status: payload.status || (payload.isRead ? 'read' : 'sent'),
           attachments: payload.attachments || payload.files || [],
           repliedTo: payload.repliedTo || [],
         };
@@ -3972,13 +3994,13 @@ const handleSendMessageFromInput = useCallback(
         let chatId = getChatId(payload);
         let userId = payload.userId;
 
-        const localMessage = {
+          const localMessage = {
           id: Date.now(),
           type: 'text',
           content: payload.content,
           sender: 'me',
           timestamp: Date.now(),
-          isRead: true,
+          status: 'sent',
         };
 
         if (!token) {
@@ -4100,13 +4122,18 @@ const handleSendMessageFromInput = useCallback(
             content: sent.content || sent.text || payload.content,
             sender: sent.sender?._id || sent.sender || 'me',
             timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: sent.status || (sent.isRead ? 'read' : 'sent'),
             repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
           };
 
           appendMessage(chatId, formatted);
           onClearReplySelection && onClearReplySelection();
-          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
+          if (socketRef.current?.emit) {
+            try {
+              console.log('[SOCKET OUT] emit new message', { chatId, messageId: formatted.id });
+              socketRef.current.emit('new message', sent);
+            } catch (e) { console.error('Error emitting new message', e); }
+          }
 
           updateRecentChat(chatId, payload.content, false);
           updateContactPreview(chatId, payload.content, false);
@@ -4129,6 +4156,7 @@ const handleSendMessageFromInput = useCallback(
           content: payload.text || '',
           sender: 'me',
           timestamp: Date.now(),
+          status: 'sent',
           attachments: payload.attachments,
         };
 
@@ -4257,7 +4285,7 @@ const handleSendMessageFromInput = useCallback(
             content: sent.content || sent.text || payload.text || '',
             sender: sent.sender?._id || sent.sender || 'me',
             timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
-            isRead: true,
+              status: sent.status || (sent.isRead ? 'read' : 'sent'),
             attachments: sent.attachments || payload.attachments,
             repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
           };
@@ -4299,7 +4327,7 @@ const handleSendMessageFromInput = useCallback(
           content: messageText,
           sender: 'me',
           timestamp: Date.now(),
-          isRead: true,
+          status: 'sent',
         };
 
         if (!token) {
@@ -4402,7 +4430,7 @@ const handleSendMessageFromInput = useCallback(
             content: sent.content || sent.text || messageText,
             sender: sent.sender?._id || sent.sender || 'me',
             timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: sent.status || (sent.isRead ? 'read' : 'sent'),
             repliedTo: sent.repliedTo || selectedReplies || [],
           };
 
@@ -4430,7 +4458,7 @@ const handleSendMessageFromInput = useCallback(
           content: payload.content || '📊 Poll',
           sender: 'me',
           timestamp: Date.now(),
-          isRead: true,
+          status: 'sent',
           poll: null, // Will be populated from server
         };
 
@@ -4485,7 +4513,7 @@ const handleSendMessageFromInput = useCallback(
             content: sent.content || payload.content || '📊 Poll',
             sender: sent.sender?._id || sent.sender || 'me',
             timestamp: new Date(sent.timestamp || sent.scheduledFor || sent.createdAt || Date.now()).getTime(),
-            isRead: true,
+            status: sent.status || (sent.isRead ? 'read' : 'sent'),
             poll: fullPoll,
             repliedTo: sent.repliedTo || selectedReplies || payload.repliedTo || [],
           };
@@ -4515,9 +4543,11 @@ const handleSendMessageFromInput = useCallback(
       socketRef.current = null;
     }
     const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+    const savedToken = localStorage.getItem('token') || (userData && userData.token) || '';
     const socket = io(API_BASE_URL, {
       transports: ['websocket'],
       withCredentials: true,
+      auth: { token: savedToken },
     });
     socketRef.current = socket;
 
@@ -4573,6 +4603,66 @@ const handleSendMessageFromInput = useCallback(
         console.log('[SOCKET ANY]', event, payload);
       });
     }
+
+    // Listen for delivery/read updates from server
+    socket.on('message-delivered', (payload) => {
+      try {
+        console.log('[SOCKET IN] message-delivered', payload);
+        // Support two payload shapes:
+        // 1) { messageId, chatId, deliveredBy, updatedDeliveredBy }
+        // 2) { delivered: [ { messageId, deliveredBy, chatId? } ] }
+        if (!payload) return;
+        const handleMark = (msgEntry) => {
+          const mid = msgEntry && (msgEntry.messageId || msgEntry.message_id);
+          const chatId = msgEntry && (msgEntry.chatId || payload.chatId || '');
+          if (!mid) return;
+          const key = String(chatId || '');
+          setMessages(prev => {
+            const copy = { ...(prev || {}) };
+            if (!copy[key]) return prev;
+            copy[key] = copy[key].map(m => (String(m.id) === String(mid) || String(m._id) === String(mid) ? { ...m, status: 'delivered' } : m));
+            return copy;
+          });
+        };
+
+        if (Array.isArray(payload.delivered) && payload.delivered.length) {
+          payload.delivered.forEach(handleMark);
+        } else if (payload.messageId) {
+          handleMark(payload);
+        }
+      } catch (e) {
+        console.error('Error handling message-delivered', e);
+      }
+    });
+
+    socket.on('message-read', (payload) => {
+      try {
+        console.log('[SOCKET IN] message-read', payload);
+        const { chatId, updatedIds, reader } = payload || {};
+        const key = String(chatId || (payload && payload.chatId) || '');
+        setMessages(prev => {
+          const copy = { ...(prev || {}) };
+          if (!copy[key]) return prev;
+          if (Array.isArray(updatedIds) && updatedIds.length) {
+            copy[key] = copy[key].map(m => (updatedIds.includes(m.id) || updatedIds.includes(m._id) ? { ...m, status: 'read' } : m));
+          } else if (reader) {
+            // No explicit IDs provided: in 1:1 flows we may receive reader info only.
+            // Only mark messages sent by the current user as 'read' (others' clients shouldn't auto-blue everything)
+            try {
+              copy[key] = copy[key].map(m => (String(m.sender) === String(currentUserId) ? { ...m, status: 'read' } : m));
+            } catch (e) {
+              copy[key] = copy[key].map(m => m);
+            }
+          } else {
+            // Unknown payload shape: do not change all messages to 'read'
+            return prev;
+          }
+          return copy;
+        });
+      } catch (e) {
+        console.error('Error handling message-read', e);
+      }
+    });
 
     // Typing indicators (payload: { chatId, user: { _id, name, avatar } })
     socket.on('typing', (payload) => {
@@ -4634,6 +4724,7 @@ const handleSendMessageFromInput = useCallback(
       try {
         const chatId = newMessage.chat?._id || newMessage.chat;
         const senderId = newMessage.sender?._id || newMessage.sender;
+        const isFromMe = String(senderId) === String(currentUserId);
         const key = String(chatId || senderId);
         const attachments = Array.isArray(newMessage.attachments) ? newMessage.attachments : [];
         const inferredType = newMessage.type || (attachments.length ? (
@@ -4662,7 +4753,8 @@ const handleSendMessageFromInput = useCallback(
           sender: (newMessage.sender && typeof newMessage.sender === 'object') ? newMessage.sender : (newMessage.sender?._id || newMessage.sender),
           // prefer server-provided normalized timestamp, then scheduledFor, then createdAt
           timestamp: newMessage.timestamp ? new Date(newMessage.timestamp).getTime() : (newMessage.scheduledFor ? new Date(newMessage.scheduledFor).getTime() : new Date(newMessage.createdAt || Date.now()).getTime()),
-          isRead: false,
+          // message status: prefer server-provided `status`, fallback to legacy `isRead`
+          status: newMessage.status || (newMessage.isRead ? 'read' : 'sent'),
           attachments: attachments,
           isSystemMessage: newMessage.type === 'system',
           poll: newMessage.poll || null,
@@ -4840,18 +4932,36 @@ const handleSendMessageFromInput = useCallback(
           timestamp: formatted.timestamp,
         });
         
-        // Only increment unread count if this chat is not currently open (reuse isCurrentChat from above)
+        // Emit delivered ack (recipient client's socket acknowledges receipt)
+        try {
+          if (!isFromMe && socketRef.current?.emit) {
+            console.log('[SOCKET OUT] emit message-delivered', { messageId: newMessage._id || newMessage.id, chatId: key });
+            socketRef.current.emit('message-delivered', { messageId: newMessage._id || newMessage.id, chatId: key });
+          }
+        } catch (e) { console.error('Error emitting message-delivered', e); }
+
+        // Only increment unread count if this chat is not currently open
         if (!isCurrentChat) {
           setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
         } else {
-          // If chat is currently open, mark the message as read
-          setMessages((prev) => {
-            const chatMessages = prev[key] || [];
-            const updatedMessages = chatMessages.map(m => 
-              String(m.id) === String(formatted.id) ? { ...m, isRead: true } : m
-            );
-            return { ...prev, [key]: updatedMessages };
-          });
+          // If chat is currently open and this message is NOT from me, mark the message as read
+          if (!isFromMe) {
+            // emit message-read so server and sender are notified
+            try {
+              if (socketRef.current?.emit) {
+                console.log('[SOCKET OUT] emit message-read', { chatId: key });
+                socketRef.current.emit('message-read', { chatId: key });
+              }
+            } catch (e) { console.error('Error emitting message-read', e); }
+
+            setMessages((prev) => {
+              const chatMessages = prev[key] || [];
+              const updatedMessages = chatMessages.map(m => 
+                String(m.id) === String(formatted.id) ? { ...m, status: 'read' } : m
+              );
+              return { ...prev, [key]: updatedMessages };
+            });
+          }
         }
         updateContactPreview(key, preview, hasAttachment, {
           attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
@@ -5084,6 +5194,31 @@ const handleSendMessageFromInput = useCallback(
       } catch (err) {}
     };
   }, [API_BASE_URL, selectedContact]);
+
+  // When user opens a conversation, emit message-read and mark local messages read
+  useEffect(() => {
+    try {
+      if (!selectedContact) return;
+      const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
+      if (!chatId) return;
+      if (socketRef.current?.emit) {
+        try {
+          console.log('[SOCKET OUT] emit message-read on open', { chatId });
+          socketRef.current.emit('message-read', { chatId });
+        } catch (e) { console.error('Error emitting message-read on open', e); }
+      }
+      // Mark local messages in this chat as read (only messages sent by others)
+      setMessages(prev => {
+        if (!prev) return prev;
+        const copy = { ...(prev || {}) };
+        const arr = copy[String(chatId)] || [];
+        copy[String(chatId)] = (arr || []).map(m => (String(m.sender) !== String(currentUserId) ? { ...m, status: 'read' } : m));
+        return copy;
+      });
+    } catch (e) {
+      console.error('Error emitting message-read on open', e);
+    }
+  }, [selectedContact]);
 
   const handleBackToContacts = useCallback(() => {
     if (isMobileView) {
@@ -5704,7 +5839,7 @@ const handleCreateGroup = useCallback(() => {
                   sender: m.sender,
                   // prefer backend-provided `timestamp` (normalized to scheduledFor when applicable)
                   timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-                  isRead: m.isRead || false,
+                  status: m.status || (m.isRead ? 'read' : 'sent'),
                   attachments: Array.isArray(m.attachments) ? m.attachments : [],
                   isSystemMessage: m.type === 'system',
                   isForwarded: m.isForwarded || false,
@@ -8169,10 +8304,10 @@ useEffect(() => {
                 )
               );
               
-              // Mark all messages in this chat as read
+              // Mark messages from others in this chat as read
               setMessages((prev) => {
                 const chatMessages = prev[chatId] || [];
-                const updatedMessages = chatMessages.map(m => ({ ...m, isRead: true }));
+                const updatedMessages = chatMessages.map(m => (String(m.sender) !== String(currentUserId) ? { ...m, status: 'read' } : m));
                 return { ...prev, [chatId]: updatedMessages };
               });
               

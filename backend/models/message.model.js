@@ -37,6 +37,14 @@ const messageSchema = new Schema(
 
     // Poll reference
     poll: { type: Schema.Types.ObjectId, ref: "Poll" }
+    ,
+    // Delivery / read tracking
+    status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
+    // For group chats: list of users who have read this message
+    readBy: [{ type: Schema.Types.ObjectId, ref: 'User' }]
+    ,
+    // For delivery tracking per-user (useful for group delivered state)
+    deliveredBy: [{ type: Schema.Types.ObjectId, ref: 'User' }]
   },
   { timestamps: true }
 );

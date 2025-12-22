@@ -263,23 +263,22 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
     user.bio = req.body.bio !== undefined ? req.body.bio : user.bio;
     
     
-  // ✅ SUPABASE AVATAR UPLOAD (ONLY CHANGE)
-  if (req.body.avatarBase64) {
-    user.avatar = await uploadBase64ImageToSupabase(
-      req.body.avatarBase64,
-      "avatars",
-      "users"
-    );
-  }
-    
-  // ✅ SUPABASE AVATAR UPLOAD (ONLY CHANGE)
-  if (req.body.avatarBase64) {
-    user.avatar = await uploadBase64ImageToSupabase(
-      req.body.avatarBase64,
-      "avatars",
-      "users"
-    );
-  }
+    // Avatar handling: clear, base64 upload, or direct URL
+    if (req.body.clearAvatar === true || req.body.avatar === null) {
+      user.avatar = "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg";
+    } else if (req.body.avatarBase64) {
+      user.avatar = await uploadBase64ImageToSupabase(
+        req.body.avatarBase64,
+        "avatars",
+        "users"
+      );
+    } else if (req.body.avatar && typeof req.body.avatar === 'string') {
+      if (req.body.avatar.startsWith("data:image/")) {
+        user.avatar = await uploadBase64ImageToSupabase(req.body.avatar, "avatars", "users");
+      } else {
+        user.avatar = req.body.avatar;
+      }
+    }
 
     // BUSINESS update (optional)
     if (req.body.isBusiness !== undefined) {
