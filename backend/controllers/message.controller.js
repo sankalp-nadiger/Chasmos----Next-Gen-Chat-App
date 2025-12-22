@@ -859,6 +859,7 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
               mimeType: attachment.mimeType,
               fileSize: attachment.fileSize,
               createdAt: message.createdAt,
+              sender: message.sender?._id,
               senderName: message.sender?.name || message.sender?.email,
               chatId: message.chat,
               messageId: message._id  // Add message ID for navigation
@@ -929,6 +930,7 @@ export const getLinkAttachments = asyncHandler(async (req, res) => {
             url: url,
             content: message.content,
             createdAt: message.createdAt,
+            sender: message.sender?._id,
             senderName: message.sender?.name || message.sender?.email,
             chatId: message.chat,
             messageId: message._id  // Add message ID for navigation
@@ -1008,6 +1010,7 @@ export const getDocumentAttachments = asyncHandler(async (req, res) => {
               mimeType: attachment.mimeType,
               fileSize: attachment.fileSize,
               createdAt: message.createdAt,
+              sender: message.sender?._id,
               senderName: message.sender?.name || message.sender?.email,
               chatId: message.chat,
               messageId: message._id  // Add message ID for navigation
