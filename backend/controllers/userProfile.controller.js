@@ -24,7 +24,10 @@ export const getUserProfile = async (req, res) => {
         user.avatar || user.picture || user.pic || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg",
       bio: user.bio,
       createdAt: user.createdAt,
-      isOnline: user.isOnline
+      isOnline: user.isOnline,
+      // Business fields
+      isBusiness: user.isBusiness || false,
+      businessCategory: user.businessCategory || ""
     });
   } catch (error) {
     console.error('Error fetching user profile:', error);

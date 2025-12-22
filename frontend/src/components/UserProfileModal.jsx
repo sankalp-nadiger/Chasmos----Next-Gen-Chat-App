@@ -562,7 +562,14 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
                       transition={{ delay: 0.5 }}
                       className={`text-2xl font-bold ${effectiveTheme.text} mb-2`}
                     >
-                      {userDetails.name}
+                      <div className="flex items-center justify-center gap-3">
+                        <span className="truncate">{userDetails.name}</span>
+                        {userDetails.isBusiness && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${effectiveTheme.mode === 'dark' ? 'bg-yellow-600 text-black' : 'bg-yellow-100 text-yellow-800'}`}>
+                            Business
+                          </span>
+                        )}
+                      </div>
                     </motion.h3>
                     
                     {/* Bio - Appears Third */}
@@ -647,6 +654,29 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
                           <p className={`text-xs ${effectiveTheme.textSecondary}`}>Joined</p>
                           <p className={`font-medium ${effectiveTheme.text} truncate`}>
                             {formatDate(userDetails.createdAt)}
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
+                    {/* Business category display */}
+                    {userDetails.isBusiness && userDetails.businessCategory && (
+                      <motion.div
+                        initial={{ x: -50, opacity: 0 }}
+                        animate={{ x: 0, opacity: 1 }}
+                        transition={{ delay: 1.05 }}
+                        whileHover={{ x: 5 }}
+                        className={`flex items-center space-x-3 p-3 rounded-lg backdrop-blur-sm ${
+                          effectiveTheme.mode === 'dark' ? 'bg-gray-800/50' : 'bg-gray-50/50'
+                        }`}
+                        style={{ marginLeft: '1rem', marginRight: '2rem' }}
+                      >
+                        <div className={`p-2 rounded-full ${effectiveTheme.accent} flex-shrink-0`}>
+                          <User className="w-5 h-5 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs ${effectiveTheme.textSecondary}`}>Category</p>
+                          <p className={`font-medium ${effectiveTheme.text} truncate`}>
+                            {userDetails.businessCategory}
                           </p>
                         </div>
                       </motion.div>
