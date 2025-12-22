@@ -130,7 +130,6 @@ export const fetchChats = asyncHandler(async (req, res) => {
       return chat;
     });
 
-    //console.log(results);
     res.status(200).send(normalized);
   } catch (error) {
     res.status(400);
@@ -591,7 +590,6 @@ export const getRecentChats = async (req, res) => {
 
       return chatData;
     });
-    //console.log("Recent chats fetched:", formattedChats);
     res.status(200).json(formattedChats);
   } catch (err) {
     console.error(err);

@@ -10,6 +10,7 @@ import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
 const normalizeMessage = (m) => {
   const obj = (m && m.toObject) ? m.toObject() : m;
   obj.timestamp = obj.isScheduled ? obj.scheduledFor : obj.createdAt;
+
   return obj;
 
 };

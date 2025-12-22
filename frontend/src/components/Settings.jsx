@@ -29,6 +29,7 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
     const saved = localStorage.getItem('soundEnabled');
     return saved !== null ? JSON.parse(saved) : true;
   });
+  const [googleContactsSyncEnabled, setGoogleContactsSyncEnabled] = useState(false);
   const [language, setLanguage] = useState("English");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -49,6 +50,9 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
           const data = await response.json();
           setNotifications(data.notifications);
           setSoundEnabled(data.sound);
+          if (data.googleContactsSyncEnabled !== undefined) {
+            setGoogleContactsSyncEnabled(data.googleContactsSyncEnabled);
+          }
         }
       } catch (error) {
         console.error('Error loading settings:', error);
@@ -99,6 +103,11 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
     updateSettings('sound', value);
   };
 
+  const handleGoogleContactsSyncChange = (value) => {
+    setGoogleContactsSyncEnabled(value);
+    updateSettings('googleContactsSyncEnabled', value);
+  };
+
 
 
   const quickSettings = [
@@ -119,6 +128,15 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
       type: "toggle",
       value: soundEnabled,
       onChange: handleSoundChange,
+    },
+    {
+      id: "googleContactsSync",
+      title: "Google Contacts Sync On Login",
+      description: "Sync your Google contacts on login",
+      icon: Globe,
+      type: "toggle",
+      value: googleContactsSyncEnabled,
+      onChange: handleGoogleContactsSyncChange,
     },
   ];
 

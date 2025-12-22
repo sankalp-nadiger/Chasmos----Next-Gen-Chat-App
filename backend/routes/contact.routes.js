@@ -3,7 +3,8 @@ import { protect } from "../middleware/auth.middleware.js";
 import { 
     googleConnect, 
     googleCallback, 
-    syncGoogleContacts 
+    syncGoogleContacts,
+    triggerSyncForUser
 } from "../controllers/contact.controller.js";
 
 const router = express.Router();
@@ -18,5 +19,8 @@ router.route("/google/callback").get(googleCallback);
 
 // 3. Manually trigger contacts sync
 router.route("/sync").post(protect, syncGoogleContacts);
+
+// 4. Trigger sync even if sync flag is false; returns connect URL if consent required
+router.route("/trigger-sync").post(protect, triggerSyncForUser);
 
 export default router;

@@ -1613,6 +1613,45 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Listen for Google sync messages from the OAuth popup and react accordingly.
+  React.useEffect(() => {
+    const handler = (e) => {
+      try {
+        const d = e?.data;
+        if (!d || (d.type !== 'google_sync' && d.type !== 'google_sync_token')) return;
+
+        // If token message received, persist it and refresh contacts
+        if (d.type === 'google_sync_token' && d.token) {
+          try { localStorage.setItem('token', d.token); } catch (err) {}
+          // If app exposes refresh function, call it. Use custom event to trigger UI updates.
+          // Navigate back to the calling route (or /chats) then reload so contacts appear
+          const dest = d.origin || '/chats';
+          try { navigate(dest); } catch (err) {}
+          setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 350);
+          window.dispatchEvent(new CustomEvent('chasmos:google-sync-success', { detail: { token: d.token } }));
+        }
+
+        if (d.type === 'google_sync' && d.success) {
+          // If token provided in the message, persist it
+          if (d.token) {
+            try { localStorage.setItem('token', d.token); } catch (err) {}
+          }
+          // Navigate to the calling route (or /chats) then reload to show synced contacts
+          const destSuccess = d.origin || '/chats';
+          try { navigate(destSuccess); } catch (err) {}
+          setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 350);
+          // request a UI refresh — other parts of the app can listen for this event
+          window.dispatchEvent(new CustomEvent('chasmos:google-sync-success', { detail: { token: d.token } }));
+        }
+      } catch (err) {
+        console.error('Message handler error', err);
+      }
+    };
+
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [navigate]);
+
   // const [selectedContact, setSelectedContact] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [chatSearchTerm, setChatSearchTerm] = useState("");
@@ -3658,6 +3697,22 @@ const refreshRecentChats = useCallback(async () => {
     setError(err.message);
   }
 }, [API_BASE_URL]);
+
+  // Listen for successful google sync events (dispatched from the oauth popup message handler)
+  React.useEffect(() => {
+    const onSync = (e) => {
+      try {
+        // optionally use token from detail
+        const token = e?.detail?.token;
+        if (token) localStorage.setItem('token', token);
+        refreshRecentChats();
+      } catch (err) {
+        console.error('Error handling google-sync-success event', err);
+      }
+    };
+    window.addEventListener('chasmos:google-sync-success', onSync);
+    return () => window.removeEventListener('chasmos:google-sync-success', onSync);
+  }, [refreshRecentChats]);
 
 
 // Fetch recent chats on mount
@@ -5745,9 +5800,27 @@ const handleCreateGroup = useCallback(() => {
     }
   }, [isMobileView]);
 
-  const handleInviteUser = useCallback(() => {
+  const handleInviteUser = useCallback(async () => {
     console.log("Invite user clicked");
     setShowFloatingMenu(false);
+
+    const message = "Join Chasmos to enjoy the next-gen chat app and have a seamless experience of connecting with people worldwide. If you're a business then make your business visible allowing people to approach you.\n\nhttps://chasmos.netlify.app";
+
+    try {
+      if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(message);
+      } else {
+        const el = document.createElement('textarea');
+        el.value = message;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      }
+      console.log('Invite copied to clipboard');
+    } catch (err) {
+      console.error('Failed to copy invite message', err);
+    }
   }, []);
 
   const handleCloseGroupCreation = useCallback(() => {

@@ -109,7 +109,7 @@ initScheduledMessageCron();
 
 
 io.on("connection", (socket) => {
-  console.log("Connected to socket.io");
+  //console.log("Connected to socket.io");
   
   socket.on("setup", async (userData) => {
     let uid = userData?._id || userData?.id || userData;
@@ -144,7 +144,7 @@ io.on("connection", (socket) => {
     if (prev === 0) {
       try {
         io.emit('user online', { userId: socket.userId });
-        //console.log(`[SOCKET] broadcast: user online -> ${socket.userId}`);
+        
       } catch (e) {
         console.error('[SOCKET] error broadcasting user online', e);
       }

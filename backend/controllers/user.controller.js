@@ -225,7 +225,8 @@ export const authUser = asyncHandler(async (req, res) => {
   }
 
   if (user && (await user.matchPassword(password))) {
-    res.status(200).json({
+    // Prepare response
+    const baseResponse = {
       _id: user._id,
       name: user.name,
       email: user.email,
@@ -236,7 +237,41 @@ export const authUser = asyncHandler(async (req, res) => {
       isBusiness: user.isBusiness,
       businessCategory: user.businessCategory,
       token: generateToken(user._id),
-    });
+    };
+
+    // Attempt auto-sync if enabled
+    try {
+      const { getOAuth2Client, CONTACTS_SCOPES } = await import('../config/google-auth.config.js');
+      const jwt = await import('jsonwebtoken');
+      const { performSyncForUser } = await import('./contact.controller.js');
+      
+      if (user.googleContactsSyncEnabled) {
+        console.log('Auto-syncing Google contacts during password login for user', user._id);
+        if (user.googleRefreshToken) {
+          await performSyncForUser(user._id);
+          baseResponse.googleContactsSynced = true;
+        } else {
+          console.log('No refresh token available for user', user._id);
+          const oauth2Client = getOAuth2Client();
+          const stateToken = jwt.default.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '10m' });
+          const connectUrl = oauth2Client.generateAuthUrl({
+            access_type: 'offline',
+            scope: CONTACTS_SCOPES,
+            login_hint: user.email,
+            prompt: 'consent',
+            state: stateToken,
+          });
+          baseResponse.needsGoogleConnect = true;
+          baseResponse.googleConnectUrl = connectUrl;
+        }
+      }
+    } catch (err) {
+      console.error('Auto-sync failed during password login for user', user._id, err);
+      baseResponse.googleContactsSynced = false;
+      baseResponse.googleSyncError = err?.message || 'sync_failed';
+    }
+
+    res.status(200).json(baseResponse);
   } else {
     res.status(401);
     throw new Error("Invalid email/phone or password");
@@ -316,12 +351,13 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
 
 // Get user settings
 export const getUserSettings = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id).select("settings");
+  const user = await User.findById(req.user._id).select("settings googleContactsSyncEnabled");
 
   if (user) {
     res.status(200).json({
       notifications: user.settings?.notifications ?? true,
       sound: user.settings?.sound ?? true,
+      googleContactsSyncEnabled: user.googleContactsSyncEnabled ?? false,
     });
   } else {
     res.status(404);
@@ -346,12 +382,17 @@ export const updateUserSettings = asyncHandler(async (req, res) => {
     if (req.body.sound !== undefined) {
       user.settings.sound = req.body.sound;
     }
+    // Allow toggling Google Contacts sync (stored on user root)
+    if (req.body.googleContactsSyncEnabled !== undefined) {
+      user.googleContactsSyncEnabled = req.body.googleContactsSyncEnabled;
+    }
 
     const updatedUser = await user.save();
 
     res.status(200).json({
       notifications: updatedUser.settings.notifications,
       sound: updatedUser.settings.sound,
+      googleContactsSyncEnabled: updatedUser.googleContactsSyncEnabled ?? false,
     });
   } else {
     res.status(404);

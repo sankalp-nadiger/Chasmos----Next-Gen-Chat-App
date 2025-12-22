@@ -103,7 +103,8 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
       // If user opted to sync Google contacts, initiate OAuth connect flow
       if (formData.enableGoogleContacts) {
         try {
-          const connectRes = await fetch(`${API_BASE_URL}/api/contacts/google/connect`, {
+          const origin = window.location.pathname + window.location.search;
+          const connectRes = await fetch(`${API_BASE_URL}/api/contacts/google/connect?origin=${encodeURIComponent(origin)}`, {
             headers: { Authorization: `Bearer ${data.token}` },
           });
           const connectJson = await connectRes.json();

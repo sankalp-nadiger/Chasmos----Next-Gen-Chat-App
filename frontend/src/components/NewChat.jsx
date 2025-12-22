@@ -1,825 +1,5 @@
-
-
-// // export default NewChat;
-// /* eslint-disable no-unused-vars */
-// import React, { useState, useMemo, useEffect } from "react";
-// import { motion } from "framer-motion";
-// import {
-//   Search,
-//   Send,
-//   Loader2,
-//   X,
-//   XCircle,
-//   MessageCircle,
-//   Clock,
-//    UserCheck,
-//   Users,
-//   Briefcase,
-//   Utensils,
-//   Car,
-//   Home,
-//   Stethoscope,
-//   GraduationCap,
-//   Palette,
-//   ShoppingBag,
-//   Coffee,
-//   Scissors,
-//   MapPin,
-//   ChevronLeft,
-//   Copy,
-// } from "lucide-react";
-// import Logo from "./Logo";
-// import CosmosBackground from "./CosmosBg";
-// import { io } from "socket.io-client";
-
-// // Business categories mock data
-// const businessCategories = [
-//   {
-//     id: "restaurants",
-//     label: "Restaurants",
-//     icon: Utensils,
-//     color: "bg-orange-500",
-//     description: "Food & Dining",
-//   },
-//   {
-//     id: "automotive",
-//     label: "Automotive",
-//     icon: Car,
-//     color: "bg-blue-500",
-//     description: "Car Services",
-//   },
-//   {
-//     id: "real-estate",
-//     label: "Real Estate",
-//     icon: Home,
-//     color: "bg-green-500",
-//     description: "Property Services",
-//   },
-//   {
-//     id: "healthcare",
-//     label: "Healthcare",
-//     icon: Stethoscope,
-//     color: "bg-red-500",
-//     description: "Medical Services",
-//   },
-//   {
-//     id: "education",
-//     label: "Education",
-//     icon: GraduationCap,
-//     color: "bg-purple-500",
-//     description: "Learning & Training",
-//   },
-//   {
-//     id: "beauty",
-//     label: "Beauty & Salon",
-//     icon: Scissors,
-//     color: "bg-pink-500",
-//     description: "Beauty Services",
-//   },
-//   {
-//     id: "retail",
-//     label: "Retail Store",
-//     icon: ShoppingBag,
-//     color: "bg-indigo-500",
-//     description: "Shopping & Stores",
-//   },
-//   {
-//     id: "cafe",
-//     label: "Cafes & Coffee",
-//     icon: Coffee,
-//     color: "bg-yellow-600",
-//     description: "Coffee Shops",
-//   },
-//   {
-//     id: "ecommerce",
-//     label: "E-commerce",
-//     icon: Users,
-//     color: "bg-purple-600",
-//     description: "Online Stores",
-//   },
-//   {
-//     id: "technology",
-//     label: "Technology",
-//     icon: Users,
-//     color: "bg-blue-600",
-//     description: "IT & Software",
-//   },
-//   {
-//     id: "finance",
-//     label: "Finance",
-//     icon: Briefcase,
-//     color: "bg-yellow-500",
-//     description: "Banking & Finance",
-//   },
-//   {
-//     id: "travel",
-//     label: "Travel & Tourism",
-//     icon: MapPin,
-//     color: "bg-cyan-500",
-//     description: "Travel Services",
-//   },
-//   {
-//     id: "entertainment",
-//     label: "Entertainment",
-//     icon: Users,
-//     color: "bg-indigo-500",
-//     description: "Media & Fun",
-//   },
-//   {
-//     id: "marketing",
-//     label: "Marketing & Advertising",
-//     icon: Users,
-//     color: "bg-fuchsia-500",
-//     description: "Promotion & Ads",
-//   },
-//   {
-//     id: "freelancer",
-//     label: "Freelancer / Consultant",
-//     icon: Palette,
-//     color: "bg-rose-500",
-//     description: "Independent Professionals",
-//   },
-//   {
-//     id: "other",
-//     label: "Other",
-//     icon: Users,
-//     color: "bg-gray-500",
-//     description: "Miscellaneous",
-//   },
-// ];
-
-// // API Base URL from environment variable
-// const API_BASE_URL =
-//   import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
-
-// // Helper to format timestamp
-// const formatTimestamp = (timestamp) => {
-//   if (!timestamp) return "Last seen recently";
-//   const date = new Date(timestamp);
-//   const now = new Date();
-//   const diff = (now - date) / 1000; // seconds
-
-//   if (diff < 60) return "Just now";
-//   if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
-//   if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
-
-//   return (
-//     date.toLocaleDateString() +
-//     " " +
-//     date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-//   );
-// };
-
-
-// const NewChat = ({
-//   effectiveTheme = {},
-//   onClose,
-//   onStartChat,
-//   existingContacts = [],
-// }) => {
-//   const [allContacts, setAllContacts] = useState([]);
-//   const [registeredUsers, setRegisteredUsers] = useState([]);
-//   const [businessUsers, setBusinessUsers] = useState([]);
-//   const [businessCategoryCounts, setBusinessCategoryCounts] = useState({});
-//   const [searchTerm, setSearchTerm] = useState("");
-//   const [loading, setLoading] = useState(true);
-//   const [error, setError] = useState(null);
-//   const [selectedBusinessCategory, setSelectedBusinessCategory] = useState(null);
-//   const [activeSection, setActiveSection] = useState("contacts");
-
-//   // =========================
-//   // CURRENT USER EMAIL
-//   // =========================
-//   let currentUserEmail = "";
-//   try {
-//     const userInfo = JSON.parse(localStorage.getItem("userInfo"));
-//     currentUserEmail = userInfo?.email || userInfo?.user?.email || "";
-//   } catch {}
-
-//   // =========================
-//   // FETCH USERS + BUSINESSES
-//   // =========================
-//   useEffect(() => {
-//     const fetchAll = async () => {
-//       try {
-//         const token = localStorage.getItem("token");
-
-//         // 1️⃣ NORMAL USERS (NON BUSINESS)
-//         const usersRes = await fetch(`${API_BASE_URL}/api/user`, {
-//           headers: { Authorization: `Bearer ${token}` },
-//         });
-//         const users = await usersRes.json();
-
-//         const normalUsers = users
-//           .filter((u) => !u.isBusiness)
-//           .map((u) => ({
-//             id: u._id,
-//             name: u.name,
-//             email: u.email,
-//             avatar: u.avatar,
-//             isOnline: !!u.online,
-//             type: "user",
-//             bio: u.bio || "",
-//             acceptedChatRequests: u.acceptedChatRequests || [],
-//           }));
-
-//         // Preserve original contact split logic
-//         const knownContacts = normalUsers.filter((u) =>
-//           existingContacts.some((c) => c.id === u.id)
-//         );
-
-//         const newUsers = normalUsers.filter(
-//           (u) => !existingContacts.some((c) => c.id === u.id)
-//         );
-
-//         setAllContacts(knownContacts);
-//         setRegisteredUsers(newUsers);
-
-//         // 2️⃣ BUSINESS USERS
-//         const bizRes = await fetch(`${API_BASE_URL}/api/user/business`, {
-//           headers: { Authorization: `Bearer ${token}` },
-//         });
-//         const bizData = await bizRes.json();
-
-//         const mappedBusinesses = bizData.businesses.map((b) => ({
-//           id: b._id,
-//           name: b.name,
-//           email: b.email,
-//           avatar: b.avatar,
-//           title: b.title,
-//           business: b.businessName,
-//           location: b.location,
-//           businessCategory: b.businessCategory,
-//           isOnline: b.isOnline,
-//           type: "business",
-//           acceptedChatRequests: b.acceptedChatRequests || [],
-//           sentChatRequests: b.sentChatRequests || [],
-//           receivedChatRequests: b.receivedChatRequests || [],
-//         }));
-
-//         setBusinessUsers(mappedBusinesses);
-//         setBusinessCategoryCounts(bizData.categoryCounts || {});
-//       } catch (err) {
-//         setError(err.message);
-//       } finally {
-//         setLoading(false);
-//       }
-//     };
-
-//     fetchAll();
-//   }, [existingContacts]);
-
-//   // =========================
-//   // FILTERS (PRESERVED)
-//   // =========================
-//   const filteredAllContacts = useMemo(
-//     () =>
-//       allContacts.filter((c) =>
-//         c.name.toLowerCase().includes(searchTerm.toLowerCase())
-//       ),
-//     [allContacts, searchTerm]
-//   );
-
-//   const filteredRegisteredUsers = useMemo(
-//     () =>
-//       registeredUsers.filter((c) =>
-//         c.name.toLowerCase().includes(searchTerm.toLowerCase())
-//       ),
-//     [registeredUsers, searchTerm]
-//   );
-
-//   const filteredBusinessContacts = useMemo(() => {
-//     if (!selectedBusinessCategory) return [];
-
-//     // Self business first
-//     const self = businessUsers.find(
-//       (b) =>
-//         b.businessCategory === selectedBusinessCategory.id &&
-//         b.email?.toLowerCase() === currentUserEmail.toLowerCase()
-//     );
-
-//     const others = businessUsers.filter(
-//       (b) =>
-//         b.businessCategory === selectedBusinessCategory.id &&
-//         b.email?.toLowerCase() !== currentUserEmail.toLowerCase() &&
-//         (
-//           b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-//           b.business?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-//           b.title?.toLowerCase().includes(searchTerm.toLowerCase())
-//         )
-//     );
-
-//     return self ? [self, ...others] : others;
-//   }, [businessUsers, selectedBusinessCategory, searchTerm, currentUserEmail]);
-
-//   // =========================
-//   // CHAT START (ORIGINAL)
-//   // =========================
-//   const handleStartChat = (contact) => {
-//     const userId =
-//       contact.userId || contact._id || contact.id || contact.email;
-
-//     const isExistingChat =
-//       contact.chatId || (contact.id && String(contact.id).length === 24);
-
-//     onStartChat({
-//       ...contact,
-//       userId,
-//       isPendingChat: !isExistingChat,
-//     });
-
-//     onClose();
-//   };
-
-//   // =========================
-//   // OPEN ONE TO ONE CHAT ✅
-//   // (MERGED – WAS MISSING)
-//   // =========================
-//   const openOneToOneChat = async (contact) => {
-//     try {
-//       const userId = contact.id || contact._id || contact.email;
-
-//       if (contact.chatId || (contact.id && String(contact.id).length === 24)) {
-//         handleStartChat({ ...contact, isPendingChat: false, userId });
-//         return;
-//       }
-
-//       handleStartChat({ ...contact, isPendingChat: true, userId });
-//     } catch (err) {
-//       console.error("openOneToOneChat error:", err);
-//       handleStartChat(contact);
-//     }
-//   };
-
-//   if (error) return <div className="p-4 text-red-500">{error}</div>;
-
-//   // =========================
-//   // RENDER
-//   // =========================
-//   return (
-//     <motion.div
-//       initial={{ x: "100%" }}
-//       animate={{ x: 0 }}
-//       exit={{ x: "100%" }}
-//       transition={{ duration: 0.3 }}
-//       className={`fixed inset-0 ${effectiveTheme.primary || "bg-white"} flex flex-col z-50`}
-//     >
-//       {/* HEADER */}
-//       <div className={`${effectiveTheme.secondary || "bg-gray-100"} border-b p-4`}>
-//         <div className="flex items-center gap-3">
-//           <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-200">
-//             <X className="w-5 h-5" />
-//           </button>
-//           <Logo size="md" showText />
-//           <h2 className="text-lg font-semibold">New Chat</h2>
-//         </div>
-//       </div>
-
-//       {/* SEARCH */}
-//       <div className="p-4">
-//         <input
-//           value={searchTerm}
-//           onChange={(e) => setSearchTerm(e.target.value)}
-//           placeholder="Search..."
-//           className="w-full px-4 py-3 rounded-lg bg-gray-100 focus:ring-2 focus:ring-blue-500"
-//         />
-//       </div>
-
-//       {/* TABS */}
-//       <div className="flex border-b px-4">
-//         {["contacts", "business"].map((tab) => (
-//           <button
-//             key={tab}
-//             onClick={() => {
-//               setActiveSection(tab);
-//               setSelectedBusinessCategory(null);
-//             }}
-//             className={`px-4 py-2 border-b-2 ${
-//               activeSection === tab
-//                 ? "border-blue-500 text-blue-600"
-//                 : "border-transparent text-gray-500"
-//             }`}
-//           >
-//             {tab === "contacts" ? "Contacts & Users" : "Business Directory"}
-//           </button>
-//         ))}
-//       </div>
-
-//       {/* BODY */}
-//       <div className="flex-1 overflow-y-auto p-4">
-//         {/* CONTACTS */}
-//         {activeSection === "contacts" && (
-//           <>
-//             {filteredAllContacts.map((c) => (
-//               <ContactItem
-//                 key={c.id}
-//                 contact={c}
-//                 onClick={() => openOneToOneChat(c)}
-//                 effectiveTheme={effectiveTheme}
-//                 currentUserEmail={currentUserEmail}
-//                 token={localStorage.getItem("token")}
-//                 showLastSeen
-//               />
-//             ))}
-
-//             {filteredRegisteredUsers.map((u) => (
-//               <ContactItem
-//                 key={u.id}
-//                 contact={u}
-//                 onClick={() => openOneToOneChat(u)}
-//                 effectiveTheme={effectiveTheme}
-//                 currentUserEmail={currentUserEmail}
-//                 token={localStorage.getItem("token")}
-//                 showLastSeen
-//               />
-//             ))}
-//           </>
-//         )}
-
-//         {/* BUSINESS */}
-//         {activeSection === "business" && (
-//           <>
-//             {!selectedBusinessCategory ? (
-//               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-//                 {businessCategories
-//                   .filter((c) => businessCategoryCounts[c.id] > 0)
-//                   .map((cat) => (
-//                     <div
-//                       key={cat.id}
-//                       onClick={() => setSelectedBusinessCategory(cat)}
-//                       className="p-4 border rounded-lg cursor-pointer hover:shadow"
-//                     >
-//                       <div
-//                         className={`w-12 h-12 ${cat.color} rounded-lg flex items-center justify-center mb-2`}
-//                       >
-//                         <cat.icon className="text-white w-6 h-6" />
-//                       </div>
-//                       <h4 className="font-semibold">{cat.label}</h4>
-//                       <p className="text-xs text-gray-500">
-//                         {businessCategoryCounts[cat.id]} businesses
-//                       </p>
-//                     </div>
-//                   ))}
-//               </div>
-//             ) : (
-//               filteredBusinessContacts.map((b) => (
-//                 <ContactItem
-//                   key={b.id}
-//                   contact={b}
-//                   onClick={() => openOneToOneChat(b)}
-//                   effectiveTheme={effectiveTheme}
-//                   currentUserEmail={currentUserEmail}
-//                   token={localStorage.getItem("token")}
-//                   showLastSeen
-//                   isSelf={
-//                     b.email?.toLowerCase() ===
-//                     currentUserEmail.toLowerCase()
-//                   }
-//                 />
-//               ))
-//             )}
-//           </>
-//         )}
-//       </div>
-//     </motion.div>
-//   );
-// };
-
-
-// //Contacts appearing in new chat page
-// const ContactItem = ({
-//   contact,
-//   effectiveTheme,
-//   onClick,
-//   showLastSeen,
-//   token,
-//   currentUserEmail,
-//   isSelf,
-// }) => {
-//   const [showInviteModal, setShowInviteModal] = useState(false);
-//   const [inviteMessage, setInviteMessage] = useState("");
-//   const [sending, setSending] = useState(false);
-//   const [inviteStatus, setInviteStatus] = useState("idle");
-//   const [chatStatus, setChatStatus] = useState("none");
-
-//   const isBusiness = contact.type === "business";
-
-//   // 🔹 Fetch chat status (SKIP for business)
-//   useEffect(() => {
-//     if (isBusiness) {
-//       setChatStatus("accepted");
-//       return;
-//     }
-
-//     const fetchStatus = async () => {
-//       try {
-//         const res = await fetch(
-//           `${API_BASE_URL}/api/user/request/status/${contact.email}?type=${contact.type}`,
-//           {
-//             headers: { Authorization: `Bearer ${token}` },
-//           }
-//         );
-//         const data = await res.json();
-//         setChatStatus(data.status);
-//       } catch (err) {
-//         console.error("Failed to fetch chat status:", err);
-//       }
-//     };
-
-//     fetchStatus();
-//     const interval = setInterval(fetchStatus, 5000);
-//     return () => clearInterval(interval);
-//   }, [contact.email, token, isBusiness]);
-
-//   const myEmailLower = currentUserEmail?.toLowerCase() || "";
-
-//   const isMyEmailAcceptedByContact =
-//     (contact.acceptedChatRequests || []).some(
-//       (e) => (e || "").toLowerCase() === myEmailLower
-//     );
-
-//   const canSendInvite =
-//     !isBusiness && chatStatus === "none" && !isMyEmailAcceptedByContact;
-
-//   // 🔹 Send Invite
-//   const handleSendInvite = async () => {
-//     try {
-//       setSending(true);
-//       await fetch(`${API_BASE_URL}/api/user/request/send`, {
-//         method: "POST",
-//         headers: {
-//           "Content-Type": "application/json",
-//           Authorization: `Bearer ${token}`,
-//         },
-//         body: JSON.stringify({
-//           recipientEmail: contact.email,
-//           inviteMessage,
-//           requestType: contact.type,
-//         }),
-//       });
-
-//       setInviteStatus("sent");
-//       setChatStatus("outgoing");
-//     } catch {
-//       setInviteStatus("sent");
-//     } finally {
-//       setSending(false);
-//     }
-//   };
-
-//   // 🔹 Withdraw Invite
-//   const handleWithdrawInvite = async () => {
-//     try {
-//       await fetch(`${API_BASE_URL}/api/user/request/withdraw`, {
-//         method: "POST",
-//         headers: {
-//           "Content-Type": "application/json",
-//           Authorization: `Bearer ${token}`,
-//         },
-//         body: JSON.stringify({
-//           recipientEmail: contact.email,
-//           requestType: contact.type,
-//         }),
-//       });
-
-//       setInviteStatus("idle");
-//       setChatStatus("none");
-//       setShowInviteModal(false);
-//     } catch (err) {
-//       console.error(err);
-//     }
-//   };
-
-//   // 🔹 Accept Invite
-//   const handleAcceptInvite = async () => {
-//     try {
-//       const token = localStorage.getItem("token");
-//       if (!token || !contact?.email) return;
-
-//       await fetch(`${API_BASE_URL}/api/user/request/accept`, {
-//         method: "PUT",
-//         headers: {
-//           "Content-Type": "application/json",
-//           Authorization: `Bearer ${token}`,
-//         },
-//         body: JSON.stringify({
-//           senderEmail: contact.email,
-//           requestType: contact.type,
-//         }),
-//       });
-
-//       setChatStatus("accepted");
-//       setShowInviteModal(false);
-//     } catch (err) {
-//       console.error("Error accepting invite:", err);
-//     }
-//   };
-
-//   const handleOpenChat = () => {
-//     onClick(contact);
-//   };
-
-//   return (
-//     <>
-//       {/* CONTACT ROW */}
-//       <motion.div
-//         whileHover={{ x: 4 }}
-//         className={`flex items-center justify-between p-4 cursor-pointer border-b
-//         ${effectiveTheme.border || "border-gray-300"}
-//         hover:${effectiveTheme.hover || "bg-gray-100"}`}
-//       >
-//         {/* LEFT */}
-//         <div className="flex items-center gap-3" onClick={handleOpenChat}>
-//           <img
-//             src={
-//               contact.avatar ||
-//               "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
-//             }
-//             className="w-12 h-12 rounded-full object-cover"
-//           />
-//           <div>
-//             <h3 className="font-semibold truncate">
-//               {contact.name}
-//               {isSelf && (
-//                 <span className="text-xs text-blue-500 ml-1">(You)</span>
-//               )}
-//             </h3>
-//             {showLastSeen && (
-//               <span className="text-xs text-gray-500">
-//                 {contact.isOnline ? "Online" : "Offline"}
-//               </span>
-//             )}
-//           </div>
-//         </div>
-
-//         {/* RIGHT ICONS */}
-
-//         {/* CHAT ICON — ALWAYS FOR BUSINESS */}
-//         {(isBusiness ||
-//           chatStatus === "accepted" ||
-//           isMyEmailAcceptedByContact) && (
-//           <button
-//             onClick={(e) => {
-//               e.stopPropagation();
-//               handleOpenChat();
-//             }}
-//             className="p-2 rounded-full hover:bg-green-500/20"
-//           >
-//             <MessageCircle className="w-5 h-5 text-green-500" />
-//           </button>
-//         )}
-
-//         {/* INVITE ICONS — USERS ONLY */}
-//         {!isBusiness && canSendInvite && (
-//           <button
-//             onClick={(e) => {
-//               e.stopPropagation();
-//               setInviteStatus("idle");
-//               setShowInviteModal(true);
-//             }}
-//             className="p-2 rounded-full hover:bg-blue-500/20"
-//           >
-//             <Send className="w-5 h-5 text-blue-500" />
-//           </button>
-//         )}
-
-//         {!isBusiness && chatStatus === "outgoing" && (
-//           <button
-//             onClick={(e) => {
-//               e.stopPropagation();
-//               setInviteStatus("sent");
-//               setShowInviteModal(true);
-//             }}
-//             className="p-2 rounded-full hover:bg-yellow-500/20"
-//           >
-//             <Clock className="w-5 h-5 text-yellow-500" />
-//           </button>
-//         )}
-
-//         {!isBusiness && chatStatus === "incoming" && (
-//           <button
-//             onClick={(e) => {
-//               e.stopPropagation();
-//               setInviteStatus("incoming");
-//               setShowInviteModal(true);
-//             }}
-//             className="p-2 rounded-full hover:bg-orange-500/20"
-//           >
-//             <Clock className="w-5 h-5 text-orange-500" />
-//           </button>
-//         )}
-//       </motion.div>
-
-//       {/* INVITE MODAL — USERS ONLY */}
-//       {!isBusiness && showInviteModal && (
-//         <div
-//           className="fixed inset-0 flex items-center justify-center z-50"
-//           style={{ background: "rgba(0,0,0,0.4)" }}
-//         >
-//           <motion.div
-//             initial={{ scale: 0.9, opacity: 0 }}
-//             animate={{ scale: 1, opacity: 1 }}
-//             className={`relative w-full max-w-md rounded-2xl p-6 shadow-xl ${
-//               effectiveTheme.secondary || "bg-white"
-//             }`}
-//           >
-//             <div className="flex justify-between mb-4">
-//               <div>
-//                 <h2 className="font-semibold text-lg">{contact.name}</h2>
-//                 {contact.bio && (
-//                   <p className="text-sm text-gray-500 mt-1 truncate">
-//                     {contact.bio}
-//                   </p>
-//                 )}
-//               </div>
-//               <button
-//                 onClick={() => setShowInviteModal(false)}
-//                 className="p-1 rounded-full hover:bg-red-500/20"
-//               >
-//                 <XCircle className="w-5 h-5 text-gray-400 hover:text-red-500" />
-//               </button>
-//             </div>
-
-//             {inviteStatus === "sent" && (
-//               <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-300">
-//                 <p className="text-sm font-medium">Invite pending</p>
-//                 <p className="text-xs text-gray-500">
-//                   Waiting for {contact.name} to accept
-//                 </p>
-//               </div>
-//             )}
-
-//             {inviteStatus === "incoming" && (
-//               <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-300">
-//                 <p className="text-sm font-medium">Incoming request</p>
-//                 <div className="flex justify-end mt-4">
-//                   <button
-//                     onClick={handleAcceptInvite}
-//                     className="px-4 py-2 rounded-xl bg-green-600 text-white"
-//                   >
-//                     Accept
-//                   </button>
-//                 </div>
-//               </div>
-//             )}
-
-//             {inviteStatus === "idle" && (
-//               <textarea
-//                 rows="3"
-//                 value={inviteMessage}
-//                 onChange={(e) => setInviteMessage(e.target.value)}
-//                 placeholder="Add an optional message..."
-//                 className="w-full mt-4 p-3 rounded-xl border resize-none text-sm"
-//               />
-//             )}
-
-//             <div className="flex justify-end mt-6 gap-2">
-//               {inviteStatus === "sent" && (
-//                 <button
-//                   onClick={handleWithdrawInvite}
-//                   className="px-4 py-2 rounded-xl border border-red-500 text-red-500"
-//                 >
-//                   Withdraw
-//                 </button>
-//               )}
-
-//               {inviteStatus === "idle" && (
-//                 <>
-//                   <button
-//                     onClick={() => setShowInviteModal(false)}
-//                     className="px-4 py-2 rounded-xl border"
-//                   >
-//                     Cancel
-//                   </button>
-//                   <button
-//                     onClick={handleSendInvite}
-//                     disabled={sending}
-//                     className="px-4 py-2 rounded-xl bg-blue-600 text-white flex items-center gap-2"
-//                   >
-//                     {sending ? (
-//                       <Loader2 className="w-4 h-4 animate-spin" />
-//                     ) : (
-//                       <Send className="w-4 h-4" />
-//                     )}
-//                     Send Invite
-//                   </button>
-//                 </>
-//               )}
-//             </div>
-//           </motion.div>
-//         </div>
-//       )}
-//     </>
-//   );
-// };
-
-// // Business Contact Item Component - for business professionals/contacts
-
-
-// export default NewChat;
-
 /* eslint-disable no-unused-vars */
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Search,
@@ -843,6 +23,7 @@ import {
   Scissors,
   MapPin,
   ChevronLeft,
+  RefreshCw,
   Copy,
 } from "lucide-react";
 import Logo from "./Logo";
@@ -1020,9 +201,14 @@ const NewChat = ({
   const [groupOnlineCounts, setGroupOnlineCounts] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
+  const [syncingContacts, setSyncingContacts] = useState(false);
+  const [refreshingContacts, setRefreshingContacts] = useState(false);
   const [error, setError] = useState(null);
   const [selectedBusinessCategory, setSelectedBusinessCategory] = useState(null);
   const [activeSection, setActiveSection] = useState("contacts");
+
+  // ref to hold the fetch function so we can call it from handlers
+  const fetchAllRef = useRef(null);
 
   // =========================
   // CURRENT USER EMAIL
@@ -1046,7 +232,14 @@ const NewChat = ({
         const token = localStorage.getItem("token");
 
         // Helper functions for phone normalization
-        const normalizePhone = (p) => (p ? String(p).replace(/\D/g, "") : "");
+        // Normalize by removing non-digits and trimming country codes (keep last 10 digits)
+        const normalizePhone = (p) => {
+          if (!p) return "";
+          let digits = String(p).replace(/\D/g, "");
+          // If number contains a country code (longer than 10), keep last 10 digits
+          if (digits.length > 10) digits = digits.slice(-10);
+          return digits;
+        };
         const extractPossiblePhone = (c) => {
           if (!c) return "";
           const candidates = [
@@ -1144,8 +337,9 @@ const NewChat = ({
           existingContacts.forEach((ec) => {
             if (ec.email) byEmailExisting.set(String(ec.email).toLowerCase(), ec);
             if (ec.id) byIdExisting.set(String(ec.id), ec);
-            const ep = (ec.phone || ec.phoneNumber || ec._rawPhone) || '';
-            if (ep) byPhoneExisting.set(String(ep), ec);
+            const epRaw = (ec.phone || ec.phoneNumber || ec._rawPhone) || '';
+            const ep = normalizePhone(epRaw);
+            if (ep) byPhoneExisting.set(ep, ec);
           });
 
           normalUsers.forEach((fu) => {
@@ -1196,8 +390,65 @@ const NewChat = ({
       }
     };
 
+    // expose fetchAll via ref so UI can trigger a manual refresh button
+    fetchAllRef.current = fetchAll;
+
     fetchAll();
   }, [existingContacts]);
+
+  const handleRefresh = async () => {
+    setRefreshingContacts(true);
+    try {
+      // first refresh local lists (users/businesses)
+      if (fetchAllRef.current) await fetchAllRef.current();
+
+      // then fetch stored google contacts from backend and merge into "Your Contacts"
+      try {
+        const token = localStorage.getItem('token');
+        if (token) {
+          const resp = await fetch(`${API_BASE_URL}/api/sync/google-contacts`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (resp.ok) {
+            const body = await resp.json();
+            const googleContacts = body?.data || [];
+            if (Array.isArray(googleContacts) && googleContacts.length > 0) {
+              const mapped = googleContacts.map((g) => ({
+                id: g.googleId || g.email || g.name,
+                name: g.name || g.email || 'Unknown',
+                email: g.email || undefined,
+                avatar: g.avatar || null,
+                isOnline: false,
+                type: g.email ? 'google-contact' : 'contact',
+                isGoogleContact: true,
+              }));
+
+              // merge into existing allContacts (avoid duplicates by email or id)
+              setAllContacts((prev) => {
+                const byKey = new Map();
+                (prev || []).forEach((c) => {
+                  const key = (c.email || c.id || c.name || '').toString().toLowerCase();
+                  if (key && !byKey.has(key)) byKey.set(key, c);
+                });
+                mapped.forEach((m) => {
+                  const key = (m.email || m.id || m.name || '').toString().toLowerCase();
+                  if (key && !byKey.has(key)) byKey.set(key, m);
+                });
+                return Array.from(byKey.values());
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch google contacts during refresh', err);
+      }
+    } catch (e) {
+      console.error('Refresh contacts failed', e);
+      setError(e.message || 'Refresh failed');
+    } finally {
+      setRefreshingContacts(false);
+    }
+  };
 
   // =========================
   // REALTIME PRESENCE (Socket)
@@ -1291,6 +542,47 @@ const NewChat = ({
     return () => { if (sock) sock.disconnect(); };
   }, [parentOnlineUsers]);
 
+  // Listen for messages from the Google OAuth popup (backend posts message on success)
+  useEffect(() => {
+    const handleMessage = (e) => {
+      try {
+        const data = e.data || {};
+        if (!data || typeof data !== 'object') return;
+        if (data.type !== 'google_sync') return;
+
+        if (data.success) {
+          // If backend provided a fresh token, persist it
+          if (data.token) {
+            try { localStorage.setItem('token', data.token); } catch (err) {}
+          }
+
+          // Close the NewChat modal if parent provided onClose
+          try {
+            if (typeof onClose === 'function') onClose();
+          } catch (e) {}
+
+          // Redirect to /chats and reload to pick up new contacts
+          try {
+            const target = '/chats';
+            if (window.location.pathname !== target) {
+              window.location.href = target;
+            } else {
+              window.location.reload();
+            }
+          } catch (e) {}
+        } else {
+          // show an error in the modal if available
+          try { setError('Google sync failed: ' + (data.error || 'unknown')); } catch (e) {}
+        }
+      } catch (err) {
+        console.error('handleMessage error', err);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
   // =========================
   // FILTERS
   // =========================
@@ -1371,6 +663,50 @@ const NewChat = ({
 
   const handleBusinessCategoryClick = (category) => {
     setSelectedBusinessCategory(category);
+  };
+
+  // Manual sync handler triggered by user action
+  const handleManualSync = async () => {
+    setError(null);
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setError('You must be signed in to sync contacts.');
+      return;
+    }
+
+    setSyncingContacts(true);
+    try {
+      const origin = window.location.pathname + window.location.search;
+      const resp = await fetch(`${API_BASE_URL}/api/contacts/trigger-sync`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origin }),
+      });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        // If server tells frontend to connect to Google, open the consent URL
+        if (data?.needsGoogleConnect && data.googleConnectUrl) {
+          window.open(data.googleConnectUrl, '_blank');
+          return;
+        }
+        setError(data?.message || 'Failed to sync contacts');
+        return;
+      }
+
+      if (data?.needsGoogleConnect && data.googleConnectUrl) {
+        window.open(data.googleConnectUrl, '_blank');
+        return;
+      }
+
+      // On successful sync, reload so UI picks up new contacts (simplest approach)
+      window.location.reload();
+    } catch (err) {
+      console.error('Manual sync error', err);
+      setError(err.message || 'Sync failed');
+    } finally {
+      setSyncingContacts(false);
+    }
   };
 
   const handleBackToBusinessCategories = () => {
@@ -1491,6 +827,28 @@ const NewChat = ({
                 <h3 className={`font-medium ${effectiveTheme.text || "text-gray-900"}`}>
                   Your Contacts ({filteredAllContacts.length})
                 </h3>
+                  <div className="ml-3 flex items-center space-x-2">
+                    <button
+                      onClick={handleManualSync}
+                      disabled={syncingContacts}
+                      className={`px-3 py-1 text-sm rounded-md border transition-colors ${effectiveTheme.hover || 'hover:bg-gray-200'}`}
+                    >
+                      {syncingContacts ? 'Syncing...' : 'Sync Contacts'}
+                    </button>
+
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleRefresh(); }}
+                      disabled={refreshingContacts || syncingContacts}
+                      title="Refresh contacts"
+                      className={`px-2 py-1 text-sm rounded-md border transition-colors hover:${effectiveTheme.hover || 'bg-gray-200'} flex items-center justify-center`}
+                    >
+                      {refreshingContacts ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
               </div>
 
               {filteredAllContacts.length === 0 ? (
@@ -2097,48 +1455,59 @@ const ContactItem = ({
               </button>
             </div>
 
-            <div className="flex items-center space-x-3">
-              <div
-                className={`flex-1 p-3 rounded-md border ${
+            <div className="flex flex-col space-y-3">
+              <p className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"}`}>
+                Invite message (editable):
+              </p>
+              {
+                /* Compose a friendly invite + link to copy */
+              }
+              <textarea
+                readOnly
+                rows={4}
+                value={
+                  "Join Chasmos to enjoy the next-gen chat app and have a seamless experience of connecting with people worldwide. If you're a business then make your business visible allowing people to approach you.\n\nhttps://chasmos.netlify.app"
+                }
+                className={`w-full p-3 rounded-md border ${
                   effectiveTheme.border || "border-gray-300"
-                } ${effectiveTheme.primary || "bg-white"} text-sm break-words ${
+                } ${effectiveTheme.primary || "bg-white"} text-sm ${
                   effectiveTheme.text || "text-gray-900"
                 }`}
-              >
-                chasmos.netlify.app
-              </div>
-              <button
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  const link = "https://chasmos.netlify.app";
-                  try {
-                    if (
-                      navigator &&
-                      navigator.clipboard &&
-                      navigator.clipboard.writeText
-                    ) {
-                      await navigator.clipboard.writeText(link);
-                    } else {
-                      const el = document.createElement("textarea");
-                      el.value = link;
-                      document.body.appendChild(el);
-                      el.select();
-                      document.execCommand("copy");
-                      document.body.removeChild(el);
+              />
+              <div className="flex justify-end">
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    const message = "Join Chasmos to enjoy the next-gen chat app. If you're a business then make your business visible allowing people to approach you.\n\nhttps://chasmos.netlify.app";
+                    try {
+                      if (
+                        navigator &&
+                        navigator.clipboard &&
+                        navigator.clipboard.writeText
+                      ) {
+                        await navigator.clipboard.writeText(message);
+                      } else {
+                        const el = document.createElement("textarea");
+                        el.value = message;
+                        document.body.appendChild(el);
+                        el.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(el);
+                      }
+                      setCopyFeedback("Copied");
+                      setTimeout(() => setCopyFeedback(""), 2000);
+                    } catch (err) {
+                      setCopyFeedback("Failed");
+                      setTimeout(() => setCopyFeedback(""), 2000);
                     }
-                    setCopyFeedback("Copied");
-                    setTimeout(() => setCopyFeedback(""), 2000);
-                  } catch (err) {
-                    setCopyFeedback("Failed");
-                    setTimeout(() => setCopyFeedback(""), 2000);
-                  }
-                }}
-                className={`px-3 py-2 ${
-                  effectiveTheme.accent || "bg-blue-600"
-                } text-white rounded-md hover:opacity-90 whitespace-nowrap transition-all`}
-              >
-                {copyFeedback || "Copy"}
-              </button>
+                  }}
+                  className={`px-3 py-2 ${
+                    effectiveTheme.accent || "bg-blue-600"
+                  } text-white rounded-md hover:opacity-90 whitespace-nowrap transition-all`}
+                >
+                  {copyFeedback || "Copy"}
+                </button>
+              </div>
             </div>
 
             <div className="flex justify-end mt-4">

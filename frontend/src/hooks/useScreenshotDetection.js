@@ -19,6 +19,42 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
       return;
     }
 
+    const isOnChatsRoute = () => {
+      try {
+        const p = window.location.pathname || '';
+        return p === '/chats' || p.startsWith('/chats/');
+      } catch (e) {
+        return false;
+      }
+    };
+
+    // Detect if the NewChat modal is open by searching for a visible element
+    // that contains the header text "New Chat". This avoids capturing when
+    // the full-screen NewChat modal is active (it mounts while still on /chats).
+    const isNewChatOpen = () => {
+      try {
+        const nodes = Array.from(document.querySelectorAll('h1,h2,h3,div'));
+        return nodes.some((n) => {
+          if (!n || !n.textContent) return false;
+          const txt = n.textContent.trim().toLowerCase();
+          if (!txt) return false;
+          if (txt.includes('new chat')) {
+            // ensure element is visible
+            const style = window.getComputedStyle(n);
+            return style && style.display !== 'none' && style.visibility !== 'hidden' && n.offsetParent !== null;
+          }
+          return false;
+        });
+      } catch (e) {
+        return false;
+      }
+    };
+
+    if (!isOnChatsRoute() || isNewChatOpen()) {
+      console.log('Screenshot detection not enabled: not on /chats route or NewChat open');
+      return;
+    }
+
     console.log('Screenshot detection enabled for chat:', chatId);
 
     // Removed visibilitychange screenshot detection to avoid false positives (e.g., Alt+Tab)
@@ -26,8 +62,9 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
 
     // Detect screenshot via keyboard shortcut (Windows/Linux: PrtScr, Mac: Cmd+Shift+3/4)
     const handleScreenshotKey = async (e) => {
-      // Only detect screenshot if tab is visible
+      // Only detect screenshot if tab is visible and user is on /chats
       if (document.hidden) return;
+      if (!isOnChatsRoute() || isNewChatOpen()) return;
       // Debug log for key events
       console.log('Key event:', { key: e.key, code: e.code, keyCode: e.keyCode, ctrl: e.ctrlKey, shift: e.shiftKey, meta: e.metaKey });
       // PrintScreen (Win/Linux/Windows+PrtScr)
@@ -64,8 +101,9 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
 
     // Detect screenshot via clipboard (when user pastes after screenshot)
     const handlePaste = async (e) => {
-      // Only detect screenshot if tab is visible
+      // Only detect screenshot if tab is visible and user is on /chats
       if (document.hidden) return;
+      if (!isOnChatsRoute() || isNewChatOpen()) return;
       const items = e.clipboardData?.items;
       if (!items) return;
 
@@ -86,6 +124,16 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
       
       try {
         isCapturing.current = true;
+
+        // Double-check we're still on /chats and NewChat modal isn't open before capturing
+        if (!(window.location && (window.location.pathname === '/chats' || window.location.pathname.startsWith('/chats/')))) {
+          console.log('Skipping capture: not on /chats route');
+          return;
+        }
+        if (isNewChatOpen()) {
+          console.log('Skipping capture: NewChat modal is open');
+          return;
+        }
 
         // Capture the messages area (main chat content)
         const messagesContainer = document.querySelector('.messages-container-capture') 
