@@ -2,6 +2,7 @@ import asyncHandler from "express-async-handler";
 import User from "../models/user.model.js";
 import Chat from "../models/chat.model.js";
 import Message from "../models/message.model.js";
+import { getSocketIOInstance } from "../services/scheduledMessageCron.js";
 
 // Block a user
 export const blockUser = asyncHandler(async (req, res) => {
@@ -41,15 +42,43 @@ export const blockUser = asyncHandler(async (req, res) => {
   });
 
   if (chat) {
-    // Create system message (but don't update lastMessage)
-    await Message.create({
+    // Create a descriptive system message (use names so it reads correctly for both users)
+    const currentUser = await User.findById(currentUserId).select('name');
+    const actorName = currentUser?.name || 'User';
+    const targetName = userToBlock?.name || 'contact';
+
+    const created = await Message.create({
       sender: currentUserId,
-      content: 'You blocked this contact',
+      content: `${actorName} blocked ${targetName}`,
       type: 'system',
       chat: chat._id,
     });
 
-    console.log(`📝 System message created for block action`);
+    // Populate message for emission
+    const populated = await Message.findById(created._id)
+      .populate('sender', 'name avatar email')
+      .populate('attachments')
+      .populate('chat');
+
+    // Emit socket event so clients see system message immediately
+    try {
+      const io = getSocketIOInstance();
+      if (io && chat && chat._id) {
+        io.to(chat._id.toString()).emit('message recieved', populated);
+
+        const users = (chat.users && chat.users.length) ? chat.users : (chat.participants || []);
+        if (Array.isArray(users)) {
+          users.forEach(user => {
+            const uid = user && (user._id ? user._id.toString() : (typeof user === 'string' ? user : (user.toString && user.toString())));
+            if (uid) {
+              io.to(uid).emit('message recieved', populated);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[block.controller] error emitting socket event for block message', e);
+    }
   }
 
   res.status(200).json({
@@ -88,15 +117,43 @@ export const unblockUser = asyncHandler(async (req, res) => {
   });
 
   if (chat) {
-    // Create system message (but don't update lastMessage)
-    await Message.create({
+    // Create a descriptive system message (use names so it reads correctly for both users)
+    const currentUser = await User.findById(currentUserId).select('name');
+    const actorName = currentUser?.name || 'User';
+    const targetName = unblockedUser?.name || 'contact';
+
+    const created = await Message.create({
       sender: currentUserId,
-      content: 'You unblocked this contact',
+      content: `${actorName} unblocked ${targetName}`,
       type: 'system',
       chat: chat._id,
     });
 
-    console.log(`📝 System message created for unblock action`);
+    const populated = await Message.findById(created._id)
+      .populate('sender', 'name avatar email')
+      .populate('attachments')
+      .populate('chat');
+
+    try {
+      const io = getSocketIOInstance();
+      if (io && chat && chat._id) {
+        io.to(chat._id.toString()).emit('message recieved', populated);
+
+        const users = (chat.users && chat.users.length) ? chat.users : (chat.participants || []);
+        if (Array.isArray(users)) {
+          users.forEach(user => {
+            const uid = user && (user._id ? user._id.toString() : (typeof user === 'string' ? user : (user.toString && user.toString())));
+            if (uid) {
+              io.to(uid).emit('message recieved', populated);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[block.controller] error emitting socket event for unblock message', e);
+    }
+
+    console.log(`📝 System message created for unblock action: ${actorName} unblocked ${targetName}`);
   }
 
   res.status(200).json({

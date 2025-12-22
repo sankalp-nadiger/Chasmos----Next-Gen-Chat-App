@@ -15,6 +15,7 @@ import {
   rejectChatRequest,
   getChatRequestStatus,
   getBusinessUsers,
+  getUserChanges,
 } from "../controllers/user.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { checkBlockStatus } from "../middleware/block.middleware.js"; // NEW
@@ -52,6 +53,9 @@ router.post(
   rejectChatRequest
 );
 router.get("/business", getBusinessUsers);
+
+// returns only additions/removals compared to client keys
+router.post("/changes", protect, getUserChanges);
 
 
 export default router;

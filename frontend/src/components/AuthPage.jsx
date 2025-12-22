@@ -45,6 +45,9 @@ const BUSINESS_CATEGORIES = [
 ];
 
 // Use shared GoogleLoginButton component (supports auth-code flow)
+// Use the full `GoogleSignupComplete` component from its file (imported above)
+import.meta.env.VITE_SUPABASE_URL
+import.meta.env.VITE_SUPABASE_ANON_KEY
 
 // Features data
 const appFeatures = [

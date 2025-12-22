@@ -10,8 +10,9 @@ const ForwardMessageModal = ({
   contacts, 
   effectiveTheme,
   currentUserId,
-  message, // optional message object being forwarded
-  setMessage // setter to allow editing/removing caption
+  message, // optional single message object being forwarded
+  messages, // optional array of messages when forwarding multiple
+  setMessage // setter to allow editing/removing caption for single
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedChats, setSelectedChats] = useState([]);
@@ -19,10 +20,12 @@ const ForwardMessageModal = ({
   const [detectedDuration, setDetectedDuration] = useState(null);
   const videoProbeRef = useRef(null);
 
-  // Probe video metadata for duration when attachment URL changes and no duration present
+  const multiForward = Array.isArray(messages) && messages.length > 0;
+
+  // Probe video metadata for duration when attachment URL changes and no duration present (only for single message preview)
   useEffect(() => {
     setDetectedDuration(null);
-    if (!message) return;
+    if (!message || multiForward) return;
     const firstAttachment = Array.isArray(message.attachments) && message.attachments.length > 0 ? message.attachments[0] : null;
     if (!firstAttachment) return;
     const ft = firstAttachment.fileType || '';
@@ -110,19 +113,24 @@ const ForwardMessageModal = ({
   const handleForward = () => {
     if (selectedChats.length > 0) {
       // If message was edited/cleared via modal, ensure parent message state updated
-      if (localForwardContent !== (message && message.content)) {
-        try { setMessage && setMessage(prev => prev ? { ...prev, content: localForwardContent } : prev); } catch (e) {}
-      }
-      // Build optional forward payload (include content and attachments when present)
-      if (message) {
-        const payload = {
-          content: localForwardContent || '',
-          attachments: Array.isArray(message.attachments) ? message.attachments : (message.attachments ? [message.attachments] : []),
-          type: message.type || 'file',
-        };
-        onForward(selectedChats, payload);
+      if (multiForward) {
+        // For multi-message forward, pass the messages array directly to parent handler
+        onForward(selectedChats, messages);
       } else {
-        onForward(selectedChats);
+        if (localForwardContent !== (message && message.content)) {
+          try { setMessage && setMessage(prev => prev ? { ...prev, content: localForwardContent } : prev); } catch (e) {}
+        }
+        // Build optional forward payload (include content and attachments when present)
+        if (message) {
+          const payload = {
+            content: localForwardContent || '',
+            attachments: Array.isArray(message.attachments) ? message.attachments : (message.attachments ? [message.attachments] : []),
+            type: message.type || 'file',
+          };
+          onForward(selectedChats, payload);
+        } else {
+          onForward(selectedChats);
+        }
       }
       setSelectedChats([]);
       setSearchTerm('');
@@ -163,8 +171,8 @@ const ForwardMessageModal = ({
             {/* Header */}
             <div className={`${effectiveTheme.secondary} p-4 flex items-center justify-between border-b ${effectiveTheme.border}`}>
               <h2 className={`text-xl font-semibold ${effectiveTheme.text}`}>
-                Forward Message
-              </h2>
+                  {multiForward ? `Forward ${messages.length} message${messages.length > 1 ? 's' : ''}` : 'Forward Message'}
+                </h2>
               <button
                 onClick={onClose}
                 className={`${effectiveTheme.textSecondary} transition-colors p-1 rounded-full hover:bg-red-500 hover:text-white dark:hover:bg-red-600`}
@@ -173,7 +181,6 @@ const ForwardMessageModal = ({
               </button>
             </div>
 
-            {/* Message Preview (when forwarding a message) */}
             {message && (() => {
               const hasImageAttachment = Array.isArray(message.attachments) && message.attachments.some(a => a && a.fileType && a.fileType.startsWith && a.fileType.startsWith('image/'));
               // Only show preview block when there's user text or an image attachment

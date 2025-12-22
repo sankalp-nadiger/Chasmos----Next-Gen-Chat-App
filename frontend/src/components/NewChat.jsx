@@ -166,24 +166,6 @@ const businessCategories = [
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
-// Helper to format timestamp
-const formatTimestamp = (timestamp) => {
-  if (!timestamp) return "Last seen recently";
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diff = (now - date) / 1000; // seconds
-
-  if (diff < 60) return "Just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
-
-  return (
-    date.toLocaleDateString() +
-    " " +
-    date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  );
-};
-
 const NewChat = ({
   effectiveTheme = {},
   onClose,
@@ -204,11 +186,38 @@ const NewChat = ({
   const [syncingContacts, setSyncingContacts] = useState(false);
   const [refreshingContacts, setRefreshingContacts] = useState(false);
   const [error, setError] = useState(null);
+  const [toast, setToast] = useState({ show: false, message: '' });
   const [selectedBusinessCategory, setSelectedBusinessCategory] = useState(null);
   const [activeSection, setActiveSection] = useState("contacts");
 
   // ref to hold the fetch function so we can call it from handlers
   const fetchAllRef = useRef(null);
+
+  // Helpers available to both fetchAll and refresh logic
+  const normalizePhone = (p) => {
+    if (!p) return "";
+    let digits = String(p).replace(/\D/g, "");
+    if (digits.length > 10) digits = digits.slice(-10);
+    return digits;
+  };
+
+  const normalizeName = (n) => {
+    if (!n) return "";
+    return String(n).trim().toLowerCase().replace(/\s+/g, " ");
+  };
+
+  const makeKey = (c) => {
+    if (!c) return "";
+    const email = c.email ? String(c.email).toLowerCase().trim() : "";
+    if (email) return `e:${email}`;
+    const id = c.id || c._id || c.userId || "";
+    if (id) return `i:${String(id)}`;
+    const phone = normalizePhone(c.phone || c.phoneNumber || c._rawPhone || c._rawPhone || "");
+    if (phone) return `p:${phone}`;
+    const n = normalizeName(c.name || c.displayName || "");
+    if (n) return `n:${n}`;
+    return "";
+  };
 
   // =========================
   // CURRENT USER EMAIL
@@ -356,7 +365,8 @@ const NewChat = ({
         const knownIds = new Set(knownContacts.map((u) => String(u.id)));
         const newUsers = normalUsers.filter((u) => !knownIds.has(String(u.id)));
 
-        setAllContacts([...existingNotRegisteredMapped, ...knownContacts]);
+        const newAllContacts = [...existingNotRegisteredMapped, ...knownContacts];
+        setAllContacts(newAllContacts);
         setRegisteredUsers(newUsers);
 
         // 2️⃣ BUSINESS USERS
@@ -384,6 +394,13 @@ const NewChat = ({
 
         setBusinessUsers(mappedBusinesses);
         setBusinessCategoryCounts(bizData.categoryCounts || {});
+
+        // Return fetched lists so callers can inspect counts without waiting for state
+        return {
+          allContacts: newAllContacts,
+          registeredUsers: newUsers,
+          businessUsers: mappedBusinesses,
+        };
       } catch (err) {
         setError(err.message);
       } finally {
@@ -400,48 +417,133 @@ const NewChat = ({
   const handleRefresh = async () => {
     setRefreshingContacts(true);
     try {
-      // first refresh local lists (users/businesses)
-      if (fetchAllRef.current) await fetchAllRef.current();
+      // helper to produce a stable key (prefer email -> id -> phone -> name)
+      const keyFor = (c) => {
+        const k = makeKey(c);
+        if (k) return k;
+        const email = c?.email ? String(c.email).toLowerCase().trim() : "";
+        const id = c?.id || c?._id || "";
+        const phone = normalizePhone(c?.phone || c?.phoneNumber || c?._rawPhone || "");
+        const name = normalizeName(c?.name || c?.displayName || email || "");
+        if (email) return `e:${email}`;
+        if (id) return `i:${String(id)}`;
+        if (phone) return `p:${phone}`;
+        if (name) return `n:${name}`;
+        return "";
+      };
 
-      // then fetch stored google contacts from backend and merge into "Your Contacts"
+      // collect previous keys for server diff detection
+      const prevKeys = new Set();
+      (allContacts || []).forEach((c) => { const k = keyFor(c); if (k) prevKeys.add(k); });
+      (registeredUsers || []).forEach((c) => { const k = keyFor(c); if (k) prevKeys.add(k); });
+      (businessUsers || []).forEach((c) => { const k = keyFor(c); if (k) prevKeys.add(k); });
+
+      // fetch google contacts (we will still include them locally)
+      let googleMapped = [];
       try {
         const token = localStorage.getItem('token');
         if (token) {
-          const resp = await fetch(`${API_BASE_URL}/api/sync/google-contacts`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          const resp = await fetch(`${API_BASE_URL}/api/sync/google-contacts`, { headers: { Authorization: `Bearer ${token}` } });
           if (resp.ok) {
             const body = await resp.json();
             const googleContacts = body?.data || [];
             if (Array.isArray(googleContacts) && googleContacts.length > 0) {
-              const mapped = googleContacts.map((g) => ({
+              googleMapped = googleContacts.map((g) => ({
                 id: g.googleId || g.email || g.name,
                 name: g.name || g.email || 'Unknown',
                 email: g.email || undefined,
                 avatar: g.avatar || null,
+                phone: g.phone || g.mobile || undefined,
                 isOnline: false,
                 type: g.email ? 'google-contact' : 'contact',
                 isGoogleContact: true,
               }));
-
-              // merge into existing allContacts (avoid duplicates by email or id)
-              setAllContacts((prev) => {
-                const byKey = new Map();
-                (prev || []).forEach((c) => {
-                  const key = (c.email || c.id || c.name || '').toString().toLowerCase();
-                  if (key && !byKey.has(key)) byKey.set(key, c);
-                });
-                mapped.forEach((m) => {
-                  const key = (m.email || m.id || m.name || '').toString().toLowerCase();
-                  if (key && !byKey.has(key)) byKey.set(key, m);
-                });
-                return Array.from(byKey.values());
-              });
             }
           }
         }
       } catch (err) {
         console.error('Failed to fetch google contacts during refresh', err);
+      }
+
+      // Ask server for diffs vs our current keys
+      let serverAdded = [];
+      let serverRemoved = [];
+      try {
+        const token = localStorage.getItem('token');
+        const resp = await fetch(`${API_BASE_URL}/api/user/changes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : undefined },
+          body: JSON.stringify({ keys: Array.from(prevKeys) }),
+        });
+
+        if (resp.status === 204) {
+          // nothing changed on server
+          setToast({ show: true, message: 'Contacts are already up to date' });
+          setTimeout(() => setToast({ show: false, message: '' }), 2000);
+          return;
+        }
+
+        if (resp.ok) {
+          const body = await resp.json();
+          serverAdded = Array.isArray(body.added) ? body.added : [];
+          serverRemoved = Array.isArray(body.removed) ? body.removed : [];
+        } else {
+          console.warn('Diff endpoint returned non-ok', resp.status);
+        }
+      } catch (err) {
+        console.error('Failed to query server diffs', err);
+      }
+
+      // Build current map from existing state + google contacts
+      const byKey = new Map();
+      const pushIntoMap = (c) => {
+        const k = keyFor(c);
+        if (!k) return;
+        if (!byKey.has(k)) byKey.set(k, { ...c });
+        else {
+          const ex = byKey.get(k) || {};
+          byKey.set(k, { ...ex, ...c });
+        }
+      };
+
+      (allContacts || []).forEach(pushIntoMap);
+      (registeredUsers || []).forEach(pushIntoMap);
+      (businessUsers || []).forEach(pushIntoMap);
+      (googleMapped || []).forEach(pushIntoMap);
+
+      // apply removals
+      (serverRemoved || []).forEach((rk) => byKey.delete(rk));
+
+      // apply additions (server provides minimal sanitized items)
+      (serverAdded || []).forEach((item) => {
+        const k = keyFor(item) || makeKey(item) || (`i:${item.id}`);
+        if (!k) return;
+        const existing = byKey.get(k) || {};
+        byKey.set(k, { ...existing, ...item });
+      });
+
+      const unified = Array.from(byKey.values());
+
+      // split into categories
+      const newBusiness = unified.filter((c) => c.type === 'business').map((c) => ({ ...c, id: c.id || keyFor(c) }));
+      const newRegistered = unified.filter((c) => c.type === 'user').map((c) => ({ ...c, id: c.id || keyFor(c) }));
+      const newAll = unified.filter((c) => c.type === 'contact' || c.type === 'google-contact' || !c.type).map((c) => ({ ...c, id: c.id || keyFor(c) }));
+
+      setAllContacts(newAll);
+      setRegisteredUsers(newRegistered);
+      setBusinessUsers(newBusiness);
+
+      // compute diff for toast
+      const newKeys = new Set();
+      newAll.forEach((c) => { const k = keyFor(c); if (k) newKeys.add(k); });
+      newRegistered.forEach((c) => { const k = keyFor(c); if (k) newKeys.add(k); });
+      newBusiness.forEach((c) => { const k = keyFor(c); if (k) newKeys.add(k); });
+
+      if (newKeys.size !== prevKeys.size) {
+        const diff = newKeys.size - prevKeys.size;
+        const message = diff > 0 ? `Contacts synced successfully! (+${diff})` : `Contacts synced successfully! (${diff})`;
+        setToast({ show: true, message });
+        setTimeout(() => setToast({ show: false, message: '' }), 3000);
       }
     } catch (e) {
       console.error('Refresh contacts failed', e);
@@ -732,8 +834,15 @@ const filteredBusinessContacts = useMemo(() => {
         return;
       }
 
-      // On successful sync, reload so UI picks up new contacts (simplest approach)
-      window.location.reload();
+      // Successful sync: refresh local lists, show toast, then close modal shortly after
+      try {
+        const fetched = fetchAllRef.current ? await fetchAllRef.current() : null;
+
+        setToast({ show: true, message: 'Contacts synced successfully!' });
+        setTimeout(() => setToast({ show: false, message: '' }), 3000);
+      } catch (err) {
+        console.error('Failed to refresh contacts after sync', err);
+      }
     } catch (err) {
       console.error('Manual sync error', err);
       setError(err.message || 'Sync failed');
@@ -788,13 +897,23 @@ const filteredBusinessContacts = useMemo(() => {
               New Chat
             </h2>
             <p className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"}`}>
-              {selectedBusinessCategory
-                ? `${selectedBusinessCategory.name} - ${filteredBusinessContacts.length} users`
+              {activeSection === "business"
+                ? (selectedBusinessCategory
+                    ? `${selectedBusinessCategory.name} - ${filteredBusinessContacts.length} users`
+                    : `${businessUsers.length} users across all business categories`)
                 : `${filteredAllContacts.length + filteredRegisteredUsers.length} users available`}
             </p>
           </div>
         </div>
       </div>
+      {/* Toast (top-left) */}
+      {toast?.show && (
+        <div className="fixed left-4 top-4 z-50">
+          <div className="px-4 py-2 rounded shadow-md bg-green-600 text-white text-sm">
+            {toast.message}
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <div className="p-4 flex-shrink-0">
@@ -807,7 +926,7 @@ const filteredBusinessContacts = useMemo(() => {
             placeholder={
               selectedBusinessCategory
                 ? "Search business users..."
-                : "Search contacts..."
+                : "Search users..."
             }
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -1377,53 +1496,52 @@ const ContactItem = ({
       {/* INVITE MODAL — USERS ONLY */}
       {!isBusiness && showInviteModal && (
         <div
-          className="fixed inset-0 flex items-center justify-center z-50"
-          style={{ background: "rgba(0,0,0,0.4)" }}
+          className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm`}
+          onClick={() => setShowInviteModal(false)}
         >
-          <div className="absolute inset-0 w-full h-full pointer-events-none">
-            <CosmosBackground opacity={0.28} theme="light" />
-          </div>
-          <div
-            className="absolute inset-0 w-full h-full pointer-events-none"
-            style={{ background: "rgba(255,255,255,0.9)" }}
-          />
+          {effectiveTheme.mode !== 'dark' && (
+            <div className="absolute inset-0 w-full h-full pointer-events-none">
+              <CosmosBackground opacity={0.28} theme="light" />
+            </div>
+          )}
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
+            onClick={(e) => e.stopPropagation()}
             className={`relative w-full max-w-md rounded-2xl p-6 shadow-xl ${
-              effectiveTheme.secondary || "bg-white"
-            }`}
+              effectiveTheme.primary || ''
+            } ${effectiveTheme.mode !== 'dark' ? 'bg-white/90' : ''}`}
             style={{ zIndex: 10 }}
           >
             <div className="flex justify-between mb-4">
               <div>
-                <h2 className="font-semibold text-lg">{contact.name}</h2>
+                <h2 className={`font-semibold text-lg ${effectiveTheme.text || 'text-gray-100'}`}>{contact.name}</h2>
                 {contact.bio && (
-                  <p className="text-sm text-gray-500 mt-1 truncate">
+                  <p className={`text-sm mt-1 truncate ${effectiveTheme.textSecondary || 'text-gray-300'}`}>
                     {contact.bio}
                   </p>
                 )}
               </div>
               <button
                 onClick={() => setShowInviteModal(false)}
-                className="p-1 rounded-full hover:bg-red-500/20"
+                className={`p-1 rounded-full transition-colors ${effectiveTheme.mode === 'dark' ? 'hover:bg-white/5' : 'hover:bg-red-500/20'}`}
               >
-                <XCircle className="w-5 h-5 text-gray-400 hover:text-red-500" />
+                <XCircle className={`w-5 h-5 ${effectiveTheme.textSecondary || 'text-gray-400'}`} />
               </button>
             </div>
 
             {inviteStatus === "sent" && (
-              <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-300">
-                <p className="text-sm font-medium">Invite pending</p>
-                <p className="text-xs text-gray-500">
+              <div className={`p-4 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'bg-yellow-900/20 border-yellow-700' : 'bg-yellow-500/10 border-yellow-300'}`}>
+                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-100'}`}>Invite pending</p>
+                <p className={`text-xs ${effectiveTheme.textSecondary || 'text-gray-300'}`}>
                   Waiting for {contact.name} to accept
                 </p>
               </div>
             )}
 
             {inviteStatus === "incoming" && (
-              <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-300">
-                <p className="text-sm font-medium">Incoming request</p>
+              <div className={`p-4 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'bg-orange-900/20 border-orange-700' : 'bg-orange-500/10 border-orange-300'}`}>
+                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-100'}`}>Incoming request</p>
                 <div className="flex justify-end mt-4">
                   <button
                     onClick={handleAcceptInvite}
@@ -1441,7 +1559,7 @@ const ContactItem = ({
                 value={inviteMessage}
                 onChange={(e) => setInviteMessage(e.target.value)}
                 placeholder="Add an optional message..."
-                className="w-full mt-4 p-3 rounded-xl border resize-none text-sm"
+                className={`w-full mt-4 p-3 rounded-xl border resize-none text-sm ${effectiveTheme.mode === 'dark' ? 'bg-transparent text-gray-100 border-gray-700 placeholder-gray-400' : 'bg-white text-gray-900 border-gray-300 placeholder-gray-500'}`}
               />
             )}
 
@@ -1449,7 +1567,7 @@ const ContactItem = ({
               {inviteStatus === "sent" && (
                 <button
                   onClick={handleWithdrawInvite}
-                  className="px-4 py-2 rounded-xl border border-red-500 text-red-500"
+                  className={`px-4 py-2 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'border-red-600 text-red-400' : 'border-red-500 text-red-500'}`}
                 >
                   Withdraw
                 </button>
@@ -1459,7 +1577,7 @@ const ContactItem = ({
                 <>
                   <button
                     onClick={() => setShowInviteModal(false)}
-                    className="px-4 py-2 rounded-xl border"
+                    className={`px-4 py-2 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'border-gray-700 text-gray-200' : ''}`}
                   >
                     Cancel
                   </button>
@@ -1485,23 +1603,19 @@ const ContactItem = ({
       {/* Share Link Popup */}
       {showSharePopup && (
         <div
-          className="fixed inset-0 flex items-center justify-center z-50 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/50 backdrop-blur-sm"
           onClick={() => setShowSharePopup(false)}
         >
-          <div className="absolute inset-0 w-full h-full pointer-events-none">
-            <CosmosBackground opacity={0.22} theme="light" />
-          </div>
-          <div
-            className="absolute inset-0 w-full h-full pointer-events-none"
-            style={{ background: "rgba(255,255,255,0.88)" }}
-          />
+          {effectiveTheme.mode !== 'dark' && (
+            <div className="absolute inset-0 w-full h-full pointer-events-none">
+              <CosmosBackground opacity={0.22} theme="light" />
+            </div>
+          )}
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm rounded-2xl p-5 ${
-              effectiveTheme.secondary || "bg-white"
-            } shadow-2xl`}
+            className={`w-full max-w-sm rounded-2xl p-5 ${effectiveTheme.primary || ''} shadow-2xl ${effectiveTheme.mode !== 'dark' ? 'bg-white/90' : ''}`}
             style={{ zIndex: 10 }}
           >
             <div className="flex items-start justify-between mb-4">
@@ -1514,7 +1628,7 @@ const ContactItem = ({
                 <p
                   className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"}`}
                 >
-                  Share this link to invite others
+                  Share this invite with others
                 </p>
               </div>
               <button
@@ -1527,7 +1641,7 @@ const ContactItem = ({
 
             <div className="flex flex-col space-y-3">
               <p className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"}`}>
-                Invite message (editable):
+                Invite message:
               </p>
               {
                 /* Compose a friendly invite + link to copy */
