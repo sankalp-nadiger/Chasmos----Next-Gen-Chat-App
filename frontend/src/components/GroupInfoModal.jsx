@@ -1,9 +1,8 @@
-/* eslint-disable no-unused-vars */
+// GroupInfoModalWhatsApp.jsx
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
-  ShieldCheck,
   Image,
   FileText,
   Link as LinkIcon,
@@ -11,19 +10,12 @@ import {
   Trash,
 } from "lucide-react";
 import Logo from "./Logo";
-import CosmosBackground from "./CosmosBg";
 
-const TabButton = ({ active, icon: Icon, label, onClick, color, effectiveTheme }) => (
+const TabButton = ({ active, icon: Icon, label, onClick, color }) => (
   <button
     onClick={onClick}
     className={`flex-1 flex flex-col items-center py-2 rounded-lg transition ${
-      active 
-        ? effectiveTheme?.mode === 'dark'
-          ? `bg-gray-800 text-${color}-400` 
-          : `bg-gray-200 text-${color}-600`
-        : effectiveTheme?.mode === 'dark'
-          ? "bg-gray-900 text-gray-400"
-          : "bg-gray-100 text-gray-600"
+      active ? `bg-gray-800 text-${color}-400` : "bg-gray-900 text-gray-400"
     }`}
   >
     <Icon className="w-5 h-5" />
@@ -31,356 +23,490 @@ const TabButton = ({ active, icon: Icon, label, onClick, color, effectiveTheme }
   </button>
 );
 
-const GroupInfoModal = ({
+const GroupInfoModalWhatsApp = ({
   open,
   group,
   currentUserId,
   onClose,
   onUpdateGroup,
   onDeleteGroup,
-  effectiveTheme,
 }) => {
   const [activeTab, setActiveTab] = useState("media");
 
   if (!group) return null;
 
-  // Map Chat model structure to component expected structure
-  // Use participants for full user objects, fall back to users if needed
-  const participants = group.participants || [];
-  const users = group.users || [];
-  const admins = group.admins || [];
-  const groupAdmin = group.groupAdmin;
-  const groupSettings = group.groupSettings || {};
-  const chatName = group.chatName || group.name || "Group";
-  const avatar = groupSettings.avatar || group.avatar;
-  const description = groupSettings.description || group.description || "";
-  const inviteLink = groupSettings.inviteLink || group.inviteLink || "";
+  console.log("📊 GroupInfoModal received group data:", {
+    inviteEnabled: group.inviteEnabled,
+    inviteLink: group.inviteLink,
+    permissions: group.permissions,
+    features: group.features
+  });
 
-  // Normalize current user ID for comparison
-  const normalizedCurrentUserId = String(currentUserId);
+  const members = group.members || group.participants || [];
+  const settings = group.settings || {};
+  
+  // ✅ Use actual values from group with proper fallbacks
+  const permissions = {
+    allowCreatorAdmin: group.permissions?.allowCreatorAdmin !== false,
+    allowOthersAdmin: group.permissions?.allowOthersAdmin === true,
+    allowMembersAdd: group.permissions?.allowMembersAdd !== false,
+  };
+  
+  const features = {
+    media: group.features?.media !== false,
+    gallery: group.features?.gallery !== false,
+    docs: group.features?.docs !== false,
+    polls: group.features?.polls !== false,
+  };
 
-  // Check if current user is admin or group admin
-  const isGroupAdmin = groupAdmin && String(groupAdmin._id || groupAdmin) === normalizedCurrentUserId;
-  const isAdmin = admins?.some(a => String(a._id || a) === normalizedCurrentUserId) || isGroupAdmin;
+  // ✅ Determine creator ID
+  const creatorId = group.admin?._id?.toString() || group.admin?.toString() || group.groupAdmin?._id?.toString() || group.groupAdmin?.toString();
 
-  // Format members from participants array (has full user objects), or fall back to users
-  const members = (participants.length > 0 ? participants : users)
-    .filter(user => user !== null && user !== undefined) // Filter out null/undefined values
-    .map(user => ({
-      id: String(user._id || user.id),
-      name: user.name || "Unknown",
-      avatar: user.avatar || "",
-      isAdmin: admins?.some(a => String(a._id || a) === String(user._id || user.id)),
-      isCreator: groupAdmin && String(groupAdmin._id || groupAdmin) === String(user._id || user.id),
-    }));
+  const isCreator = currentUserId?.toString() === creatorId;
+
+  const isAdmin = isCreator || group.admins?.some(admin => {
+    const adminId = admin._id?.toString() || admin.toString();
+    return adminId === currentUserId?.toString();
+  });
 
   const handleRemoveMember = (memberId) => {
-    // This would be handled by parent component
     onUpdateGroup?.({
       ...group,
-      users: users.filter(u => String(u._id || u.id) !== memberId),
+      members: members.filter((m) => m.id !== memberId && m._id !== memberId),
     });
   };
 
   const handlePromoteToggle = (memberId) => {
-    // This would be handled by parent component
-    const newAdmins = admins?.some(a => String(a._id || a) === memberId)
-      ? admins.filter(a => String(a._id || a) !== memberId)
-      : [...(admins || []), ...users.filter(u => String(u._id || u.id) === memberId)];
-    
     onUpdateGroup?.({
       ...group,
-      admins: newAdmins,
+      members: members.map((m) =>
+        (m.id === memberId || m._id === memberId) ? { ...m, isAdmin: !m.isAdmin } : m
+      ),
     });
   };
 
   const handleCopyInvite = async () => {
-    if (!inviteLink) return;
+    const link = group.inviteLink || settings.inviteLink || "";
+    if (!link) return;
     try {
-      await navigator.clipboard.writeText(inviteLink);
+      await navigator.clipboard.writeText(link);
+      alert("Invite link copied!");
     } catch (e) {
       console.error("Failed to copy invite link", e);
     }
   };
 
+  const mediaContent = group.media || [];
+  const docsContent = group.docs || [];
+  const linksContent = group.links || [];
+
+  const handleLeaveGroup = async () => {
+  if (!confirm('Are you sure you want to leave this group?')) return;
+  
+  try {
+    console.log('Leaving group with ID:', group?._id);
+
+    const response = await fetch('/api/group/exit-group', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}` // Adjust based on how you store auth token
+      },
+      body: JSON.stringify({ groupId: group._id }) // or whatever the group ID variable is
+      
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to leave group');
+    }
+
+    // Success - redirect or update UI
+    alert('Successfully left the group');
+    // Redirect to groups list or home
+    window.location.href = '/groups'; // or use your router's navigation
+    
+  } catch (error) {
+    console.error('Failed to leave group:', error);
+    alert(error.message || 'Failed to leave group. Please try again.');
+  }
+};
+
   return (
     <AnimatePresence>
       {open && (
         <motion.div
-          className={`fixed inset-0 z-[20000] flex flex-col`}
-          style={{
-            backgroundColor: effectiveTheme?.mode === 'dark' ? '#121212' : '#f5f5f5',
-          }}
+          className="fixed inset-0 z-[20000] bg-[#121212] flex flex-col"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          {/* Cosmos Background */}
-          <div className="absolute inset-0 overflow-hidden">
-            <CosmosBackground effectiveTheme={effectiveTheme} />
-          </div>
-
-          {/* Content wrapper - relative positioning */}
-          <div className="relative z-10 flex flex-col h-full">
-            {/* Header */}
-            <div className={`flex items-center justify-between px-5 py-4 border-b ${
-              effectiveTheme?.mode === 'dark' 
-                ? 'border-gray-700 bg-gray-900/80 backdrop-blur' 
-                : 'border-gray-300 bg-white/80 backdrop-blur'
-            }`}>
-              <div className="flex items-center gap-4">
-                <div className={`w-14 h-14 rounded-lg flex items-center justify-center overflow-hidden ${
-                  effectiveTheme?.mode === 'dark' ? 'bg-gray-800' : 'bg-gray-200'
-                }`}>
-                  {avatar ? (
-                    <img
-                      src={avatar}
-                      alt={chatName}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <Logo size="sm" showText={false} textClassName="text-white" />
-                  )}
-                </div>
-                <div className="flex flex-col">
-                  <span className={`font-semibold text-lg ${
-                    effectiveTheme?.mode === 'dark' ? 'text-white' : 'text-gray-900'
-                  }`}>
-                    {chatName}
+          {/* ================= HEADER ================= */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-lg bg-gray-800 flex items-center justify-center overflow-hidden">
+                {group.avatar || group.icon ? (
+                  <img
+                    src={group.avatar || group.icon}
+                    alt={group.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-white text-xl font-bold">
+                    {group.name?.charAt(0)}
                   </span>
-                  <span className={`text-sm truncate max-w-[60vw] ${
-                    effectiveTheme?.mode === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                  }`}>
-                    {description}
-                  </span>
-                  <span className={`text-xs mt-1 ${
-                    effectiveTheme?.mode === 'dark' ? 'text-gray-500' : 'text-gray-500'
-                  }`}>
-                    {members.length} members
-                  </span>
-                </div>
+                )}
               </div>
 
-              <button
-                onClick={onClose}
-                className={`p-2 rounded transition ${
-                  effectiveTheme?.mode === 'dark' 
-                    ? 'hover:bg-gray-700 text-white' 
-                    : 'hover:bg-gray-300 text-gray-900'
-                }`}
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div>
+                <h2 className="text-white font-semibold text-lg">
+                  {group.name}
+                </h2>
+                <p className="text-gray-400 text-sm">
+                  {members.length} members
+                </p>
+              </div>
             </div>
 
-            {/* Body */}
-            <div className={`flex-1 overflow-y-auto p-5 space-y-6`}>
+            <button
+              onClick={onClose}
+              className="p-2 rounded hover:bg-gray-800 transition"
+            >
+              <X className="text-white w-6 h-6" />
+            </button>
+          </div>
 
-              {/* Members */}
-              <section>
-                <h4 className={`font-semibold mb-3 ${
-                  effectiveTheme?.mode === 'dark' ? 'text-white' : 'text-gray-900'
-                }`}>
-                  Members ({members.length})
-                </h4>
-                <div className="space-y-2">
-                  {members && members.length > 0 ? (
-                    members.map((member) => {
-                      const me = member.id === normalizedCurrentUserId;
-                      return (
-                        <div
-                          key={member.id}
-                          className={`flex items-center justify-between rounded-xl px-4 py-3 transition ${
-                            effectiveTheme?.mode === 'dark' 
-                              ? 'bg-gray-900/60 hover:bg-gray-800/60 backdrop-blur' 
-                              : 'bg-white/60 hover:bg-gray-100/60 backdrop-blur border border-gray-200'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 text-white flex items-center justify-center font-semibold">
-                              {(member.name || "?").charAt(0).toUpperCase()}
-                            </div>
+          {/* ================= BODY ================= */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-6">
 
-                            <div className="flex flex-col">
-                              <div className={`flex items-center gap-2 ${
-                                effectiveTheme?.mode === 'dark' ? 'text-white' : 'text-gray-900'
-                              }`}>
-                                <span className="font-medium">{member.name}</span>
-                                {member.isCreator && (
-                                  <span className={`px-2 py-0.5 text-xs rounded ${
-                                    effectiveTheme?.mode === 'dark' 
-                                      ? 'bg-gray-700 text-gray-200' 
-                                      : 'bg-gray-300 text-gray-700'
-                                  }`}>
-                                    Creator
-                                  </span>
-                                )}
-                                {member.isAdmin && !member.isCreator && (
-                                  <span className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded ${
-                                    effectiveTheme?.mode === 'dark' 
-                                      ? 'bg-yellow-700 text-yellow-200' 
-                                      : 'bg-yellow-200 text-yellow-800'
-                                  }`}>
-                                    <ShieldCheck className="w-3 h-3" />
-                                    Admin
-                                  </span>
-                                )}
-                                {me && (
-                                  <span className={`text-xs ${
-                                    effectiveTheme?.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'
-                                  }`}>
-                                    You
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {(isAdmin || isGroupAdmin) && !member.isCreator && (
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => handlePromoteToggle(member.id)}
-                                className={`px-3 py-1 text-xs rounded transition ${
-                                  effectiveTheme?.mode === 'dark' 
-                                    ? 'bg-gray-800 text-blue-400 hover:bg-gray-700' 
-                                    : 'bg-gray-200 text-blue-600 hover:bg-gray-300'
-                                }`}
-                              >
-                                {member.isAdmin ? "Demote" : "Make Admin"}
-                              </button>
-
-                              <button
-                                onClick={() => handleRemoveMember(member.id)}
-                                className={`px-3 py-1 text-xs rounded transition ${
-                                  effectiveTheme?.mode === 'dark' 
-                                    ? 'bg-gray-800 text-red-500 hover:bg-gray-700' 
-                                    : 'bg-gray-200 text-red-600 hover:bg-gray-300'
-                                }`}
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <p className={`text-sm ${
-                      effectiveTheme?.mode === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                    }`}>
-                      No members to display
-                    </p>
-                  )}
+            {/* ================= DESCRIPTION ================= */}
+            {group.description && (
+              <Section title="About">
+                <div className="bg-gray-900 rounded-xl p-4">
+                  <p className="text-gray-300 text-sm">{group.description}</p>
                 </div>
-              </section>
+              </Section>
+            )}
 
-              {/* Invite Link */}
-              <section>
-                <h4 className={`font-semibold mb-3 ${
-                  effectiveTheme?.mode === 'dark' ? 'text-white' : 'text-gray-900'
-                }`}>
-                  Invite via Link
-                </h4>
-                <div className={`p-4 rounded-xl flex justify-between items-center ${
-                  effectiveTheme?.mode === 'dark' 
-                    ? 'bg-gray-900/60 backdrop-blur' 
-                    : 'bg-white/60 backdrop-blur border border-gray-200'
-                }`}>
-                  <span className={`text-sm truncate ${
-                    effectiveTheme?.mode === 'dark' ? 'text-gray-300' : 'text-gray-700'
-                  }`}>
-                    {inviteLink || "No invite link"}
-                  </span>
+            {/* ================= MEMBERS ================= */}
+            <Section title={`Members (${members.length})`}>
+              {members.map((member) => {
+                const memberId = member.id || member._id;
+                const me = memberId?.toString() === currentUserId?.toString();
+                
+                // ✅ Check if this member is the creator
+                const isMemberCreator = memberId?.toString() === creatorId;
+                
+                // ✅ Check if this member is an admin
+                const isMemberAdmin = group.admins?.some(admin => {
+                  const adminId = admin._id?.toString() || admin.toString();
+                  return adminId === memberId?.toString();
+                }) || false;
+
+                return (
+                  <div
+                    key={memberId}
+                    className="flex justify-between items-center bg-gray-900 rounded-xl p-3 hover:bg-gray-800 transition"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-white overflow-hidden">
+                        {member.avatar ? (
+                          <img src={member.avatar} alt={member.name} className="w-full h-full rounded-full object-cover" />
+                        ) : (
+                          <span className="font-semibold">{member.name?.charAt(0) || "?"}</span>
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="flex gap-2 items-center flex-wrap">
+                          <span className="text-white text-sm font-medium">
+                            {member.name}
+                          </span>
+
+                          {isMemberCreator && Badge("Creator", "purple")}
+                          {isMemberAdmin && !isMemberCreator && Badge("Admin", "blue")}
+                          {me && Badge("You", "gray")}
+                        </div>
+
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {member.username || member.email || "Member"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {(isAdmin || isCreator) && !isMemberCreator && !me && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handlePromoteToggle(memberId)}
+                          className="text-xs px-3 py-1.5 bg-gray-800 text-blue-400 rounded hover:bg-gray-700 transition"
+                        >
+                          {isMemberAdmin ? "Demote" : "Make Admin"}
+                        </button>
+
+                        <button
+                          onClick={() => handleRemoveMember(memberId)}
+                          className="text-xs px-3 py-1.5 bg-gray-800 text-red-500 rounded hover:bg-gray-700 transition"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </Section>
+
+            {/* ================= INVITE LINK ================= */}
+            <Section title="Invite Link">
+              <div className="bg-gray-900 rounded-xl p-4">
+                <div className="flex justify-between items-center mb-3">
+                  <div>
+                    <span className="text-white text-sm font-medium block">Invite via link</span>
+                    <span className="text-xs text-gray-400 mt-1 block">
+                      {group.inviteEnabled ? "Members can join using the invite link" : "Invite link is currently disabled"}
+                    </span>
+                  </div>
+                  <StatusBadge enabled={group.inviteEnabled} />
+                </div>
+
+                {group.inviteEnabled && (
                   <button
                     onClick={handleCopyInvite}
-                    className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition"
+                    className="w-full mt-2 text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
                   >
-                    Copy
-                  </button>
-                </div>
-              </section>
-
-              {/* Tabs */}
-              <section>
-                <div className="flex gap-3 mb-4">
-                  <TabButton
-                    active={activeTab === "media"}
-                    icon={Image}
-                    label="Media"
-                    color="blue"
-                    onClick={() => setActiveTab("media")}
-                    effectiveTheme={effectiveTheme}
-                  />
-                  <TabButton
-                    active={activeTab === "docs"}
-                    icon={FileText}
-                    label="Docs"
-                    color="green"
-                    onClick={() => setActiveTab("docs")}
-                    effectiveTheme={effectiveTheme}
-                  />
-                  <TabButton
-                    active={activeTab === "links"}
-                    icon={LinkIcon}
-                    label="Links"
-                    color="purple"
-                    onClick={() => setActiveTab("links")}
-                    effectiveTheme={effectiveTheme}
-                  />
-                </div>
-
-                <div className={`rounded-xl p-4 max-h-72 overflow-y-auto ${
-                  effectiveTheme?.mode === 'dark' 
-                    ? 'bg-gray-900/60 backdrop-blur' 
-                    : 'bg-white/60 backdrop-blur border border-gray-200'
-                }`}>
-                  {activeTab === "media" && (
-                    <p className={`text-sm ${
-                      effectiveTheme?.mode === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                    }`}>No media shared</p>
-                  )}
-
-                  {activeTab === "docs" && (
-                    <p className={`text-sm ${
-                      effectiveTheme?.mode === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                    }`}>No documents shared</p>
-                  )}
-
-                  {activeTab === "links" && (
-                    <p className={`text-sm ${
-                      effectiveTheme?.mode === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                    }`}>No links shared</p>
-                  )}
-                </div>
-              </section>
-
-              {/* Actions */}
-              <section className="space-y-3 mt-6">
-                {!members.some(m => m.isCreator && m.id === normalizedCurrentUserId) && (
-                  <button className={`w-full flex items-center gap-3 py-3 rounded-xl px-4 transition ${
-                    effectiveTheme?.mode === 'dark' 
-                      ? 'bg-gray-900/60 text-red-500 hover:bg-gray-800/60' 
-                      : 'bg-white/60 text-red-600 hover:bg-gray-100/60 border border-gray-200'
-                  }`}>
-                    <LogOut className="w-5 h-5" /> Leave group
+                    Copy Invite Link
                   </button>
                 )}
+              </div>
+            </Section>
 
-                {members.some(m => m.isCreator && m.id === normalizedCurrentUserId) && (
-                  <button
-                    onClick={() => onDeleteGroup?.(group.id || group._id)}
-                    className="w-full flex items-center gap-3 bg-red-600 text-white py-3 rounded-xl px-4 hover:bg-red-700 transition"
-                  >
-                    <Trash className="w-5 h-5" /> Delete group
-                  </button>
+            {/* ================= PERMISSIONS ================= */}
+            <Section title="Permissions">
+              <PermissionRow
+                label="Creator is Admin"
+                description="Group creator has admin privileges"
+                enabled={permissions.allowCreatorAdmin}
+              />
+              <PermissionRow
+                label="Allow Others as Admins"
+                description="Members can be promoted to admin"
+                enabled={permissions.allowOthersAdmin}
+              />
+              <PermissionRow
+                label="Members Can Add Users"
+                description="Any member can invite new people"
+                enabled={permissions.allowMembersAdd}
+              />
+            </Section>
+
+            {/* ================= FEATURES ================= */}
+            <Section title="Group Features">
+              <FeatureRow
+                icon={Image}
+                label="Media Sharing"
+                description="Send photos and videos"
+                enabled={features.media}
+                color="blue"
+              />
+              <FeatureRow
+                icon={Image}
+                label="Gallery View"
+                description="View all shared media"
+                enabled={features.gallery}
+                color="purple"
+              />
+              <FeatureRow
+                icon={FileText}
+                label="Document Sharing"
+                description="Share files and documents"
+                enabled={features.docs}
+                color="green"
+              />
+              <FeatureRow
+                icon={FileText}
+                label="Polls"
+                description="Create and vote on polls"
+                enabled={features.polls}
+                color="orange"
+              />
+            </Section>
+
+            {/* ================= MEDIA TABS ================= */}
+            <Section title="Shared Content">
+              <div className="flex gap-2 mb-4">
+                <TabButton
+                  active={activeTab === "media"}
+                  icon={Image}
+                  label="Media"
+                  onClick={() => setActiveTab("media")}
+                  color="blue"
+                />
+                <TabButton
+                  active={activeTab === "docs"}
+                  icon={FileText}
+                  label="Docs"
+                  onClick={() => setActiveTab("docs")}
+                  color="green"
+                />
+                <TabButton
+                  active={activeTab === "links"}
+                  icon={LinkIcon}
+                  label="Links"
+                  onClick={() => setActiveTab("links")}
+                  color="purple"
+                />
+              </div>
+
+              <div className="bg-gray-900 rounded-xl p-4 min-h-[200px]">
+                {activeTab === "media" && (
+                  <div className="grid grid-cols-3 gap-2">
+                    {mediaContent.length > 0 ? (
+                      mediaContent.map((item, i) => (
+                        <div key={i} className="aspect-square bg-gray-800 rounded-lg overflow-hidden">
+                          <img src={item.url} alt="" className="w-full h-full object-cover" />
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-400 text-sm col-span-3 text-center py-8">No media shared yet</p>
+                    )}
+                  </div>
                 )}
-              </section>
-            </div>
+
+                {activeTab === "docs" && (
+                  <div className="space-y-2">
+                    {docsContent.length > 0 ? (
+                      docsContent.map((doc, i) => (
+                        <div key={i} className="flex items-center gap-3 p-3 bg-gray-800 rounded-lg hover:bg-gray-750 transition">
+                          <FileText className="w-5 h-5 text-blue-400" />
+                          <span className="text-white text-sm">{doc.name}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-400 text-sm text-center py-8">No documents shared yet</p>
+                    )}
+                  </div>
+                )}
+
+                {activeTab === "links" && (
+                  <div className="space-y-2">
+                    {linksContent.length > 0 ? (
+                      linksContent.map((link, i) => (
+                        <div key={i} className="flex items-center gap-3 p-3 bg-gray-800 rounded-lg hover:bg-gray-750 transition">
+                          <LinkIcon className="w-5 h-5 text-purple-400" />
+                          <a href={link.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 text-sm hover:underline">
+                            {link.title || link.url}
+                          </a>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-400 text-sm text-center py-8">No links shared yet</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Section>
+
+            {/* ================= ACTIONS ================= */}
+            <Section title="Actions">
+  {!isCreator && (
+    <ActionButton 
+      icon={LogOut} 
+      label="Leave group" 
+      color="orange"
+      onClick={handleLeaveGroup}
+    />
+  )}
+</Section>
           </div>
         </motion.div>
       )}
     </AnimatePresence>
   );
+}
+
+/* ================= REUSABLE COMPONENTS ================= */
+
+const Section = ({ title, children }) => (
+  <section className="space-y-3">
+    {title && (
+      <h4 className="text-white font-semibold text-base mb-3">{title}</h4>
+    )}
+    <div className="space-y-3">{children}</div>
+  </section>
+);
+
+const StatusBadge = ({ enabled }) => (
+  <span
+    className={`px-3 py-1 text-xs font-medium rounded-full ${
+      enabled 
+        ? "bg-green-500/20 text-green-400 border border-green-500/30" 
+        : "bg-red-500/20 text-red-400 border border-red-500/30"
+    }`}
+  >
+    {enabled ? "Enabled" : "Disabled"}
+  </span>
+);
+
+const PermissionRow = ({ label, description, enabled }) => (
+  <div className="flex justify-between items-center bg-gray-900 rounded-xl p-4 hover:bg-gray-800 transition">
+    <div className="flex-1">
+      <span className="text-white text-sm font-medium block">{label}</span>
+      {description && (
+        <span className="text-gray-400 text-xs mt-1 block">{description}</span>
+      )}
+    </div>
+    <StatusBadge enabled={enabled} />
+  </div>
+);
+
+const FeatureRow = ({ icon: Icon, label, description, enabled, color }) => (
+  <div className="flex items-center justify-between bg-gray-900 rounded-xl p-4 hover:bg-gray-800 transition">
+    <div className="flex items-center gap-3 flex-1">
+      <div className={`w-10 h-10 rounded-lg bg-${color}-500/10 flex items-center justify-center`}>
+        <Icon className={`w-5 h-5 text-${color}-400`} />
+      </div>
+      <div>
+        <span className="text-white text-sm font-medium block">{label}</span>
+        {description && (
+          <span className="text-gray-400 text-xs mt-1 block">{description}</span>
+        )}
+      </div>
+    </div>
+    <StatusBadge enabled={enabled} />
+  </div>
+);
+
+const Badge = (text, color) => {
+  const colorClasses = {
+    purple: "bg-purple-600",
+    blue: "bg-blue-600",
+    gray: "bg-gray-600",
+  };
+  
+  return (
+    <span className={`text-[10px] px-2 py-0.5 rounded ${colorClasses[color] || "bg-gray-600"} text-white font-medium`}>
+      {text}
+    </span>
+  );
 };
 
-export default GroupInfoModal;
+const ActionButton = ({ icon: Icon, label, color, onClick }) => {
+  const colorClasses = {
+    red: "text-red-400 hover:bg-red-500/10",
+    orange: "text-orange-400 hover:bg-orange-500/10",
+    yellow: "text-yellow-400 hover:bg-yellow-500/10",
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-3 py-3 px-4 rounded-xl bg-gray-900 ${colorClasses[color] || "text-gray-400"} hover:bg-gray-800 transition`}
+    >
+      {Icon && <Icon className="w-5 h-5" />}
+      <span className="font-medium">{label}</span>
+    </button>
+  );
+};
+
+export default GroupInfoModalWhatsApp;

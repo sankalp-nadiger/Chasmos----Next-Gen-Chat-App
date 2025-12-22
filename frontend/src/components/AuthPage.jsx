@@ -1,327 +1,4 @@
-// /* eslint-disable no-unused-vars */
-// import React, { useState, useCallback, useEffect } from "react";
-// import { motion, AnimatePresence } from "framer-motion";
-// import {
-//   Mail,
-//   MessageCircle,
-//   Users,
-//   Shield,
-//   ChevronLeft,
-//   ChevronRight,
-//   AlertCircle,
-//   Eye,
-//   EyeOff,
-//   Lock,
-//   ArrowRight,
-// } from "lucide-react";
-// import { useTheme } from "../context/ThemeContext";
-// import Logo from "./Logo";
-// import GoogleSignupComplete from "./GoogleSignupComplete.jsx";
 
-// const API_BASE_URL =
-//   import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
-
-// /* ✅ FIXED BUSINESS CATEGORIES (ID + LABEL) */
-// const BUSINESS_CATEGORIES = [
-//   { id: "restaurants", label: "Restaurant" },
-//   { id: "retail", label: "Retail Store" },
-//   { id: "ecommerce", label: "E-commerce" },
-//   { id: "technology", label: "Technology" },
-//   { id: "education", label: "Education" },
-//   { id: "healthcare", label: "Healthcare" },
-//   { id: "finance", label: "Finance" },
-//   { id: "real-estate", label: "Real Estate" },
-//   { id: "travel", label: "Travel & Tourism" },
-//   { id: "entertainment", label: "Entertainment" },
-//   { id: "marketing", label: "Marketing & Advertising" },
-//   { id: "freelancer", label: "Freelancer / Consultant" },
-//   { id: "other", label: "Other" },
-// ];
-
-// /* ---------------- ERROR ALERT ---------------- */
-// const ErrorAlert = ({ message, onClose }) => (
-//   <motion.div
-//     initial={{ opacity: 0, y: -10 }}
-//     animate={{ opacity: 1, y: 0 }}
-//     exit={{ opacity: 0, y: -10 }}
-//     className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start space-x-2"
-//   >
-//     <AlertCircle className="w-5 h-5 text-red-500 mt-0.5" />
-//     <div className="flex-1 text-sm text-red-700 dark:text-red-400">
-//       {message}
-//     </div>
-//     <button onClick={onClose}>×</button>
-//   </motion.div>
-// );
-
-// /* ---------------- LOGIN FORM ---------------- */
-// const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
-//   const [formData, setFormData] = useState({
-//     emailOrPhone: "",
-//     password: "",
-//   });
-//   const [showPassword, setShowPassword] = useState(false);
-//   const [loading, setLoading] = useState(false);
-//   const [error, setError] = useState("");
-
-//   const submit = async (e) => {
-//     e.preventDefault();
-//     setError("");
-//     setLoading(true);
-//     try {
-//       const res = await fetch(`${API_BASE_URL}/api/user/login`, {
-//         method: "POST",
-//         headers: { "Content-Type": "application/json" },
-//         body: JSON.stringify(formData),
-//       });
-//       const data = await res.json();
-//       if (!res.ok) throw new Error(data.message);
-//       localStorage.setItem("token", data.token);
-//       localStorage.setItem("userInfo", JSON.stringify(data));
-//       onLogin(data);
-//     } catch (err) {
-//       setError(err.message || "Login failed");
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   return (
-//     <form onSubmit={submit} className="space-y-6">
-//       {error && <ErrorAlert message={error} onClose={() => setError("")} />}
-
-//       <input
-//         placeholder="Email or phone"
-//         className={`w-full px-4 py-3 ${currentTheme.inputBg} border rounded-lg`}
-//         value={formData.emailOrPhone}
-//         onChange={(e) =>
-//           setFormData((p) => ({ ...p, emailOrPhone: e.target.value }))
-//         }
-//         required
-//       />
-
-//       <div className="relative">
-//         <input
-//           type={showPassword ? "text" : "password"}
-//           placeholder="Password"
-//           className={`w-full px-4 py-3 ${currentTheme.inputBg} border rounded-lg`}
-//           value={formData.password}
-//           onChange={(e) =>
-//             setFormData((p) => ({ ...p, password: e.target.value }))
-//           }
-//           required
-//         />
-//         <button
-//           type="button"
-//           onClick={() => setShowPassword(!showPassword)}
-//           className="absolute right-3 top-3"
-//         >
-//           {showPassword ? <EyeOff /> : <Eye />}
-//         </button>
-//       </div>
-
-//       <button
-//         disabled={loading}
-//         className="w-full py-3 bg-blue-600 text-white rounded-lg"
-//       >
-//         {loading ? "Signing in..." : "Sign In"}
-//       </button>
-//     </form>
-//   );
-// };
-
-// /* ---------------- SIGNUP FORM ---------------- */
-// const SignupForm = ({ currentTheme, onSignup }) => {
-//   const [formData, setFormData] = useState({
-//     name: "",
-//     email: "",
-//     phoneNumber: "",
-//     password: "",
-//     confirmPassword: "",
-//     bio: "",
-//     isBusiness: false,
-//     businessCategory: "",
-//   });
-//   const [error, setError] = useState("");
-//   const [loading, setLoading] = useState(false);
-
-//   const submit = async (e) => {
-//     e.preventDefault();
-//     setError("");
-
-//     if (formData.password !== formData.confirmPassword)
-//       return setError("Passwords do not match");
-
-//     setLoading(true);
-//     try {
-//       const res = await fetch(`${API_BASE_URL}/api/user`, {
-//         method: "POST",
-//         headers: { "Content-Type": "application/json" },
-//         body: JSON.stringify(formData),
-//       });
-//       const data = await res.json();
-//       if (!res.ok) throw new Error(data.message);
-//       localStorage.setItem("token", data.token);
-//       localStorage.setItem("userInfo", JSON.stringify(data));
-//       onSignup(data);
-//     } catch (err) {
-//       setError(err.message || "Signup failed");
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   return (
-//     <form onSubmit={submit} className="space-y-6">
-//       {error && <ErrorAlert message={error} onClose={() => setError("")} />}
-
-//       <input
-//         placeholder="Full name"
-//         required
-//         className={`w-full px-4 py-3 ${currentTheme.inputBg} border rounded-lg`}
-//         onChange={(e) =>
-//           setFormData((p) => ({ ...p, name: e.target.value }))
-//         }
-//       />
-
-//       <input
-//         placeholder="Email"
-//         required
-//         className={`w-full px-4 py-3 ${currentTheme.inputBg} border rounded-lg`}
-//         onChange={(e) =>
-//           setFormData((p) => ({ ...p, email: e.target.value }))
-//         }
-//       />
-
-//       <input
-//         placeholder="Phone"
-//         required
-//         className={`w-full px-4 py-3 ${currentTheme.inputBg} border rounded-lg`}
-//         onChange={(e) =>
-//           setFormData((p) => ({ ...p, phoneNumber: e.target.value }))
-//         }
-//       />
-
-//       {/* BUSINESS TOGGLE */}
-//       <label className="flex items-center gap-2">
-//         <input
-//           type="checkbox"
-//           checked={formData.isBusiness}
-//           onChange={(e) =>
-//             setFormData((p) => ({
-//               ...p,
-//               isBusiness: e.target.checked,
-//               businessCategory: "",
-//             }))
-//           }
-//         />
-//         Business account
-//       </label>
-
-//       {/* BUSINESS CATEGORY */}
-//       {formData.isBusiness && (
-//         <select
-//           required
-//           value={formData.businessCategory}
-//           className={`w-full px-4 py-3 ${currentTheme.inputBg} border rounded-lg`}
-//           onChange={(e) =>
-//             setFormData((p) => ({
-//               ...p,
-//               businessCategory: e.target.value,
-//             }))
-//           }
-//         >
-//           <option value="">Select category</option>
-//           {BUSINESS_CATEGORIES.map((c) => (
-//             <option key={c.id} value={c.id}>
-//               {c.label}
-//             </option>
-//           ))}
-//         </select>
-//       )}
-
-//       <textarea
-//         placeholder={formData.isBusiness ? "About company" : "Bio"}
-//         required
-//         className={`w-full px-4 py-3 ${currentTheme.inputBg} border rounded-lg`}
-//         onChange={(e) =>
-//           setFormData((p) => ({ ...p, bio: e.target.value }))
-//         }
-//       />
-
-//       <input
-//         type="password"
-//         placeholder="Password"
-//         required
-//         className={`w-full px-4 py-3 ${currentTheme.inputBg} border rounded-lg`}
-//         onChange={(e) =>
-//           setFormData((p) => ({ ...p, password: e.target.value }))
-//         }
-//       />
-
-//       <input
-//         type="password"
-//         placeholder="Confirm password"
-//         required
-//         className={`w-full px-4 py-3 ${currentTheme.inputBg} border rounded-lg`}
-//         onChange={(e) =>
-//           setFormData((p) => ({ ...p, confirmPassword: e.target.value }))
-//         }
-//       />
-
-//       <button
-//         disabled={loading}
-//         className="w-full py-3 bg-blue-600 text-white rounded-lg"
-//       >
-//         {loading ? "Creating..." : "Create Account"}
-//       </button>
-//     </form>
-//   );
-// };
-
-// /* ---------------- MAIN AUTH PAGE ---------------- */
-// const AuthPage = ({ onAuthenticated }) => {
-//   const { currentTheme } = useTheme();
-//   const [isLogin, setIsLogin] = useState(true);
-//   const [googleData, setGoogleData] = useState(null);
-
-//   return googleData ? (
-//     <GoogleSignupComplete
-//       googleData={googleData}
-//       currentTheme={currentTheme}
-//       onBack={() => setGoogleData(null)}
-//       onSuccess={(data) => onAuthenticated(true, data)}
-//     />
-//   ) : (
-//     <div className="min-h-screen flex">
-//       <div className="w-full max-w-md mx-auto p-8">
-//         <div className="flex mb-6">
-//           <button onClick={() => setIsLogin(true)} className="flex-1">
-//             Sign In
-//           </button>
-//           <button onClick={() => setIsLogin(false)} className="flex-1">
-//             Sign Up
-//           </button>
-//         </div>
-
-//         {isLogin ? (
-//           <LoginForm
-//             currentTheme={currentTheme}
-//             onLogin={(data) => onAuthenticated(true, data)}
-//           />
-//         ) : (
-//           <SignupForm
-//             currentTheme={currentTheme}
-//             onSignup={(data) => onAuthenticated(true, data)}
-//           />
-//         )}
-//       </div>
-//     </div>
-//   );
-// };
-
-// export default AuthPage;
-/* eslint-disable no-unused-vars */
 import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -343,22 +20,12 @@ import { useTheme } from '../context/ThemeContext';
 import Logo from './Logo';
 import GoogleSignupComplete from './GoogleSignupComplete.jsx';
 import imageCompression from "browser-image-compression";
-// import { createClient } from "@supabase/supabase-js";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 import { supabase } from '../supabaseClient';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const MAX_BIO_LENGTH = 100; // Character limit for bio
 
-
-const MAX_AVATAR_SIZE = 1 * 1024 * 1024; // 1 MB
-
-// Example usage:
-const { data, error } = await supabase
-  .from('users')
-  .select('*');
-
-/* ✅ FIXED BUSINESS CATEGORIES */
+/* ✅ BUSINESS CATEGORIES */
 const BUSINESS_CATEGORIES = [
   { id: "restaurants", label: "Restaurant" },
   { id: "retail", label: "Retail Store" },
@@ -374,17 +41,6 @@ const BUSINESS_CATEGORIES = [
   { id: "freelancer", label: "Freelancer / Consultant" },
   { id: "other", label: "Other" },
 ];
-
-// Use the full `GoogleSignupComplete` component from its file (imported above)
-import.meta.env.VITE_SUPABASE_URL
-import.meta.env.VITE_SUPABASE_ANON_KEY
-
-// Mock Cloudinary upload
-const uploadToCloudinary = async (file) => {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve("https://via.placeholder.com/150"), 1000);
-  });
-};
 
 const GoogleLoginButton = ({ onSuccess, onError }) => {
   useEffect(() => {
@@ -430,14 +86,13 @@ const appFeatures = [
     icon: MessageCircle,
     color: "from-blue-500 to-cyan-500",
   },
- {
-  id: 2,
-  title: "End-to-End Encryption",
-  description: "Your messages are fully encrypted from sender to receiver, ensuring complete privacy and security",
-  icon: Shield,
-  color: "from-purple-500 to-pink-500",
-},
-
+  {
+    id: 2,
+    title: "End-to-End Encryption",
+    description: "Your messages are fully encrypted from sender to receiver, ensuring complete privacy and security",
+    icon: Shield,
+    color: "from-purple-500 to-pink-500",
+  },
   {
     id: 3,
     title: "Screenshot Detection",
@@ -589,7 +244,6 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
       setError("");
       setIsLoading(true);
       try {
-        // Support both authorization code and idToken
         const bodyPayload = googleResponse.code
           ? { code: googleResponse.code }
           : { idToken: googleResponse.credential };
@@ -600,13 +254,14 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify(bodyPayload),
-        });        const data = await res.json();
+        });
+        
+        const data = await res.json();
 
         if (!res.ok) {
           throw new Error(data.message || "Google login failed");
         }
 
-        // If backend indicates this is a new user, let parent show completion form
         if (data.isNewUser) {
           onGoogleNewUser?.({
             email: data.email || data.googleData?.email,
@@ -774,212 +429,157 @@ const SignupForm = ({ currentTheme, onSignup }) => {
     password: "",
     confirmPassword: "",
     bio: "",
-    avatar: "",
     picFile: null,
     isBusiness: false,
-  businessCategory: "",
+    businessCategory: "",
+    customBusinessCategory: "",
   });
+
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handlePicChange = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (file) {
-      setFormData((prev) => ({ ...prev, picFile: file }));
+      setFormData((p) => ({ ...p, picFile: file }));
     }
   };
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
 
-
-
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  setError("");
-
-  // ✅ Check passwords
-  if (formData.password !== formData.confirmPassword) {
-    setError("Passwords don't match!");
-    return;
-  }
-        const response = await fetch(`${API_BASE_URL}/api/user`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: formData.name,
-            email: formData.email,
-            phoneNumber: formData.phoneNumber,
-            password: formData.password,
-            bio: formData.bio,
-            avatar: avatarUrl,
-            isBusiness: formData.isBusiness,
-  businessCategory: formData.isBusiness ? formData.businessCategory : null,
-          }),
-        });
-
-  // ✅ Check required fields
-  if (!formData.name || !formData.email || !formData.password || !formData.phoneNumber || !formData.bio) {
-    setError("Please fill in all required fields");
-    return;
-  }
-
-  setIsLoading(true);
-
-  try {
-    let avatarUrl = null;
-
-    // ✅ Upload avatar if user selected a file
-    if (formData.picFile) {
-      // Compress image if needed
-      const compressedFile = await imageCompression(formData.picFile, {
-        maxSizeMB: 1,
-        maxWidthOrHeight: 1024,
-        useWebWorker: true,
-      });
-
-      const fileExt = compressedFile.name.split('.').pop();
-      const fileName = `avatars/${Date.now()}.${fileExt}`;
-
-      // Upload to Supabase
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, compressedFile, { cacheControl: '3600', upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(fileName);
-
-      avatarUrl = urlData.publicUrl;
+    /* ---------- VALIDATION ---------- */
+    if (
+      !formData.name ||
+      !formData.email ||
+      !formData.phoneNumber ||
+      !formData.password ||
+      !formData.bio
+    ) {
+      return setError("Please fill in all required fields");
     }
 
-    // ✅ Send registration data to backend
-    const response = await fetch(`${API_BASE_URL}/api/user`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: formData.name,
-        email: formData.email,
-        phoneNumber: formData.phoneNumber,
-        password: formData.password,
-        bio: formData.bio,
-        avatar: avatarUrl, // Send Supabase URL
-      }),
-    });
+    if (formData.password !== formData.confirmPassword) {
+      return setError("Passwords don't match");
+    }
 
-   const data = await response.json();
-if (!response.ok) throw new Error(data.message || "Registration failed");
+    if (formData.isBusiness && !formData.businessCategory) {
+      return setError("Please select a business category");
+    }
 
-// ✅ Normalize user object
-const normalizedUser = {
-  ...data,
-  createdAt: data.createdAt || new Date().toISOString(),
-};
+    if (
+      formData.isBusiness &&
+      formData.businessCategory === "other" &&
+      !formData.customBusinessCategory.trim()
+    ) {
+      return setError("Please specify your business category");
+    }
 
-// ✅ Save locally
-localStorage.setItem("userInfo", JSON.stringify(normalizedUser));
-localStorage.setItem("chasmos_user_data", JSON.stringify(normalizedUser));
-localStorage.setItem("token", data.token);
+    setIsLoading(true);
 
-onSignup?.(normalizedUser);
-  } catch (err) {
-    console.error("Signup error:", err);
-    setError(err.message || "Failed to create account. Please try again.");
-  } finally {
-    setIsLoading(false);
-  }
-};
+    try {
+      /* ---------- FINAL BUSINESS CATEGORY LABEL ---------- */
+      let finalBusinessCategory = null;
 
+      if (formData.isBusiness) {
+        if (formData.businessCategory === "other") {
+          finalBusinessCategory = formData.customBusinessCategory.trim();
+        } else {
+          const selected = BUSINESS_CATEGORIES.find(
+            (c) => c.id === formData.businessCategory
+          );
+          finalBusinessCategory = selected?.label || null;
+        }
+      }
 
-  // const handleSubmit = useCallback(
-  //   async (e) => {
-  //     e.preventDefault();
-  //     setError("");
+      /* ---------- AVATAR UPLOAD ---------- */
+      let avatarUrl = null;
 
-  //     if (formData.password !== formData.confirmPassword) {
-  //       setError("Passwords don't match!");
-  //       return;
-  //     }
-  //     if (!formData.name || !formData.email || !formData.password || !formData.phoneNumber || !formData.bio) {
-  //       setError("Please fill in all required fields");
-  //       return;
-  //     }
+      if (formData.picFile) {
+        const compressed = await imageCompression(formData.picFile, {
+          maxSizeMB: 1,
+          maxWidthOrHeight: 1024,
+          useWebWorker: true,
+        });
 
-  //     setIsLoading(true);
+        const ext = compressed.name.split(".").pop();
+        const fileName = `avatars/${Date.now()}.${ext}`;
 
-  //     try {
-  //       let avatarUrl = formData.avatar;
-  //       if (formData.picFile) {
-  //         avatarUrl = await uploadToCloudinary(formData.picFile);
-  //       }
+        const { error: uploadError } = await supabase.storage
+          .from("avatars")
+          .upload(fileName, compressed, { upsert: true });
 
-  //       const response = await fetch(`${API_BASE_URL}/api/user`, {
-  //         method: "POST",
-  //         headers: {
-  //           "Content-Type": "application/json",
-  //         },
-  //         body: JSON.stringify({
-  //           name: formData.name,
-  //           email: formData.email,
-  //           phoneNumber: formData.phoneNumber,
-  //           password: formData.password,
-  //           bio: formData.bio,
-  //           avatar: avatarUrl,
-  //         }),
-  //       });
+        if (uploadError) throw uploadError;
 
-  //       const data = await response.json();
+        const { data } = supabase.storage
+          .from("avatars")
+          .getPublicUrl(fileName);
 
-  //       if (!response.ok) {
-  //         throw new Error(data.message || "Registration failed");
-  //       }
+        avatarUrl = data.publicUrl;
+      }
 
-  //       localStorage.setItem("userInfo", JSON.stringify(data));
-  //       localStorage.setItem("chasmos_user_data", JSON.stringify(data));
-  //       localStorage.setItem("token", data.token);
-  //       onSignup?.(data);
-  //     } catch (err) {
-  //       setError(err.message || "Failed to create account. Please try again.");
-  //     } finally {
-  //       setIsLoading(false);
-  //     }
-  //   },
-  //   [formData, onSignup]
-  // );
+      /* ---------- API REQUEST ---------- */
+      const response = await fetch(`${API_BASE_URL}/api/user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          phoneNumber: formData.phoneNumber,
+          password: formData.password,
+          bio: formData.bio,
+          avatar: avatarUrl,
+          isBusiness: formData.isBusiness,
+          businessCategory: finalBusinessCategory,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Signup failed");
+
+      /* ---------- SAVE ---------- */
+      localStorage.setItem("userInfo", JSON.stringify(data));
+      localStorage.setItem("chasmos_user_data", JSON.stringify(data));
+      localStorage.setItem("token", data.token);
+
+      onSignup?.(data);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Failed to create account");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <motion.form
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
       onSubmit={handleSubmit}
       className="space-y-6"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
     >
       <AnimatePresence>
         {error && <ErrorAlert message={error} onClose={() => setError("")} />}
       </AnimatePresence>
 
+      {/* FULL NAME */}
       <div className="space-y-2">
         <label className={`block text-sm font-medium ${currentTheme.text}`}>
           Full Name
         </label>
         <input
-          type="text"
           placeholder="Enter your full name"
           value={formData.name}
-          onChange={(e) =>
-            setFormData((prev) => ({ ...prev, name: e.target.value }))
-          }
-          className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${currentTheme.text}`}
+          onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))}
+          className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 ${currentTheme.text}`}
           required
         />
       </div>
 
+      {/* EMAIL */}
       <div className="space-y-2">
         <label className={`block text-sm font-medium ${currentTheme.text}`}>
           Email Address
@@ -992,15 +592,14 @@ onSignup?.(normalizedUser);
             type="email"
             placeholder="Enter your email"
             value={formData.email}
-            onChange={(e) =>
-              setFormData((prev) => ({ ...prev, email: e.target.value }))
-            }
-            className={`w-full pl-10 pr-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${currentTheme.text}`}
+            onChange={(e) => setFormData(p => ({ ...p, email: e.target.value }))}
+            className={`w-full pl-10 pr-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 ${currentTheme.text}`}
             required
           />
         </div>
       </div>
 
+      {/* PHONE */}
       <div className="space-y-2">
         <label className={`block text-sm font-medium ${currentTheme.text}`}>
           Phone Number
@@ -1009,71 +608,109 @@ onSignup?.(normalizedUser);
           type="tel"
           placeholder="Enter your phone number"
           value={formData.phoneNumber}
-          onChange={(e) =>
-            setFormData((prev) => ({ ...prev, phoneNumber: e.target.value }))
-          }
-          className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${currentTheme.text}`}
+          onChange={(e) => setFormData(p => ({ ...p, phoneNumber: e.target.value }))}
+          className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 ${currentTheme.text}`}
           required
         />
       </div>
 
-      {/* BUSINESS ACCOUNT TOGGLE */}
-<label className={`flex items-center gap-2 text-sm ${currentTheme.text}`}>
-  <input
-    type="checkbox"
-    checked={formData.isBusiness}
-    onChange={(e) =>
-      setFormData((prev) => ({
-        ...prev,
-        isBusiness: e.target.checked,
-        businessCategory: "",
-      }))
-    }
-  />
-  Business Account
-</label>
+      {/* BUSINESS TOGGLE */}
+      <label className={`flex items-center gap-2 text-sm ${currentTheme.text}`}>
+        <input
+          type="checkbox"
+          checked={formData.isBusiness}
+          onChange={(e) =>
+            setFormData(p => ({
+              ...p,
+              isBusiness: e.target.checked,
+              businessCategory: "",
+              customBusinessCategory: "",
+            }))
+          }
+          className="w-4 h-4"
+        />
+        Business Account
+      </label>
 
-{formData.isBusiness && (
-  <div className="space-y-2">
-    <label className={`block text-sm font-medium ${currentTheme.text}`}>
-      Business Category
-    </label>
-    <select
-      required
-      value={formData.businessCategory}
-      onChange={(e) =>
-        setFormData((prev) => ({
-          ...prev,
-          businessCategory: e.target.value,
-        }))
-      }
-      className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg ${currentTheme.textSecondary}`}
-    >
-      <option value="">Select category</option>
-      {BUSINESS_CATEGORIES.map((cat) => (
-        <option key={cat.id} value={cat.id}>
-          {cat.label}
-        </option>
-      ))}
-    </select>
-  </div>
-)}
+      {/* BUSINESS CATEGORY */}
+      {formData.isBusiness && (
+        <>
+          <div className="space-y-2">
+            <label className={`block text-sm font-medium ${currentTheme.text}`}>
+              Business Category
+            </label>
+            <select
+              value={formData.businessCategory}
+              onChange={(e) =>
+                setFormData(p => ({
+                  ...p,
+                  businessCategory: e.target.value,
+                  customBusinessCategory: "",
+                }))
+              }
+              className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 ${currentTheme.text}`}
+              required
+            >
+              <option value="">Select category</option>
+              {BUSINESS_CATEGORIES.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
+          {formData.businessCategory === "other" && (
+            <div className="space-y-2">
+              <label className={`block text-sm font-medium ${currentTheme.text}`}>
+                Specify Business Category
+              </label>
+              <textarea
+                placeholder="Enter your business category"
+                value={formData.customBusinessCategory}
+                onChange={(e) =>
+                  setFormData(p => ({ ...p, customBusinessCategory: e.target.value }))
+                }
+                className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 ${currentTheme.text} resize-none`}
+                rows="2"
+                maxLength={50}
+                required
+              />
+            </div>
+          )}
+        </>
+      )}
 
+      {/* BIO with character limit */}
       <div className="space-y-2">
         <label className={`block text-sm font-medium ${currentTheme.text}`}>
-          {formData.isBusiness ? "About company" : "Bio"}
+          {formData.isBusiness ? "About Company" : "Bio"}
+          <span className={`ml-2 text-xs ${currentTheme.textSecondary}`}>
+            ({formData.bio.length}/{MAX_BIO_LENGTH})
+          </span>
         </label>
         <textarea
-       placeholder={formData.isBusiness ? "About company" : "Bio"}
-       required
-        className={`w-full px-4 py-3 ${currentTheme.inputBg} border rounded-lg ${currentTheme.textSecondary}`}
-         onChange={(e) =>
-           setFormData((p) => ({ ...p, bio: e.target.value }))
-         }
-       />
+          placeholder={formData.isBusiness ? "Brief description of your company" : "Tell us about yourself"}
+          value={formData.bio}
+          onChange={(e) => {
+            const text = e.target.value;
+            if (text.length <= MAX_BIO_LENGTH) {
+              setFormData(p => ({ ...p, bio: text }));
+            }
+          }}
+          className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 ${currentTheme.text} resize-none`}
+          rows="3"
+          maxLength={MAX_BIO_LENGTH}
+          required
+        />
+        {formData.bio.length >= MAX_BIO_LENGTH && (
+          <p className="text-xs text-orange-500">
+            Maximum character limit reached
+          </p>
+        )}
       </div>
 
+      {/* PASSWORD */}
       <div className="space-y-2">
         <label className={`block text-sm font-medium ${currentTheme.text}`}>
           Password
@@ -1086,10 +723,8 @@ onSignup?.(normalizedUser);
             type={showPassword ? "text" : "password"}
             placeholder="Create a strong password"
             value={formData.password}
-            onChange={(e) =>
-              setFormData((prev) => ({ ...prev, password: e.target.value }))
-            }
-            className={`w-full pl-10 pr-12 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${currentTheme.text}`}
+            onChange={(e) => setFormData(p => ({ ...p, password: e.target.value }))}
+            className={`w-full pl-10 pr-12 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 ${currentTheme.text}`}
             required
           />
           <button
@@ -1102,6 +737,7 @@ onSignup?.(normalizedUser);
         </div>
       </div>
 
+      {/* CONFIRM PASSWORD */}
       <div className="space-y-2">
         <label className={`block text-sm font-medium ${currentTheme.text}`}>
           Confirm Password
@@ -1115,12 +751,9 @@ onSignup?.(normalizedUser);
             placeholder="Confirm your password"
             value={formData.confirmPassword}
             onChange={(e) =>
-              setFormData((prev) => ({
-                ...prev,
-                confirmPassword: e.target.value,
-              }))
+              setFormData(p => ({ ...p, confirmPassword: e.target.value }))
             }
-            className={`w-full pl-10 pr-12 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${currentTheme.text}`}
+            className={`w-full pl-10 pr-12 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg focus:ring-2 focus:ring-blue-500 ${currentTheme.text}`}
             required
           />
           <button
@@ -1138,6 +771,7 @@ onSignup?.(normalizedUser);
           )}
       </div>
 
+      {/* AVATAR */}
       <div className="space-y-2">
         <label className={`block text-sm font-medium ${currentTheme.text}`}>
           Profile Picture <span className="text-gray-400">(Optional)</span>
@@ -1146,7 +780,7 @@ onSignup?.(normalizedUser);
           type="file"
           accept="image/*"
           onChange={handlePicChange}
-          className={`w-full px-4 py-2 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg`}
+          className={`w-full px-4 py-2 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg ${currentTheme.text}`}
         />
       </div>
 
@@ -1195,14 +829,12 @@ const AuthPage = ({ onAuthenticated }) => {
       }
 
       if (data.isNewUser) {
-        // For new users, show the completion form
         setGoogleData({
           email: data.email,
           name: data.name,
           avatar: data.picture
         });
       } else {
-        // For existing users, proceed with login
         localStorage.setItem('userInfo', JSON.stringify(data));
         localStorage.setItem('chasmos_user_data', JSON.stringify(data));
         localStorage.setItem('token', data.token);
