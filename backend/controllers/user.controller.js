@@ -643,3 +643,87 @@ export const getBusinessUsers = async (req, res) => {
   }
 };
 
+  // POST /api/user/changes
+  // Request body: { keys: ["e:email@example.com", "p:1234567890", ...] }
+  // Responds 204 when no changes, or 200 with { added: [...], removed: [...] }
+  export const getUserChanges = asyncHandler(async (req, res) => {
+    const clientKeys = Array.isArray(req.body?.keys) ? req.body.keys.map(String) : [];
+
+    // helpers
+    const normalizePhone = (p) => {
+      if (!p) return "";
+      let digits = String(p).replace(/\D/g, "");
+      if (digits.length > 10) digits = digits.slice(-10);
+      return digits;
+    };
+    const normalizeName = (n) => {
+      if (!n) return "";
+      return String(n).trim().toLowerCase().replace(/\s+/g, " ");
+    };
+    const stableKey = (c) => {
+      if (!c) return "";
+      const email = c.email ? String(c.email).toLowerCase().trim() : "";
+      if (email) return `e:${email}`;
+      const id = c.id || c._id || "";
+      if (id) return `i:${String(id)}`;
+      const phone = normalizePhone(c.phone || c.phoneNumber || c._rawPhone || c.mobile || "");
+      if (phone) return `p:${phone}`;
+      const name = normalizeName(c.name || c.displayName || c.business || "");
+      if (name) return `n:${name}`;
+      return "";
+    };
+
+    // build server-side map of keys -> item
+    const serverMap = new Map();
+
+    // fetch normal users (exclude requester)
+    const users = await User.find({ _id: { $ne: req.user._id } }).select('-password -__v');
+    users.forEach((u) => {
+      const obj = (typeof u.toObject === 'function') ? u.toObject() : u;
+      obj.type = obj.isBusiness ? 'business' : 'user';
+      const k = stableKey(obj);
+      if (k) serverMap.set(k, obj);
+    });
+
+    // also fetch business users explicitly (in case isBusiness flagged differently)
+    const biz = await User.find({ isBusiness: true }).select('-password -__v');
+    biz.forEach((b) => {
+      const obj = (typeof b.toObject === 'function') ? b.toObject() : b;
+      obj.type = 'business';
+      const k = stableKey(obj);
+      if (k) serverMap.set(k, obj);
+    });
+
+    // compute sets
+    const serverKeys = new Set(serverMap.keys());
+    const clientKeySet = new Set((clientKeys || []).filter(Boolean));
+
+    // additions: keys present on server but not on client
+    const addedKeys = Array.from(serverKeys).filter((k) => !clientKeySet.has(k));
+    // removals: keys present on client but not on server
+    const removedKeys = Array.from(clientKeySet).filter((k) => !serverKeys.has(k));
+
+    if (addedKeys.length === 0 && removedKeys.length === 0) {
+      // Per request: if nothing changed, return nothing (204 No Content)
+      return res.status(204).send();
+    }
+
+    const added = addedKeys.map((k) => {
+      const item = serverMap.get(k);
+      // sanitize and return minimal fields the frontend expects
+      return {
+        id: item._id || item.id || stableKey(item),
+        name: item.name || item.displayName || item.business || 'Unknown',
+        email: item.email,
+        avatar: item.avatar || null,
+        phone: item.phoneNumber || item.phone || undefined,
+        type: item.type || (item.isBusiness ? 'business' : 'user'),
+        businessCategory: item.businessCategory || undefined,
+        title: item.title || undefined,
+        business: item.businessName || item.business || undefined,
+      };
+    });
+
+    return res.status(200).json({ added, removed: removedKeys });
+  });
+

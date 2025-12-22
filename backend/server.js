@@ -1345,7 +1345,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
           participantIds.forEach(pid => {
             if (pid === String(userId)) return;
             try {
-              console.log('[SOCKET OUT] emitting message-read to personal room', pid, { chatId, reader: userId, updatedIds });
+              //console.log('[SOCKET OUT] emitting message-read to personal room', pid, { chatId, reader: userId, updatedIds });
               io.to(pid).emit('message-read', { chatId, reader: userId, updatedIds });
             } catch (e) { console.error('Error emitting message-read to personal room', e); }
           });
@@ -1373,7 +1373,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
 
         // notify participants so UI can show blue ticks where appropriate (for 1:1, this will notify the other user)
         try {
-          console.log('[SOCKET OUT] emitting message-read to chat room (1:1)', chatId, { reader: userId, updatedIds });
+          //console.log('[SOCKET OUT] emitting message-read to chat room (1:1)', chatId, { reader: userId, updatedIds });
           socket.to(chatId).emit('message-read', { chatId, reader: userId, updatedIds });
         } catch (e) { console.error('emit chat room message-read error (1:1)', e); }
         try {
@@ -1381,7 +1381,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
           participantIds.forEach(pid => {
             if (pid === String(userId)) return;
             try {
-              console.log('[SOCKET OUT] emitting message-read to personal room (1:1)', pid, { chatId, reader: userId, updatedIds });
+              //console.log('[SOCKET OUT] emitting message-read to personal room (1:1)', pid, { chatId, reader: userId, updatedIds });
               io.to(pid).emit('message-read', { chatId, reader: userId, updatedIds });
             } catch (e) { console.error('Error emitting message-read to personal room (1:1)', e); }
           });

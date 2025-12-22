@@ -203,7 +203,14 @@ const avatarFallbackText =
             </div>
 
         <div>
-              <h2 className={`font-semibold ${effectiveTheme.text}`}>{selectedContact.name}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className={`font-semibold ${effectiveTheme.text}`}>{selectedContact.name}</h2>
+                {selectedContact?.unreadCount > 0 && (
+                  <div className="ml-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-500 text-white text-xs font-semibold">
+                    {selectedContact.unreadCount > 99 ? '99+' : selectedContact.unreadCount}
+                  </div>
+                )}
+              </div>
 
 
              <p className={`text-sm ${effectiveTheme.textSecondary}`}>
@@ -2658,6 +2665,58 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
     }
   }, [onlineUsers, currentUserId]);
 
+  // Guarded recompute: when `recentChats` is first populated (or updated),
+  // ensure presence flags reflect current `onlineUsers`. Only write back
+  // when computed presence differs to avoid update loops.
+  useEffect(() => {
+    try {
+      if (!Array.isArray(recentChats) || recentChats.length === 0) return;
+
+      const recomputed = recentChats.map(c => {
+        const copy = { ...c };
+        const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat || (Array.isArray(copy.users) && copy.users.length > 0) || (Array.isArray(copy.participants) && copy.participants.length > 0);
+        if (isGroup) {
+          const members = copy.users || copy.participants || [];
+          const count = (members || []).filter(m => {
+            const uid = m && (m._id || m.id || m);
+            if (!uid) return false;
+            if (String(uid) === String(currentUserId)) return false;
+            return onlineUsers && typeof onlineUsers.has === 'function' ? onlineUsers.has(String(uid)) : false;
+          }).length;
+          copy.__computedGroupOnlineCount = count;
+          copy.isOnline = count > 0;
+        } else {
+          const candidateIds = [];
+          if (copy.userId) candidateIds.push(String(copy.userId));
+          if (copy.user_id) candidateIds.push(String(copy.user_id));
+          if (copy._id) candidateIds.push(String(copy._id));
+          if (copy.id) candidateIds.push(String(copy.id));
+          if (copy.participantId) candidateIds.push(String(copy.participantId));
+          if (copy.otherUser) {
+            if (copy.otherUser.id) candidateIds.push(String(copy.otherUser.id));
+            if (copy.otherUser._id) candidateIds.push(String(copy.otherUser._id));
+          }
+          if (Array.isArray(copy.participants) && copy.participants.length) {
+            const p = copy.participants[0];
+            if (p && (p._id || p.id)) candidateIds.push(String(p._id || p.id));
+          }
+          const uniq = Array.from(new Set(candidateIds.filter(Boolean)));
+          const foundOnline = uniq.some(id => onlineUsers && typeof onlineUsers.has === 'function' ? onlineUsers.has(String(id)) : false);
+          copy.isOnline = foundOnline || Boolean(copy.isOnline);
+        }
+        return copy;
+      });
+
+      const oldCompact = recentChats.map(c => ({ id: String(c.chatId || c.id || c._id || ''), isOnline: Boolean(c.isOnline), count: Number(c.__computedGroupOnlineCount || 0) }));
+      const newCompact = recomputed.map(c => ({ id: String(c.chatId || c.id || c._id || ''), isOnline: Boolean(c.isOnline), count: Number(c.__computedGroupOnlineCount || 0) }));
+      if (JSON.stringify(oldCompact) !== JSON.stringify(newCompact)) {
+        setRecentChats(recomputed);
+      }
+    } catch (e) {
+      // non-fatal
+    }
+  }, [recentChats, onlineUsers, currentUserId]);
+
   // When selected contact changes, refresh block/archive status for that chat/user
   useEffect(() => {
     let mounted = true;
@@ -2795,7 +2854,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             sender: m.sender,
             // prefer backend-provided `timestamp` (normalized to scheduledFor when applicable)
             timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
-            status: sent.status || (sent.isRead ? 'read' : 'sent'),
+            status: m.status || (m.isRead ? 'read' : 'sent'),
             attachments: Array.isArray(m.attachments) ? m.attachments : [],
             isSystemMessage: m.type === 'system',
             isForwarded: m.isForwarded || false,
@@ -3717,7 +3776,8 @@ const refreshRecentChats = useCallback(async () => {
           avatar: otherUser?.avatar || otherUser?.pic || null,
           lastMessage: rawLast || "",
           timestamp: chat.timestamp || chat.updatedAt,
-          isOnline: otherUser?.isOnline || false,
+          // Compute online status immediately using current onlineUsers set
+          isOnline: otherId ? (onlineUsers && typeof onlineUsers.has === 'function' ? onlineUsers.has(String(otherId)) : Boolean(otherUser?.isOnline)) : false,
           unreadCount: typeof chat.unreadCount === "number" ? chat.unreadCount : (chat.unreadCount?.[loggedInUserId] || 0),
           hasAttachment,
           attachmentFileName,
@@ -3769,7 +3829,7 @@ const refreshRecentChats = useCallback(async () => {
   } catch (err) {
     setError(err.message);
   }
-}, [API_BASE_URL]);
+}, [API_BASE_URL, onlineUsers]);
 
   // Listen for successful google sync events (dispatched from the oauth popup message handler)
   React.useEffect(() => {
@@ -3817,12 +3877,12 @@ useEffect(() => {
     chatsFetched = true;
     maybeHideLoader();
   });
-
+  
   return () => {
     mounted = false;
     clearTimeout(minLoadingTimer);
   };
-}, [refreshRecentChats]);
+}, []);
 
   // Handle responsive design
   useEffect(() => {
@@ -4699,6 +4759,89 @@ const handleSendMessageFromInput = useCallback(
       try {
         const s = new Set((arr || []).map(a => String(a)));
         setOnlineUsers(s);
+
+        // Immediately update presence flags on recent chats and contacts
+        try {
+          setRecentChats(prev => {
+            if (!prev) return prev;
+            return prev.map(c => {
+              const copy = { ...c };
+              const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
+              if (isGroup) {
+                const members = copy.users || copy.participants || [];
+                const count = (members || []).filter(m => {
+                  const uid = m && (m._id || m.id || m);
+                  if (!uid) return false;
+                  if (String(uid) === String(currentUserId)) return false;
+                  return s.has(String(uid));
+                }).length;
+                copy.__computedGroupOnlineCount = count;
+                copy.isOnline = count > 0;
+              } else {
+                // Support multiple shapes: userId, otherUser, participants, participants[0]
+                const candidateIds = [];
+                if (copy.userId) candidateIds.push(String(copy.userId));
+                if (copy.user_id) candidateIds.push(String(copy.user_id));
+                if (copy._id) candidateIds.push(String(copy._id));
+                if (copy.id) candidateIds.push(String(copy.id));
+                if (copy.participantId) candidateIds.push(String(copy.participantId));
+                if (copy.otherUser) {
+                  if (copy.otherUser.id) candidateIds.push(String(copy.otherUser.id));
+                  if (copy.otherUser._id) candidateIds.push(String(copy.otherUser._id));
+                }
+                if (Array.isArray(copy.participants) && copy.participants.length) {
+                  const p = copy.participants[0];
+                  if (p && (p._id || p.id)) candidateIds.push(String(p._id || p.id));
+                }
+                // Deduplicate
+                const uniq = Array.from(new Set(candidateIds.filter(Boolean)));
+                const foundOnline = uniq.some(id => s.has(String(id)));
+                copy.isOnline = foundOnline || Boolean(copy.isOnline);
+              }
+              return copy;
+            });
+          });
+
+          setContacts(prev => {
+            if (!prev) return prev;
+            return prev.map(c => {
+              const copy = { ...c };
+              const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
+              if (isGroup) {
+                const members = copy.users || copy.participants || [];
+                const count = (members || []).filter(m => {
+                  const uid = m && (m._id || m.id || m);
+                  if (!uid) return false;
+                  if (String(uid) === String(currentUserId)) return false;
+                  return s.has(String(uid));
+                }).length;
+                copy.__computedGroupOnlineCount = count;
+                copy.isOnline = count > 0;
+              } else {
+                const candidateIds = [];
+                if (copy.userId) candidateIds.push(String(copy.userId));
+                if (copy.user_id) candidateIds.push(String(copy.user_id));
+                if (copy._id) candidateIds.push(String(copy._id));
+                if (copy.id) candidateIds.push(String(copy.id));
+                if (copy.participantId) candidateIds.push(String(copy.participantId));
+                if (copy.otherUser) {
+                  if (copy.otherUser.id) candidateIds.push(String(copy.otherUser.id));
+                  if (copy.otherUser._id) candidateIds.push(String(copy.otherUser._id));
+                }
+                if (Array.isArray(copy.participants) && copy.participants.length) {
+                  const p = copy.participants[0];
+                  if (p && (p._id || p.id)) candidateIds.push(String(p._id || p.id));
+                }
+                const uniq = Array.from(new Set(candidateIds.filter(Boolean)));
+                const foundOnline = uniq.some(id => s.has(String(id)));
+                copy.isOnline = foundOnline || Boolean(copy.isOnline);
+              }
+              return copy;
+            });
+          });
+        } catch (e) {
+          // non-fatal
+        }
       } catch (e) {}
     });
 
@@ -5337,6 +5480,93 @@ const handleSendMessageFromInput = useCallback(
     };
   }, [API_BASE_URL, selectedContact]);
 
+  // Ensure presence flags on recent chats/contacts are recalculated whenever
+  // the `onlineUsers` set or per-chat counts change. This handles the case
+  // where the initial `online users` socket event arrives before the
+  // recent chats REST response completes.
+  useEffect(() => {
+    try {
+      if (!onlineUsers) return;
+
+      setRecentChats(prev => {
+        if (!prev) return prev;
+        return prev.map(c => {
+          const copy = { ...c };
+          const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat || (Array.isArray(copy.users) && copy.users.length > 0) || (Array.isArray(copy.participants) && copy.participants.length > 0);
+          if (isGroup) {
+            const members = copy.users || copy.participants || [];
+            const count = (members || []).filter(m => {
+              const uid = m && (m._id || m.id || m);
+              if (!uid) return false;
+              if (String(uid) === String(currentUserId)) return false;
+              return onlineUsers.has(String(uid));
+            }).length;
+            copy.__computedGroupOnlineCount = count;
+            copy.isOnline = count > 0;
+          } else {
+            const candidateIds = [];
+            if (copy.userId) candidateIds.push(String(copy.userId));
+            if (copy.user_id) candidateIds.push(String(copy.user_id));
+            if (copy._id) candidateIds.push(String(copy._id));
+            if (copy.id) candidateIds.push(String(copy.id));
+            if (copy.participantId) candidateIds.push(String(copy.participantId));
+            if (copy.otherUser) {
+              if (copy.otherUser.id) candidateIds.push(String(copy.otherUser.id));
+              if (copy.otherUser._id) candidateIds.push(String(copy.otherUser._id));
+            }
+            if (Array.isArray(copy.participants) && copy.participants.length) {
+              const p = copy.participants[0];
+              if (p && (p._id || p.id)) candidateIds.push(String(p._id || p.id));
+            }
+            const uniq = Array.from(new Set(candidateIds.filter(Boolean)));
+            const foundOnline = uniq.some(id => onlineUsers.has(String(id)));
+            copy.isOnline = foundOnline || Boolean(copy.isOnline);
+          }
+          return copy;
+        });
+      });
+
+      setContacts(prev => {
+        if (!prev) return prev;
+        return prev.map(c => {
+          const copy = { ...c };
+          const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat || (Array.isArray(copy.users) && copy.users.length > 0) || (Array.isArray(copy.participants) && copy.participants.length > 0);
+          if (isGroup) {
+            const members = copy.users || copy.participants || [];
+            const count = (members || []).filter(m => {
+              const uid = m && (m._id || m.id || m);
+              if (!uid) return false;
+              if (String(uid) === String(currentUserId)) return false;
+              return onlineUsers.has(String(uid));
+            }).length;
+            copy.__computedGroupOnlineCount = count;
+            copy.isOnline = count > 0;
+          } else {
+            const candidateIds = [];
+            if (copy.userId) candidateIds.push(String(copy.userId));
+            if (copy.user_id) candidateIds.push(String(copy.user_id));
+            if (copy._id) candidateIds.push(String(copy._id));
+            if (copy.id) candidateIds.push(String(copy.id));
+            if (copy.participantId) candidateIds.push(String(copy.participantId));
+            if (copy.otherUser) {
+              if (copy.otherUser.id) candidateIds.push(String(copy.otherUser.id));
+              if (copy.otherUser._id) candidateIds.push(String(copy.otherUser._id));
+            }
+            if (Array.isArray(copy.participants) && copy.participants.length) {
+              const p = copy.participants[0];
+              if (p && (p._id || p.id)) candidateIds.push(String(p._id || p.id));
+            }
+            const uniq = Array.from(new Set(candidateIds.filter(Boolean)));
+            const foundOnline = uniq.some(id => onlineUsers.has(String(id)));
+            copy.isOnline = foundOnline || Boolean(copy.isOnline);
+          }
+          return copy;
+        });
+      });
+    } catch (e) {
+      // non-fatal
+    }
+  }, [onlineUsers, currentUserId]);
   // When user opens a conversation, emit message-read and mark local messages read
   useEffect(() => {
     try {

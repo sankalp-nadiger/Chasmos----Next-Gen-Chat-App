@@ -25,11 +25,6 @@ import imageCompression from "browser-image-compression";
 // import { createClient } from "@supabase/supabase-js";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 import { supabase } from '../supabaseClient';
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-
 const MAX_AVATAR_SIZE = 1 * 1024 * 1024; // 1 MB
 
 // Example usage:
@@ -57,15 +52,6 @@ const BUSINESS_CATEGORIES = [
 // Use the full `GoogleSignupComplete` component from its file (imported above)
 import.meta.env.VITE_SUPABASE_URL
 import.meta.env.VITE_SUPABASE_ANON_KEY
-
-// Mock Cloudinary upload
-const uploadToCloudinary = async (file) => {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve("https://via.placeholder.com/150"), 1000);
-  });
-};
-
-// Use shared GoogleLoginButton component (supports auth-code flow)
 
 // Features data
 const appFeatures = [

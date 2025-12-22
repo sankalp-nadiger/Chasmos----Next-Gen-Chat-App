@@ -110,30 +110,46 @@ export const fetchChats = asyncHandler(async (req, res) => {
       select: "name avatar email",
     });
 
-    // Normalize lastMessage timestamp so clients can rely on `timestamp` field.
-    // If a message was scheduled and has been sent (`scheduledSent === true`),
-    // prefer `scheduledFor` as the display timestamp; otherwise use `createdAt`.
-    const normalized = (Array.isArray(populatedResults) ? populatedResults : []).map((chat) => {
-      if (chat && chat.lastMessage) {
-        try {
-          const lm = chat.lastMessage;
-          const ts = (lm.isScheduled && lm.scheduledSent && lm.scheduledFor) ? lm.scheduledFor : (lm.createdAt || lm.updatedAt || null);
-          // attach a consistent `timestamp` property on lastMessage (lean objects may already have it)
-          if (lm.toObject && typeof lm.toObject === 'function') {
-            const obj = lm.toObject();
-            obj.timestamp = ts;
-            chat.lastMessage = obj;
-          } else {
-            chat.lastMessage.timestamp = ts;
-          }
-        } catch (e) {
-          // ignore and continue
+    // For each chat compute unreadCount for the current user (exclude system messages)
+    const resultsWithUnread = [];
+    for (const chat of (Array.isArray(populatedResults) ? populatedResults : [])) {
+      try {
+        // Normalize lastMessage timestamp like before
+        if (chat && chat.lastMessage) {
+          try {
+            const lm = chat.lastMessage;
+            const ts = (lm.isScheduled && lm.scheduledSent && lm.scheduledFor) ? lm.scheduledFor : (lm.createdAt || lm.updatedAt || null);
+            if (lm.toObject && typeof lm.toObject === 'function') {
+              const obj = lm.toObject();
+              obj.timestamp = ts;
+              chat.lastMessage = obj;
+            } else {
+              chat.lastMessage.timestamp = ts;
+            }
+          } catch (e) {}
         }
-      }
-      return chat;
-    });
 
-    res.status(200).send(normalized);
+        // Count unread messages for this user (exclude messages of type 'system' and deleted messages)
+        const unreadCount = await Message.countDocuments({
+          chat: chat._id,
+          isDeleted: { $ne: true },
+          type: { $ne: 'system' },
+          readBy: { $not: { $elemMatch: { $eq: req.user._id } } },
+        });
+
+        // attach unreadCount to the chat object (lean/POJO safe)
+        const chatObj = (chat && chat.toObject && typeof chat.toObject === 'function') ? chat.toObject() : { ...chat };
+        chatObj.unreadCount = unreadCount || 0;
+        resultsWithUnread.push(chatObj);
+      } catch (e) {
+        // on error, push chat without unread count
+        const chatObj = (chat && chat.toObject && typeof chat.toObject === 'function') ? chat.toObject() : { ...chat };
+        chatObj.unreadCount = 0;
+        resultsWithUnread.push(chatObj);
+      }
+    }
+
+    res.status(200).send(resultsWithUnread);
   } catch (error) {
     res.status(400);
     throw new Error(error.message);
@@ -516,13 +532,27 @@ export const getRecentChats = async (req, res) => {
       .populate({ path: 'lastMessage.sender', select: '_id email name' })
       .lean();
 
-    const formattedChats = chats.map((chat) => {
+    const formattedChats = [];
+    // Compute unread counts for each chat (exclude system messages)
+    for (const chat of chats) {
+      let unread = 0;
+      try {
+        unread = await Message.countDocuments({
+          chat: chat._id,
+          isDeleted: { $ne: true },
+          type: { $ne: 'system' },
+          readBy: { $not: { $elemMatch: { $eq: userId } } },
+        });
+      } catch (e) {
+        unread = 0;
+      }
+
+      // preserve existing mapping logic but inject unread
        const otherUser =
         (Array.isArray(chat.participants) &&
           chat.participants.find((p) => String(p._id) !== String(userId))) ||
         (Array.isArray(chat.participants) ? chat.participants[0] : null);
 
-      let unread = 0;
       if (typeof chat.unreadCount === "number") {
         unread = chat.unreadCount;
       } else if (chat.unreadCount && typeof chat.unreadCount === "object") {
@@ -593,8 +623,8 @@ export const getRecentChats = async (req, res) => {
         };
       }
 
-      return chatData;
-    });
+      formattedChats.push(chatData);
+    }
     res.status(200).json(formattedChats);
   } catch (err) {
     console.error(err);
