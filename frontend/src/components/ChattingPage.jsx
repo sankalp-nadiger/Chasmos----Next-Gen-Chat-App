@@ -397,7 +397,7 @@ const avatarFallbackText =
 
 // MessageBubble component definition
 const MessageBubble = React.memo(
-  ({ message, isPinned, onPinToggle, onDeleteMessage, onForwardMessage, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange, onPollVote, onPollRemoveVote, onPollClose, replySelectionActive, selectedReplies, onStartReplySelection, onToggleSelectReply, allMessages }) => {
+  ({ message, isPinned, onPinToggle, onDeleteMessage, onStartForwardSelection, onToggleSelectForward, forwardSelectionActive, selectedForwards, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange, onPollVote, onPollRemoveVote, onPollClose, replySelectionActive, selectedReplies, onStartReplySelection, onToggleSelectReply, allMessages }) => {
     const sender = message.sender;
     const isOwnMessage = (() => {
       if (!sender) return false;
@@ -416,8 +416,13 @@ const MessageBubble = React.memo(
     }, [message.id, onPinToggle]);
 
     const handleForwardClick = useCallback(() => {
-      onForwardMessage(message);
-    }, [message, onForwardMessage]);
+      const id = message._id || message.id;
+      if (forwardSelectionActive) {
+        onToggleSelectForward && onToggleSelectForward(id);
+      } else {
+        onStartForwardSelection && onStartForwardSelection(id);
+      }
+    }, [message, onStartForwardSelection, onToggleSelectForward, forwardSelectionActive]);
 
     const handleEditClick = useCallback(() => {
       setIsEditing(true);
@@ -446,6 +451,9 @@ const MessageBubble = React.memo(
     const messageText = message.content || '';
     const hasAttachments = message.attachments && message.attachments.length > 0;
     const isShortMessage = messageText.length < 30 && !hasAttachments;
+
+    const msgId = message._id || message.id;
+    const isForwardSelected = forwardSelectionActive && Array.isArray(selectedForwards) && selectedForwards.includes(msgId);
 
     const bubblePaddingClass = isShortMessage
       ? 'py-2'
@@ -534,7 +542,7 @@ const MessageBubble = React.memo(
   : effectiveTheme.mode === 'dark'
     ? 'backdrop-blur-xl bg-gradient-to-br from-blue-400/30 to-blue-600/25 border border-blue-300/30 shadow-lg shadow-blue-500/10 text-white'
     : 'bg-gradient-to-br from-blue-50 to-purple-50 backdrop-blur-md text-gray-800 border border-blue-200 shadow-sm'
-          } ${isPinned ? "ring-2 ring-yellow-400" : ""}`}
+          } ${isPinned ? "ring-2 ring-yellow-400" : ""} ${isForwardSelected ? (effectiveTheme.mode === 'dark' ? 'ring-2 ring-blue-400 bg-blue-700/20' : 'ring-2 ring-blue-400 bg-blue-50') : ''}`}
           whileHover={{
             boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
             transition: { duration: 0.3 },
@@ -563,6 +571,12 @@ const MessageBubble = React.memo(
               </motion.div>
             )}
           </AnimatePresence>
+
+          {isForwardSelected && (
+            <div className={`absolute -top-2 right-2 z-30 flex items-center justify-center rounded-full p-1 ${effectiveTheme.mode === 'dark' ? 'bg-blue-500' : 'bg-blue-600'}`} style={{ width: 22, height: 22 }}>
+              <Check className="w-3 h-3 text-white" />
+            </div>
+          )}
 
           {/* Forwarded indicator */}
           {message.isForwarded && (
@@ -849,7 +863,7 @@ const MessageBubble = React.memo(
             {/* Forward button */}
             <motion.button
               whileHover={{ scale: 1.05 }}
-              className="p-1 rounded-full bg-white shadow-lg text-blue-600"
+              className={`p-1 rounded-full ${forwardSelectionActive && selectedForwards && selectedForwards.includes(message._id || message.id) ? 'bg-blue-500 text-white' : 'bg-white shadow-lg text-blue-600'}`}
               onClick={handleForwardClick}
               title="Forward message"
             >
@@ -1274,8 +1288,13 @@ const MessagesArea = ({
   selectedContactId,
   currentUserId,
   onDeleteMessage,
-  onForwardMessage,
   onEditMessage,
+  // Forward props
+  forwardSelectionActive,
+  selectedForwards,
+  onStartForwardSelection,
+  onToggleSelectForward,
+  onClearForwardSelection,
   onHoverDateChange,
   manualScrollInProgress,
   onPollVote,
@@ -1470,7 +1489,10 @@ const MessagesArea = ({
                     isPinned={pinnedMessages[item.id] || false}
                     onPinToggle={onPinMessage}
                     onDeleteMessage={onDeleteMessage}
-                    onForwardMessage={onForwardMessage}
+                    onStartForwardSelection={onStartForwardSelection}
+                    onToggleSelectForward={onToggleSelectForward}
+                    forwardSelectionActive={forwardSelectionActive}
+                    selectedForwards={selectedForwards}
                     onEditMessage={onEditMessage}
                     effectiveTheme={effectiveTheme}
                     currentUserId={currentUserId}
@@ -1699,6 +1721,38 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
     setSelectedReplies([]);
   }, []);
 
+  // Forward selection handlers
+  const onStartForwardSelection = useCallback((initialId) => {
+    setForwardSelectionActive(true);
+    if (initialId) setSelectedForwards([initialId]);
+  }, []);
+
+  const onToggleSelectForward = useCallback((id) => {
+    const MAX_FORWARD_SELECTION = 10;
+    setSelectedForwards((prev) => {
+      const current = Array.isArray(prev) ? prev : [];
+      if (current.includes(id)) return current.filter((x) => x !== id);
+      if (current.length >= MAX_FORWARD_SELECTION) {
+        setForwardSelectionHint(`You can only select up to ${MAX_FORWARD_SELECTION} messages to forward.`);
+        if (forwardHintTimerRef.current) clearTimeout(forwardHintTimerRef.current);
+        forwardHintTimerRef.current = setTimeout(() => setForwardSelectionHint(null), 3500);
+        return current;
+      }
+      return [...current, id];
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (forwardHintTimerRef.current) clearTimeout(forwardHintTimerRef.current);
+    };
+  }, []);
+
+  const onClearForwardSelection = useCallback(() => {
+    setForwardSelectionActive(false);
+    setSelectedForwards([]);
+  }, []);
+
   // Clear any stale contacts on mount (helps when user account was deleted and re-created)
   useEffect(() => {
     setContacts([]);
@@ -1731,9 +1785,15 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
 const [selectedContact, setSelectedContact] = useState(null);
 
 
-  // Forward message state
+  // Forward message state (supports multiple messages)
   const [showForwardModal, setShowForwardModal] = useState(false);
-  const [messageToForward, setMessageToForward] = useState(null);
+  const [messagesToForward, setMessagesToForward] = useState([]);
+
+  // Forward selection (multi-select) UI
+  const [forwardSelectionActive, setForwardSelectionActive] = useState(false);
+  const [selectedForwards, setSelectedForwards] = useState([]);
+  const [forwardSelectionHint, setForwardSelectionHint] = useState(null);
+  const forwardHintTimerRef = useRef(null);
 
   // Delete message state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -2268,14 +2328,14 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
     }
   };
 
-  // Forward message handlers
+  // Forward message handlers (supports forwarding multiple messages)
   const handleForwardMessage = useCallback((message) => {
-    setMessageToForward(message);
+    setMessagesToForward([message]);
     setShowForwardModal(true);
   }, []);
 
   const handleForwardToChats = async (selectedChats) => {
-    if (!messageToForward || selectedChats.length === 0) return;
+    if (!messagesToForward || messagesToForward.length === 0 || selectedChats.length === 0) return;
 
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
@@ -2284,62 +2344,62 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
         return;
       }
 
-      // Forward the message to each selected chat
+      // For each selected chat, forward each message sequentially
       for (const chat of selectedChats) {
-        // Prioritize chatId (the actual MongoDB chat document _id) over id (other user's id)
         const chatId = chat.chatId || chat._id || chat.id;
-        
-        const forwardData = {
-          chatId: chatId,
-          content: messageToForward.content,
-          attachments: messageToForward.attachments || [],
-          type: messageToForward.type || 'text',
-          isForwarded: true,
-        };
 
-        const res = await fetch(`${API_BASE_URL}/api/message/forward`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(forwardData),
-        });
-
-        if (!res.ok) {
-          console.error(`Failed to forward message to ${chat.name || chat.chatName}`);
-          continue;
-        }
-
-        const forwardedMessage = await res.json();
-
-        // Emit socket event for real-time update
-        if (socketRef.current?.emit) {
-          socketRef.current.emit('new message', forwardedMessage);
-        }
-
-        // Update local messages state if the chat is already loaded
-        setMessages((prev) => {
-          const existing = prev[chatId] || [];
-          return {
-            ...prev,
-            [chatId]: [...existing, forwardedMessage],
+        for (const msg of messagesToForward) {
+          const forwardData = {
+            chatId: chatId,
+            content: msg.content || '',
+            attachments: msg.attachments || [],
+            type: msg.type || 'text',
+            isForwarded: true,
           };
-        });
 
-        // Update recent chats preview
-        setRecentChats((prev) =>
-          prev.map((c) =>
-            (String(c.id) === String(chatId) || String(c.chatId) === String(chatId))
-              ? { ...c, lastMessage: forwardedMessage.content || 'Forwarded message', timestamp: Date.now() }
-              : c
-          )
-        );
+          const res = await fetch(`${API_BASE_URL}/api/message/forward`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(forwardData),
+          });
+
+          if (!res.ok) {
+            console.error(`Failed to forward message to ${chat.name || chat.chatName}`);
+            continue;
+          }
+
+          const forwardedMessage = await res.json();
+
+          // Emit socket event for real-time update
+          if (socketRef.current?.emit) {
+            socketRef.current.emit('new message', forwardedMessage);
+          }
+
+          // Update local messages state if the chat is already loaded
+          setMessages((prev) => {
+            const existing = prev[chatId] || [];
+            return {
+              ...prev,
+              [chatId]: [...existing, forwardedMessage],
+            };
+          });
+
+          // Update recent chats preview
+          setRecentChats((prev) =>
+            prev.map((c) =>
+              (String(c.id) === String(chatId) || String(c.chatId) === String(chatId))
+                ? { ...c, lastMessage: forwardedMessage.content || 'Forwarded message', timestamp: Date.now() }
+                : c
+            )
+          );
+        }
       }
 
-      // Show success notification (you can customize this)
-      console.log(`Message forwarded to ${selectedChats.length} chat(s)`);
-      
+      console.log(`Messages forwarded to ${selectedChats.length} chat(s)`);
+
     } catch (err) {
       console.error('Forward message failed', err);
     }
@@ -6841,12 +6901,24 @@ useEffect(() => {
         isOpen={showForwardModal}
         onClose={() => {
           setShowForwardModal(false);
-          setMessageToForward(null);
+          setMessagesToForward([]);
         }}
         onForward={handleForwardToChats}
         contacts={recentChats}
         effectiveTheme={effectiveTheme}
         currentUserId={currentUserId}
+        // Pass single message when only one, else pass messages array
+        message={messagesToForward && messagesToForward.length === 1 ? messagesToForward[0] : null}
+        messages={messagesToForward && messagesToForward.length > 0 ? messagesToForward : null}
+        setMessage={(m) => {
+          // update the single message content in messagesToForward if present
+          if (!m) return;
+          setMessagesToForward((prev) => {
+            if (!prev || prev.length === 0) return prev;
+            if (prev.length === 1) return [{ ...prev[0], ...m }];
+            return prev;
+          });
+        }}
       />
 
       {/* Delete message modal */}
@@ -8253,21 +8325,67 @@ useEffect(() => {
                   selectedContactId={selectedContact.id}
                   currentUserId={currentUserId}
                   onDeleteMessage={handleDeleteMessage}
-                  onForwardMessage={handleForwardMessage}
+                  onStartForwardSelection={onStartForwardSelection}
                   onEditMessage={handleEditMessage}
                   manualScrollInProgress={manualScrollInProgressRef}
                   onPollVote={handlePollVote}
                   onPollRemoveVote={handlePollRemoveVote}
                   onPollClose={handlePollClose}
                   // Reply props
+                  // Reply props
                   replySelectionActive={replySelectionActive}
                   selectedReplies={selectedReplies}
                   onStartReplySelection={onStartReplySelection}
                   onToggleSelectReply={onToggleSelectReply}
                   onClearReplySelection={onClearReplySelection}
+                  // Forward props
+                  forwardSelectionActive={forwardSelectionActive}
+                  selectedForwards={selectedForwards}
+                  onToggleSelectForward={onToggleSelectForward}
+                  onClearForwardSelection={onClearForwardSelection}
                 />
               </div>
-              {replySelectionActive && (
+              {forwardSelectionActive ? (
+                <div
+                  className={`p-2 border-t border-b flex items-center justify-between space-x-4 ${effectiveTheme.mode === 'dark' ? 'bg-gradient-to-r from-black/30 to-white/2' : 'bg-gradient-to-r from-white to-gray-50'}`}
+                  style={{
+                    background: effectiveTheme.mode === 'dark'
+                      ? 'linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))'
+                      : 'linear-gradient(90deg, rgba(0,0,0,0.02), rgba(0,0,0,0.01))',
+                    borderColor: effectiveTheme.border ? effectiveTheme.border.replace('border-', '') : undefined
+                  }}
+                >
+                  <div className={`text-sm ${effectiveTheme.text}`}>
+                    Forwarding <strong className={`${effectiveTheme.text}`}>{selectedForwards?.length || 0}</strong> message{selectedForwards?.length > 1 ? 's' : ''}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {forwardSelectionHint && (
+                      <div className="mr-4 text-sm text-red-500" role="status">
+                        {forwardSelectionHint}
+                      </div>
+                    )}
+                    <button
+                      className={`text-sm px-3 py-1 rounded ${effectiveTheme.mode === 'dark' ? 'bg-white/6 text-white/90' : 'bg-gray-200 text-gray-800'}`}
+                      onClick={() => onClearForwardSelection && onClearForwardSelection()}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className={`text-sm px-3 py-1 rounded bg-blue-500 text-white`}
+                      onClick={() => {
+                        // Build messages array from selected ids and open modal without preview
+                        const all = getMessagesForContact(selectedContact.id, chatSearchTerm) || [];
+                        const msgs = all.filter(m => selectedForwards.includes(m._id || m.id));
+                        setMessagesToForward(msgs);
+                        setShowForwardModal(true);
+                        onClearForwardSelection && onClearForwardSelection();
+                      }}
+                    >
+                      Forward
+                    </button>
+                  </div>
+                </div>
+              ) : replySelectionActive && (
                 <div
                   className={`p-2 border-t border-b flex items-center justify-between space-x-4 ${effectiveTheme.mode === 'dark' ? 'bg-gradient-to-r from-black/30 to-white/2' : 'bg-gradient-to-r from-white to-gray-50'}`}
                   style={{

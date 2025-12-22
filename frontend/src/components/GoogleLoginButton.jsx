@@ -58,7 +58,7 @@ const GoogleLoginButton = ({ clientId, onSuccess, onError, buttonId = "google-lo
           btn.className = 'w-full py-2 px-4 rounded-md bg-white border text-sm flex items-center justify-center';
           btn.innerHTML = `
             <span style="display:inline-flex;align-items:center;">
-              <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 48 52" style="display:block;vertical-align:middle;overflow:visible;" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <path fill="#4285F4" d="M24 9.5c3.9 0 6.6 1.7 8.1 3.1l6-6C35.4 3 30.1 1 24 1 14.7 1 6.9 6.9 3.5 15.2l7.5 5.8C12.9 15 17.7 9.5 24 9.5z"/>
                 <path fill="#34A853" d="M46.5 24c0-1.6-.1-3.1-.4-4.6H24v9.2h12.7c-.5 2.6-1.9 4.8-4 6.3l6.2 4.8C43.9 37.6 46.5 31 46.5 24z"/>
                 <path fill="#FBBC05" d="M10.9 29.6c-.6-1.8-1-3.7-1-5.6s.4-3.9 1-5.6L3.5 13.2C1.3 17.9 0 22.8 0 28s1.3 10.1 3.5 14.8l7.4-13.2z"/>

@@ -1309,7 +1309,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
           }
         } catch (e) {}
       }
-      console.log('[SOCKET IN] message-read received from', userId, 'payload:', data);
+      //console.log('[SOCKET IN] message-read received from', userId, 'payload:', data);
       if (!userId) return socket.emit('message-read-error', { message: 'Not authenticated' });
       if (!chatId) return socket.emit('message-read-error', { message: 'chatId required' });
 
@@ -1337,7 +1337,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
 
         // notify participants so UI can show blue ticks where appropriate
         try {
-          console.log('[SOCKET OUT] emitting message-read to chat room', chatId, { reader: userId, updatedIds });
+          //console.log('[SOCKET OUT] emitting message-read to chat room', chatId, { reader: userId, updatedIds });
           socket.to(chatId).emit('message-read', { chatId, reader: userId, updatedIds });
         } catch (e) { console.error('emit chat room message-read error', e); }
         try {

@@ -1307,53 +1307,52 @@ const ContactItem = ({
       {/* INVITE MODAL — USERS ONLY */}
       {!isBusiness && showInviteModal && (
         <div
-          className="fixed inset-0 flex items-center justify-center z-50"
-          style={{ background: "rgba(0,0,0,0.4)" }}
+          className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm`}
+          onClick={() => setShowInviteModal(false)}
         >
-          <div className="absolute inset-0 w-full h-full pointer-events-none">
-            <CosmosBackground opacity={0.28} theme="light" />
-          </div>
-          <div
-            className="absolute inset-0 w-full h-full pointer-events-none"
-            style={{ background: "rgba(255,255,255,0.9)" }}
-          />
+          {effectiveTheme.mode !== 'dark' && (
+            <div className="absolute inset-0 w-full h-full pointer-events-none">
+              <CosmosBackground opacity={0.28} theme="light" />
+            </div>
+          )}
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
+            onClick={(e) => e.stopPropagation()}
             className={`relative w-full max-w-md rounded-2xl p-6 shadow-xl ${
-              effectiveTheme.secondary || "bg-white"
-            }`}
+              effectiveTheme.primary || ''
+            } ${effectiveTheme.mode !== 'dark' ? 'bg-white/90' : ''}`}
             style={{ zIndex: 10 }}
           >
             <div className="flex justify-between mb-4">
               <div>
-                <h2 className="font-semibold text-lg">{contact.name}</h2>
+                <h2 className={`font-semibold text-lg ${effectiveTheme.text || 'text-gray-100'}`}>{contact.name}</h2>
                 {contact.bio && (
-                  <p className="text-sm text-gray-500 mt-1 truncate">
+                  <p className={`text-sm mt-1 truncate ${effectiveTheme.textSecondary || 'text-gray-300'}`}>
                     {contact.bio}
                   </p>
                 )}
               </div>
               <button
                 onClick={() => setShowInviteModal(false)}
-                className="p-1 rounded-full hover:bg-red-500/20"
+                className={`p-1 rounded-full transition-colors ${effectiveTheme.mode === 'dark' ? 'hover:bg-white/5' : 'hover:bg-red-500/20'}`}
               >
-                <XCircle className="w-5 h-5 text-gray-400 hover:text-red-500" />
+                <XCircle className={`w-5 h-5 ${effectiveTheme.textSecondary || 'text-gray-400'}`} />
               </button>
             </div>
 
             {inviteStatus === "sent" && (
-              <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-300">
-                <p className="text-sm font-medium">Invite pending</p>
-                <p className="text-xs text-gray-500">
+              <div className={`p-4 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'bg-yellow-900/20 border-yellow-700' : 'bg-yellow-500/10 border-yellow-300'}`}>
+                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-100'}`}>Invite pending</p>
+                <p className={`text-xs ${effectiveTheme.textSecondary || 'text-gray-300'}`}>
                   Waiting for {contact.name} to accept
                 </p>
               </div>
             )}
 
             {inviteStatus === "incoming" && (
-              <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-300">
-                <p className="text-sm font-medium">Incoming request</p>
+              <div className={`p-4 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'bg-orange-900/20 border-orange-700' : 'bg-orange-500/10 border-orange-300'}`}>
+                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-100'}`}>Incoming request</p>
                 <div className="flex justify-end mt-4">
                   <button
                     onClick={handleAcceptInvite}
@@ -1371,7 +1370,7 @@ const ContactItem = ({
                 value={inviteMessage}
                 onChange={(e) => setInviteMessage(e.target.value)}
                 placeholder="Add an optional message..."
-                className="w-full mt-4 p-3 rounded-xl border resize-none text-sm"
+                className={`w-full mt-4 p-3 rounded-xl border resize-none text-sm ${effectiveTheme.mode === 'dark' ? 'bg-transparent text-gray-100 border-gray-700 placeholder-gray-400' : 'bg-white text-gray-900 border-gray-300 placeholder-gray-500'}`}
               />
             )}
 
@@ -1379,7 +1378,7 @@ const ContactItem = ({
               {inviteStatus === "sent" && (
                 <button
                   onClick={handleWithdrawInvite}
-                  className="px-4 py-2 rounded-xl border border-red-500 text-red-500"
+                  className={`px-4 py-2 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'border-red-600 text-red-400' : 'border-red-500 text-red-500'}`}
                 >
                   Withdraw
                 </button>
@@ -1389,7 +1388,7 @@ const ContactItem = ({
                 <>
                   <button
                     onClick={() => setShowInviteModal(false)}
-                    className="px-4 py-2 rounded-xl border"
+                    className={`px-4 py-2 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'border-gray-700 text-gray-200' : ''}`}
                   >
                     Cancel
                   </button>
@@ -1415,23 +1414,19 @@ const ContactItem = ({
       {/* Share Link Popup */}
       {showSharePopup && (
         <div
-          className="fixed inset-0 flex items-center justify-center z-50 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/50 backdrop-blur-sm"
           onClick={() => setShowSharePopup(false)}
         >
-          <div className="absolute inset-0 w-full h-full pointer-events-none">
-            <CosmosBackground opacity={0.22} theme="light" />
-          </div>
-          <div
-            className="absolute inset-0 w-full h-full pointer-events-none"
-            style={{ background: "rgba(255,255,255,0.88)" }}
-          />
+          {effectiveTheme.mode !== 'dark' && (
+            <div className="absolute inset-0 w-full h-full pointer-events-none">
+              <CosmosBackground opacity={0.22} theme="light" />
+            </div>
+          )}
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm rounded-2xl p-5 ${
-              effectiveTheme.secondary || "bg-white"
-            } shadow-2xl`}
+            className={`w-full max-w-sm rounded-2xl p-5 ${effectiveTheme.primary || ''} shadow-2xl ${effectiveTheme.mode !== 'dark' ? 'bg-white/90' : ''}`}
             style={{ zIndex: 10 }}
           >
             <div className="flex items-start justify-between mb-4">
@@ -1444,7 +1439,7 @@ const ContactItem = ({
                 <p
                   className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"}`}
                 >
-                  Share this link to invite others
+                  Share this invite with others
                 </p>
               </div>
               <button
@@ -1457,7 +1452,7 @@ const ContactItem = ({
 
             <div className="flex flex-col space-y-3">
               <p className={`text-sm ${effectiveTheme.textSecondary || "text-gray-500"}`}>
-                Invite message (editable):
+                Invite message:
               </p>
               {
                 /* Compose a friendly invite + link to copy */
