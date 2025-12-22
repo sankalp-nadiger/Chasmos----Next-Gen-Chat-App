@@ -265,6 +265,36 @@ const AppContent = () => {
 };
 
 function App() {
+  // Request notification permission and register service worker on app load
+  useEffect(() => {
+    // Request notification permission with detailed logging
+    if ("Notification" in window) {
+      console.log('Current notification permission:', Notification.permission);
+      
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(permission => {
+          console.log('Notification permission result:', permission);
+        });
+      } else {
+        console.log('Notification permission already set to:', Notification.permission);
+      }
+    } else {
+      console.log('Notifications not supported in this browser');
+    }
+
+    // Register service worker for notification actions
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .register('/sw-notification.js')
+        .then((registration) => {
+          console.log('Service Worker registered:', registration);
+        })
+        .catch((error) => {
+          console.log('Service Worker registration failed:', error);
+        });
+    }
+  }, []);
+
   return (
     <div className="App">
       <Router>
