@@ -1742,13 +1742,15 @@ const [selectedContact, setSelectedContact] = useState(null);
   // --- Delete Chat Modal State ---
 const [showDeleteChatModal, setShowDeleteChatModal] = useState(false);
 const [chatToDelete, setChatToDelete] = useState(null);
+const [keepMediaOnDelete, setKeepMediaOnDelete] = useState(false);
 
 // Confirm delete chat handler
 const confirmDeleteChat = async () => {
   if (chatToDelete) {
-    await handleDeleteChat(chatToDelete);
+    await handleDeleteChat(chatToDelete, keepMediaOnDelete);
     setShowDeleteChatModal(false);
     setChatToDelete(null);
+    setKeepMediaOnDelete(false);
   }
 };
 
@@ -2095,12 +2097,14 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
   }, []);
 
   // Delete chat handler (lifted here so it has access to state setters)
-  const handleDeleteChat = async (contact) => {
+  const handleDeleteChat = async (contact, keepMedia = false) => {
     const chatId = contact?.id || contact?._id || selectedContact?.id || selectedContact?._id;
     if (!chatId) return;
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/chat/${chatId}`, {
+      // include keepMedia flag as query param when provided
+      const qs = keepMedia ? '?keepMedia=true' : '';
+      const res = await fetch(`${API_BASE_URL}/api/chat/${chatId}${qs}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -3170,6 +3174,15 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             avatar: chat.avatar,
             participants: chat.participants || [],
             isGroup: chat.isGroup || chat.isGroupChat || false,
+            // set presence flag immediately based on known onlineUsers set
+            isOnline: (function() {
+              try {
+                const isGroup = chat.isGroup || chat.isGroupChat || false;
+                if (isGroup) return false;
+                const other = chat.userId || chat.id || chat.participantId || (chat.participants && chat.participants[0]?._id);
+                return other ? onlineUsers.has(String(other)) : false;
+              } catch (e) { return false; }
+            })(),
           };
 
           console.log('📝 Created contactForUI from existing chat:', contactForUI, 'from chat:', chat);
@@ -3928,6 +3941,9 @@ useEffect(() => {
                 hasAttachment: !!hasAttachment,
                 ...(hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {}),
                 ...(hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {}),
+                ...(meta.name ? { name: meta.name } : {}),
+                ...(meta.avatar ? { avatar: meta.avatar } : {}),
+                ...(meta.userId ? { userId: meta.userId } : {}),
               })
             : c
         );
@@ -3937,8 +3953,12 @@ useEffect(() => {
           {
             id: chatId,
             chatId,
-            name: selectedContact?.name || '',
-            avatar: selectedContact?.avatar || '/default-avatar.png',
+            // associate a userId for one-to-one chats when provided so presence/status works
+            userId: meta.userId || null,
+            // Prefer explicit meta.name/meta.avatar when provided (server or message payload),
+            // otherwise fall back to currently selected contact or a default.
+            name: meta.name || selectedContact?.name || '',
+            avatar: meta.avatar || selectedContact?.avatar || '/default-avatar.png',
             lastMessage: preview,
             hasAttachment: !!hasAttachment,
             timestamp: useTs,
@@ -4981,10 +5001,17 @@ const handleSendMessageFromInput = useCallback(
         
         const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
         const hasAttachment = Boolean(formatted.attachments && formatted.attachments.length);
+        // Determine a userId to attach when this is a 1:1 chat (so the UI can compute presence)
+        const metaUserId = (!newMessage.chat || (newMessage.chat && !newMessage.chat.isGroupChat)) ? (senderId || undefined) : undefined;
+
         updateRecentChat(key, preview, hasAttachment, {
           attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
           attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
           timestamp: formatted.timestamp,
+          // pass sender info (when available) so new recent-chat entries show correct avatar/name
+          name: (newMessage.sender && typeof newMessage.sender === 'object') ? (newMessage.sender.name || newMessage.sender.username) : undefined,
+          avatar: (newMessage.sender && typeof newMessage.sender === 'object') ? (newMessage.sender.avatar || newMessage.sender.pic) : undefined,
+          userId: metaUserId,
         });
         
         // Emit delivered ack (recipient client's socket acknowledges receipt)
@@ -6613,7 +6640,13 @@ useEffect(() => {
               <Trash2 className="w-6 h-6 text-red-500" />
               Delete Chat
             </h2>
-              <p className={`mb-6 ${effectiveTheme.textSecondary}`}>Are you sure you want to delete this chat? This will remove the chat for everyone if you are allowed. This action cannot be undone.</p>
+              <p className={`mb-4 ${effectiveTheme.textSecondary}`}>
+                This will clear out all messages for you in this chat, but the chat and messages will still be available to the other user.
+              </p>
+              <div className="mb-4 flex items-center gap-3">
+                <input id="keepMedia" type="checkbox" checked={keepMediaOnDelete} onChange={(e) => setKeepMediaOnDelete(e.target.checked)} />
+                <label htmlFor="keepMedia" className={`${effectiveTheme.textSecondary}`}>Keep attachments & screenshots from this chat in the media gallery</label>
+              </div>
             <div className="flex gap-3 justify-end">
               <button
                 className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition"

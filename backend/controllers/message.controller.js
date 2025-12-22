@@ -20,6 +20,8 @@ export const allMessages = asyncHandler(async (req, res) => {
     // Exclude messages that are scheduled and not yet sent
     const messages = await Message.find({
       chat: req.params.chatId,
+      // Exclude messages that the current user has soft-deleted
+      deletedFor: { $not: { $elemMatch: { $eq: req.user._id } } },
       $or: [
         { isScheduled: { $ne: true } },
         { scheduledSent: true }
@@ -215,6 +217,14 @@ export const sendMessage = asyncHandler(async (req, res) => {
     if (!isScheduled) {
       await Chat.findByIdAndUpdate(chat._id, { lastMessage: message });
       console.log("[sendMessage] Updated chat lastMessage:", chat._id);
+    }
+
+    // When a new message is created, clear any soft-deletes on the chat
+    // so the chat revives for all participants.
+    try {
+      await Chat.findByIdAndUpdate(chat._id, { $set: { deletedBy: [] } });
+    } catch (err) {
+      console.warn('[sendMessage] Failed to clear chat.deletedBy:', err && err.message);
     }
 
     // Attach normalized timestamp before sending
@@ -831,6 +841,8 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
     // Find all messages with media attachments in these chats
     const messages = await Message.find({
       chat: { $in: verifiedChatIds },
+      // Include messages that are not deletedFor the user OR where the user is listed in keepFor
+      $or: [ { deletedFor: { $ne: req.user._id } }, { keepFor: req.user._id } ],
       attachments: { $exists: true, $ne: [] }
     })
       .populate({
@@ -913,6 +925,8 @@ export const getLinkAttachments = asyncHandler(async (req, res) => {
     // Find all messages with URLs in content
     const messages = await Message.find({
       chat: { $in: verifiedChatIds },
+      // Include messages that are not deletedFor the user OR where the user is listed in keepFor
+      $or: [ { deletedFor: { $ne: req.user._id } }, { keepFor: req.user._id } ],
       content: { $regex: urlRegex }
     })
       .populate('sender', 'name email avatar')
@@ -979,6 +993,8 @@ export const getDocumentAttachments = asyncHandler(async (req, res) => {
     // Find all messages with document attachments in these chats
     const messages = await Message.find({
       chat: { $in: verifiedChatIds },
+      // Include messages that are not deletedFor the user OR where the user is listed in keepFor
+      $or: [ { deletedFor: { $ne: req.user._id } }, { keepFor: req.user._id } ],
       attachments: { $exists: true, $ne: [] }
     })
       .populate({

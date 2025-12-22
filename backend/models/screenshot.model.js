@@ -26,4 +26,13 @@ const screenshotSchema = new Schema(
 screenshotSchema.index({ chat: 1, createdAt: -1 });
 screenshotSchema.index({ capturedBy: 1 });
 
+// Users who have soft-deleted this screenshot (hidden for them)
+screenshotSchema.add({
+  deletedFor: [{ type: Schema.Types.ObjectId, ref: 'User' }]
+});
+// Users who should still see this screenshot even if they deleted the chat
+screenshotSchema.add({
+  keepFor: [{ type: Schema.Types.ObjectId, ref: 'User' }]
+});
+
 export default mongoose.model("Screenshot", screenshotSchema);

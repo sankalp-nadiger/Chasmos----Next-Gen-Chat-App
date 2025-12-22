@@ -13,6 +13,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
   const [showFilter, setShowFilter] = useState(false);
   const [selectedChats, setSelectedChats] = useState([]);
   const [availableChats, setAvailableChats] = useState([]);
+  const [previousChats, setPreviousChats] = useState([]);
   const [detailView, setDetailView] = useState(null); // For showing detail view of selected item
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
@@ -39,37 +40,76 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
         }
 
         const chatsData = await response.json();
+
+        // Also fetch previously-deleted (soft-deleted) chats for this user
+        let prevData = [];
+        try {
+          const prevResp = await fetch(`${API_BASE_URL}/api/chat/previous`, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+          });
+          if (prevResp && prevResp.ok) {
+            prevData = await prevResp.json();
+          }
+        } catch (e) {
+          console.warn('Failed to fetch previous chats', e);
+        }
         
         // Transform chats into the format needed for the component
         const transformedChats = chatsData.map(chat => {
-          // For 1-on-1 chats, get the other user's info
           const currentUserId = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}')._id;
           let chatName = 'Unknown';
           let chatAvatar = null;
-          
-          if (!chat.isGroupChat && chat.users && chat.users.length > 0) {
-            const otherUser = chat.users.find(user => 
-              String(user._id || user.id) !== String(currentUserId)
-            );
+
+          // If controller returned otherUser (formatted), prefer that
+          if (!chat.isGroupChat && chat.otherUser) {
+            chatName = chat.otherUser.username || chat.otherUser.email || 'Unknown';
+            chatAvatar = chat.otherUser.avatar || null;
+          } else if (!chat.isGroupChat && chat.users && chat.users.length > 0) {
+            const otherUser = chat.users.find(user => String(user._id || user.id) !== String(currentUserId));
             if (otherUser) {
               chatName = otherUser.name || otherUser.email || 'Unknown';
               chatAvatar = otherUser.avatar;
             }
           } else if (chat.isGroupChat) {
             chatName = chat.chatName || chat.name || 'Group Chat';
-            // Check multiple possible locations for group avatar
-            chatAvatar = chat.groupSettings?.avatar || chat.groupAvatar || chat.avatar || chat.icon;
+            chatAvatar = chat.groupSettings?.avatar || chat.groupAvatar || chat.avatar || chat.icon || null;
           }
 
+          const idVal = chat.chatId || chat._id || chat.id || null;
+
           return {
-            id: chat._id,
+            id: idVal,
             name: chatName,
             avatar: chatAvatar
           };
-        });
+        }).filter(c => c.id);
 
         setAvailableChats(transformedChats);
-        setSelectedChats(transformedChats.map(c => c.id)); // Select all by default
+        setPreviousChats((prevData || []).map(chat => {
+          const currentUserId = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}')._id;
+          let chatName = 'Unknown';
+          let chatAvatar = null;
+
+          // Prefer formatted otherUser from controller when available
+          if (!chat.isGroupChat && chat.otherUser) {
+            chatName = chat.otherUser.username || chat.otherUser.email || 'Unknown';
+            chatAvatar = chat.otherUser.avatar || null;
+          } else if (!chat.isGroupChat && chat.users && chat.users.length > 0) {
+            const otherUser = chat.users.find(user => String(user._id || user.id) !== String(currentUserId));
+            if (otherUser) {
+              chatName = otherUser.name || otherUser.email || 'Unknown';
+              chatAvatar = otherUser.avatar;
+            }
+          } else if (chat.isGroupChat) {
+            chatName = chat.chatName || chat.name || 'Group Chat';
+            chatAvatar = chat.groupSettings?.avatar || chat.groupAvatar || chat.avatar || chat.icon || null;
+          }
+
+          const idVal = chat.chatId || chat._id || chat.id || null;
+          return { id: idVal, name: chatName, avatar: chatAvatar };
+        }).filter(c => c.id));
+
+        setSelectedChats(transformedChats.map(c => c.id)); // Select available chats by default
       } catch (error) {
         console.error('Error fetching recent chats:', error);
         setError('Failed to load chats');
@@ -99,7 +139,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
         return;
       }
 
-      const chatIds = selectedChats.join(',');
+      const chatIds = (selectedChats || []).filter(Boolean).map(id => String(id)).join(',');
       console.log('Fetching data for chats:', chatIds);
       
       let endpoint = '';
@@ -174,7 +214,10 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
   };
 
   const selectAllChats = () => {
-    setSelectedChats(availableChats.map(c => c.id));
+    setSelectedChats([...
+      (availableChats || []).map(c => c.id),
+      (previousChats || []).map(c => c.id)
+    ].flat().filter(Boolean));
   };
 
   const deselectAllChats = () => {
@@ -683,6 +726,42 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                     </label>
                   ))}
                 </div>
+
+                {/* Previous (soft-deleted) chats section */}
+                {previousChats && previousChats.length > 0 && (
+                  <div className="mt-3">
+                    <h4 className={`px-2 mb-2 text-sm font-medium ${effectiveTheme.textSecondary}`}>Previous Chats</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
+                      {previousChats.map(chat => (
+                        <label
+                          key={chat.id}
+                          className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer ${selectedChats.includes(chat.id) ? (effectiveTheme.mode === 'dark' ? 'bg-blue-900/20' : 'bg-blue-50') : (effectiveTheme.mode === 'dark' ? 'bg-gray-800' : 'bg-gray-100')} hover:shadow transition-all opacity-90`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedChats.includes(chat.id)}
+                            onChange={() => toggleChatSelection(chat.id)}
+                            className="w-4 h-4"
+                          />
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            {chat.avatar ? (
+                              <img
+                                src={chat.avatar}
+                                alt={chat.name}
+                                className="w-8 h-8 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold ${effectiveTheme.mode === 'dark' ? 'bg-gray-700' : 'bg-gray-300'} ${effectiveTheme.text}`}>
+                                {chat.name.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <span className={`text-sm truncate ${effectiveTheme.text}`}>{chat.name}</span>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}

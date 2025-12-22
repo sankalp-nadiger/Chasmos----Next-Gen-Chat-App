@@ -5,6 +5,7 @@ import connectDB from "./config/db.js";
 import Chat from "./models/chat.model.js";
 import User from "./models/user.model.js";
 import Message from "./models/message.model.js";
+import Screenshot from "./models/screenshot.model.js";
 import colors from "colors";
 import path from "path";
 import userRoutes from "./routes/user.routes.js";
@@ -473,13 +474,33 @@ io.on("connection", (socket) => {
             }
           }
 
-          // Ensure top-level sender is populated if possible (best-effort)
-          if (payload && payload.sender && (typeof payload.sender === 'string' || !payload.sender.name)) {
+          // Ensure top-level sender is populated if possible (best-effort).
+          // Normalize sender id whether payload.sender is string or object.
+          if (payload) {
             try {
-              const u = await User.findById(payload.sender).select('name avatar _id').lean();
-              if (u) payload.sender = u;
+              let senderId = null;
+              if (payload.sender) {
+                if (typeof payload.sender === 'string') {
+                  senderId = payload.sender;
+                } else if (payload.sender._id) {
+                  senderId = String(payload.sender._id);
+                } else if (payload.sender.id) {
+                  senderId = String(payload.sender.id);
+                }
+              }
+              // fallback to original incoming object if payload lacks sender
+              if (!senderId && newMessageRecieved && newMessageRecieved.sender) {
+                if (typeof newMessageRecieved.sender === 'string') senderId = newMessageRecieved.sender;
+                else if (newMessageRecieved.sender._id) senderId = String(newMessageRecieved.sender._id);
+                else if (newMessageRecieved.sender.id) senderId = String(newMessageRecieved.sender.id);
+              }
+
+              if (senderId) {
+                const u = await User.findById(senderId).select('name avatar _id').lean();
+                if (u) payload.sender = u;
+              }
             } catch (e3) {
-              // ignore
+              // ignore population errors - best-effort only
             }
           }
         } catch (e) {
@@ -593,7 +614,7 @@ io.on("connection", (socket) => {
 
   socket.on("delete chat", async (data) => {
     try {
-      const { chatId } = data;
+      const { chatId } = data || {};
       const userId = socket.userId;
       
       if (!userId) {
@@ -623,12 +644,73 @@ io.on("connection", (socket) => {
           return;
         }
 
-        await Message.deleteMany({ chat: chatId });
-        await Chat.findByIdAndDelete(chatId);
-        
-        const otherUser = chat.users.find(user => user.toString() !== userId.toString());
-        if (otherUser) {
-          socket.to(otherUser.toString()).emit("chat deleted", { chatId, deletedBy: userId });
+        // Soft-delete for 1-on-1 chats: mark messages as deleted for this user
+        // and add this user to chat.deletedBy so the chat is hidden for them only.
+        // Support `keepMedia` flag from the client: when true, also add the user
+        // to `keepFor` on messages/screenshots that contain media so they remain visible.
+        try {
+          const keepMedia = (data && (data.keepMedia === true || String(data.keepMedia).toLowerCase() === 'true'));
+
+          // Always mark all messages as deletedFor this user
+          try {
+            await Message.updateMany(
+              { chat: chatId },
+              { $addToSet: { deletedFor: userId } }
+            );
+          } catch (mErr) {
+            console.warn('[socket delete chat] Failed to mark messages deletedFor user:', mErr && mErr.message);
+          }
+
+          // If keepMedia requested, add user to keepFor for messages that have attachments
+          if (keepMedia) {
+            try {
+              await Message.updateMany(
+                { chat: chatId, attachments: { $exists: true, $ne: [] } },
+                { $addToSet: { keepFor: userId } }
+              );
+            } catch (kErr) {
+              console.warn('[socket delete chat] Failed to add user to keepFor for messages with attachments:', kErr && kErr.message);
+            }
+          }
+
+          // Always mark screenshots as deletedFor this user
+          try {
+            await Screenshot.updateMany(
+              { chat: chatId },
+              { $addToSet: { deletedFor: userId } }
+            );
+          } catch (sErr) {
+            console.warn('[socket delete chat] Failed to mark screenshots deletedFor user:', sErr && sErr.message);
+          }
+
+          // If keepMedia requested, also add user to keepFor for screenshots
+          if (keepMedia) {
+            try {
+              await Screenshot.updateMany(
+                { chat: chatId },
+                { $addToSet: { keepFor: userId } }
+              );
+            } catch (kSErr) {
+              console.warn('[socket delete chat] Failed to add user to keepFor for screenshots:', kSErr && kSErr.message);
+            }
+          }
+
+          await Chat.findByIdAndUpdate(
+            chatId,
+            { $addToSet: { deletedBy: userId }, $set: { deletedAt: new Date() } },
+            { new: true }
+          );
+
+          // Notify the other participant that this user cleared the chat (optional)
+          const otherUser = chat.users.find(user => user.toString() !== userId.toString());
+          if (otherUser) {
+            try { socket.to(otherUser.toString()).emit("chat cleared", { chatId, clearedBy: userId }); } catch (e) { /* ignore */ }
+          }
+
+        } catch (err) {
+          console.error('Error while soft-deleting chat via socket:', err);
+          socket.emit('delete chat error', { message: 'Failed to clear chat' });
+          return;
         }
       }
 

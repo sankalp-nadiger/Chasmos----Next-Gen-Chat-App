@@ -44,10 +44,8 @@ const chatSchema = new Schema(
       type: Boolean,
       default: false
     },
-    deletedBy: {
-      type: Schema.Types.ObjectId,
-      ref: "User"
-    },
+    // List of users who have soft-deleted this chat (chat hidden for them)
+    deletedBy: [{ type: Schema.Types.ObjectId, ref: "User" }],
     deletedAt: Date
   },
   { timestamps: true }

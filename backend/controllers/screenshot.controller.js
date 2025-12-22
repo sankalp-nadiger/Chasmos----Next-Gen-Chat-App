@@ -94,6 +94,14 @@ export const uploadScreenshot = asyncHandler(async (req, res) => {
     screenshot.systemMessage = systemMessage._id;
     await screenshot.save();
 
+    // When a new screenshot is created, clear any soft-deletes on the chat
+    // so the chat revives for all participants.
+    try {
+      await Chat.findByIdAndUpdate(chatId, { $set: { deletedBy: [] } });
+    } catch (err) {
+      console.warn('[uploadScreenshot] Failed to clear chat.deletedBy:', err && err.message);
+    }
+
     // Do NOT update chat's last message for screenshot system messages
     // (screenshot notifications should not appear as last message)
 
@@ -148,7 +156,9 @@ export const getScreenshots = asyncHandler(async (req, res) => {
 
     // Find all screenshots in these chats
     const screenshots = await Screenshot.find({
-      chat: { $in: verifiedChatIds }
+      chat: { $in: verifiedChatIds },
+      // Include screenshots that are not deletedFor the user OR where the user is listed in keepFor
+      $or: [ { deletedFor: { $ne: req.user._id } }, { keepFor: req.user._id } ]
     })
       .populate('capturedBy', 'name email avatar')
       .populate('chat', 'chatName isGroupChat')

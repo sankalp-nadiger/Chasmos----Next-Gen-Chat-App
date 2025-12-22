@@ -9,6 +9,8 @@ const messageSchema = new Schema(
     documentSession: { type: Schema.Types.ObjectId, ref: "Document" },
     attachments: [{ type: Schema.Types.ObjectId, ref: "Attachment" }],
     deletedFor: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    // Users who should still see this message's media even if they deleted the chat
+    keepFor: [{ type: Schema.Types.ObjectId, ref: "User" }],
     isDeleted: { type: Boolean, default: false },
     isForwarded: { type: Boolean, default: false },
     isEdited: { type: Boolean, default: false },
@@ -56,5 +58,7 @@ messageSchema.index({ "reactions.user": 1 });
 messageSchema.index({ isScheduled: 1, scheduledFor: 1, scheduledSent: 1 });
 // Index repliedTo for faster lookups when fetching referenced messages
 messageSchema.index({ repliedTo: 1 });
+// Index keepFor for faster lookups when filtering media visibility
+messageSchema.index({ keepFor: 1 });
 
 export default mongoose.model("Message", messageSchema);
