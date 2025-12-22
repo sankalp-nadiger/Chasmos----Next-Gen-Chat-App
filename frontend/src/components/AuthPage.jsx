@@ -336,7 +336,8 @@ import {
   EyeOff,
   Lock,
   Phone,
-  ArrowRight
+  ArrowRight,
+  Camera
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { useTheme } from '../context/ThemeContext';
@@ -442,7 +443,7 @@ const appFeatures = [
     id: 3,
     title: "Screenshot Detection",
     description: "Automatically detect and organize screenshots for easy reference and sharing",
-    icon: Shield,
+    icon: Camera,
     color: "from-green-500 to-emerald-500",
   },
 ];

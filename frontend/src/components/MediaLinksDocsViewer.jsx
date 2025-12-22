@@ -56,8 +56,9 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
               chatAvatar = otherUser.avatar;
             }
           } else if (chat.isGroupChat) {
-            chatName = chat.chatName || 'Group Chat';
-            chatAvatar = chat.groupAvatar;
+            chatName = chat.chatName || chat.name || 'Group Chat';
+            // Check multiple possible locations for group avatar
+            chatAvatar = chat.groupSettings?.avatar || chat.groupAvatar || chat.avatar || chat.icon;
           }
 
           return {
@@ -198,6 +199,41 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
     }
   };
 
+  // Helper function to get current user ID
+  const getCurrentUserId = () => {
+    const userData = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+    return userData._id || userData.id;
+  };
+
+  // Helper function to check if sender is current user
+  const isSenderCurrentUser = (item) => {
+    const currentUserId = getCurrentUserId();
+    const senderId = item.sender?._id || item.sender?.id || item.sender || item.capturedBy?._id || item.capturedBy?.id || item.capturedBy;
+    return String(senderId) === String(currentUserId);
+  };
+
+  // Helper function to get sender display name
+  const getSenderDisplayName = (item) => {
+    if (isSenderCurrentUser(item)) {
+      return 'You';
+    }
+    return item.senderName || item.capturedByName || 'Unknown';
+  };
+
+  // Helper function to get chat name
+  const getChatName = (item) => {
+    const chatId = item.chat?._id || item.chat?.id || item.chat || item.chatId;
+    const chat = availableChats.find(c => String(c.id) === String(chatId));
+    return chat ? chat.name : '';
+  };
+
+  // Helper function to format sender info with chat name
+  const formatSenderInfo = (item) => {
+    const senderName = getSenderDisplayName(item);
+    const chatName = getChatName(item);
+    return chatName ? `${senderName} in ${chatName}` : senderName;
+  };
+
   const renderMediaGrid = () => {
     if (loading) {
       return <div className={`text-center py-8 ${effectiveTheme.textSecondary}`}>Loading media...</div>;
@@ -296,7 +332,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                     {new Date(item.createdAt).toLocaleString()}
                   </span>
                   <span className={effectiveTheme.textSecondary}>
-                    From: {item.senderName || 'Unknown'}
+                    From: {formatSenderInfo(item)}
                   </span>
                 </div>
               </div>
@@ -343,7 +379,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                     {new Date(item.createdAt).toLocaleString()}
                   </span>
                   <span className={effectiveTheme.textSecondary}>
-                    From: {item.senderName || 'Unknown'}
+                    From: {formatSenderInfo(item)}
                   </span>
                 </div>
               </div>
@@ -402,7 +438,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                 <Camera className="w-3 h-3 text-yellow-400" />
                 <p className="text-xs text-yellow-400 font-medium">Screenshot</p>
               </div>
-              <p className="text-xs text-white truncate">By: {item.capturedByName || 'Unknown'}</p>
+              <p className="text-xs text-white truncate">By: {formatSenderInfo(item)}</p>
               <p className="text-xs text-gray-300">{new Date(item.createdAt).toLocaleDateString()}</p>
             </div>
           </motion.div>
@@ -441,7 +477,7 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
               {/* Sender Info Below Navbar */}
               <div className={`px-6 pt-4 pb-2`}>
                 <p className={`text-sm font-medium ${effectiveTheme.text}`}>
-                  Sent by: {detailView.senderName || detailView.capturedByName || 'Unknown'}
+                  Sent by: {formatSenderInfo(detailView)}
                 </p>
               </div>
 
@@ -631,9 +667,17 @@ const MediaLinksDocsViewer = ({ onClose, effectiveTheme, contacts, selectedConta
                         className="w-4 h-4"
                       />
                       <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold ${effectiveTheme.mode === 'dark' ? 'bg-gray-700' : 'bg-gray-300'} ${effectiveTheme.text}`}>
-                          {chat.name.charAt(0).toUpperCase()}
-                        </div>
+                        {chat.avatar ? (
+                          <img
+                            src={chat.avatar}
+                            alt={chat.name}
+                            className="w-8 h-8 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold ${effectiveTheme.mode === 'dark' ? 'bg-gray-700' : 'bg-gray-300'} ${effectiveTheme.text}`}>
+                            {chat.name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
                         <span className={`text-sm truncate ${effectiveTheme.text}`}>{chat.name}</span>
                       </div>
                     </label>

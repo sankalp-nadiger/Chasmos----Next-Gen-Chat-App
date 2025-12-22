@@ -166,8 +166,8 @@ export const getScreenshots = asyncHandler(async (req, res) => {
       fileSize: screenshot.fileSize,
       dimensions: screenshot.dimensions,
       createdAt: screenshot.createdAt,
+      capturedBy: screenshot.capturedBy?._id,
       capturedByName: screenshot.capturedBy?.name || screenshot.capturedBy?.email,
-      capturedBy: screenshot.capturedBy,
       chatId: screenshot.chat._id,
       chatName: screenshot.chat?.chatName,
       messageId: screenshot.systemMessage // For navigation to message
