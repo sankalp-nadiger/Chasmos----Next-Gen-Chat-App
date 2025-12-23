@@ -1,10 +1,21 @@
 /* eslint-disable no-unused-vars */
-
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Send, Paperclip, Image, FileText, Camera, MapPin, X, Clock, Calendar, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CosmosBg from './CosmosBg';
 import PollCreationModal from './PollCreationModal';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+
+const getInitials = (name) => {
+  if (!name || typeof name !== 'string') return '';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  const first = parts[0].charAt(0).toUpperCase();
+  const last = parts[parts.length - 1].charAt(0).toUpperCase();
+  return `${first}${last}`;
+};
 
 const MessageInput = React.memo(({ 
   onSendMessage, 
@@ -22,6 +33,7 @@ const MessageInput = React.memo(({
   const [scheduledTime, setScheduledTime] = useState("");
   const [creatingPoll, setCreatingPoll] = useState(false);
   const attachmentMenuRef = useRef(null);
+  const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
   const videoInputRef = useRef(null);
@@ -29,6 +41,87 @@ const MessageInput = React.memo(({
   const [uploading, setUploading] = useState(false);
   const typingTimeoutRef = useRef(null);
   const isTypingSentRef = useRef(false);
+  // Mention related state
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [showMentionList, setShowMentionList] = useState(false);
+  const [mentionSuggestions, setMentionSuggestions] = useState([]);
+  const [selectedMentions, setSelectedMentions] = useState([]); // array of user ids
+  const [selectedMentionMap, setSelectedMentionMap] = useState({}); // id -> display name
+  const [groupMembers, setGroupMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
+  const fetchGroupMembers = useCallback(async (chatId) => {
+    if (!chatId) return;
+    setLoadingMembers(true);
+    const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+
+    const endpoints = [
+      // prefer new chat participants endpoint
+      `${API_BASE}/api/chat/${chatId}/participants`,
+      `${API_BASE}/api/group/${chatId}/members`, // legacy endpoints
+      `${API_BASE}/api/group/${chatId}`,
+      `${API_BASE}/api/chat/group/${chatId}`,
+      `${API_BASE}/api/chat/${chatId}`,
+      `${API_BASE}/api/group/get/${chatId}`,
+    ];
+
+    const tryParseMembers = (data) => {
+      if (!data) return [];
+      const candidates = [];
+      // common shapes
+      if (Array.isArray(data.members)) candidates.push(...data.members);
+      if (Array.isArray(data.users)) candidates.push(...data.users);
+      if (Array.isArray(data.participants)) candidates.push(...data.participants);
+      // nested shapes
+      if (data.group && Array.isArray(data.group.members)) candidates.push(...data.group.members);
+      if (data.chat && Array.isArray(data.chat.users)) candidates.push(...data.chat.users);
+      // sometimes API wraps in `data` key
+      if (data.data) return tryParseMembers(data.data);
+      // remove duplicates
+      const uniq = [];
+      const seen = new Set();
+      for (const m of candidates) {
+        const id = String(m?._id || m?.id || m).toString();
+        if (!id) continue;
+        if (!seen.has(id)) {
+          seen.add(id);
+          uniq.push(m);
+        }
+      }
+      return uniq;
+    };
+
+    try {
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+          if (!res.ok) {
+            try { console.warn('[fetchGroupMembers] non-ok response', { url, status: res.status }); } catch(e){}
+            continue;
+          }
+          const data = await res.json();
+          try { console.log('[fetchGroupMembers] response', { url, data }); } catch(e){}
+          const members = tryParseMembers(data || {});
+          if (members && members.length) {
+            setGroupMembers(members);
+            return;
+          }
+          // if we got a 200 but no member objects, still set to empty and stop
+          setGroupMembers([]);
+          return;
+        } catch (e) {
+          try { console.warn('[fetchGroupMembers] fetch error', { url, err: e && e.message }); } catch(e){}
+          continue;
+        }
+      }
+      // none of the endpoints yielded members
+      setGroupMembers([]);
+    } catch (e) {
+      setGroupMembers([]);
+    } finally {
+      setLoadingMembers(false);
+    }
+  }, []);
 
   const handleCreatePoll = useCallback(async (pollData) => {
     try {
@@ -73,6 +166,49 @@ const MessageInput = React.memo(({
     const val = e.target.value;
     setMessageInput(val);
 
+    // DEBUG
+    try { console.log('[Mention] input change, caret-aware detection starting', { val, selectedContact: selectedContact && (selectedContact._id || selectedContact.id || selectedContact.chatId) }); } catch (e) {}
+
+    try {
+      const isGroup = isGroupChat || (selectedContact && (selectedContact.isGroup || selectedContact.isGroupChat));
+      if (!isGroup || !selectedContact) {
+        setShowMentionList(false);
+        setMentionSuggestions([]);
+        setMentionQuery('');
+      } else {
+        // caret-aware detection: look at text up to caret to find last @token
+        const el = inputRef.current;
+        const caret = el ? (el.selectionStart || 0) : val.length;
+        const textUpToCaret = val.slice(0, caret);
+        const m = textUpToCaret.match(/(?:^|\s)@([^\s@]*)$/);
+        if (m) {
+          const q = (m[1] || '').toLowerCase();
+          try { console.log('[Mention] matched token', { q, caret }); } catch(e) {}
+          setMentionQuery(q);
+          const members = (groupMembers && groupMembers.length) ? groupMembers : ((selectedContact && (selectedContact.users || selectedContact.participants)) || []);
+          try { console.log('[Mention] members count', { count: (members || []).length }); } catch(e) {}
+          const filtered = (members || [])
+            .filter(u => u && (u.name || u.email || u.username))
+            .filter(u => String(u._id || u.id || u).toString() !== (currentUser && (currentUser._id || currentUser.id)))
+            .filter(u => {
+              if (!q) return true;
+              const hay = ((u.name || '') + ' ' + (u.email || '') + ' ' + (u.username || '')).toLowerCase();
+              return hay.indexOf(q) !== -1;
+            })
+            .slice(0, 8);
+          setMentionSuggestions(filtered);
+          setShowMentionList(filtered.length > 0);
+          try { console.log('[Mention] suggestions', { filtered: filtered.map(u => ({ id: u._id || u.id, name: u.name })) }); } catch(e) {}
+        } else {
+          setShowMentionList(false);
+          setMentionQuery('');
+          setMentionSuggestions([]);
+        }
+      }
+    } catch (e) {
+      setShowMentionList(false);
+    }
+
     try {
       const chatId = selectedContact?.chatId || selectedContact?.id || selectedContact?._id;
       if (!socket || !chatId) return;
@@ -99,6 +235,32 @@ const MessageInput = React.memo(({
       // ignore
     }
   }, [selectedContact, socket, currentUser]);
+
+  // Clear mention map when mentions cleared
+  useEffect(() => {
+    if (!selectedMentions || selectedMentions.length === 0) {
+      setSelectedMentionMap({});
+    }
+  }, [selectedMentions]);
+
+  const handleKeyDown = useCallback((e) => {
+    try {
+      if (e.key === '@') {
+        try { console.log('[Mention] onKeyDown @ pressed'); } catch(e) {}
+        const isGroup = isGroupChat || (selectedContact && (selectedContact.isGroup || selectedContact.isGroupChat));
+        if (!isGroup || !selectedContact) return;
+        const members = (groupMembers && groupMembers.length) ? groupMembers : ((selectedContact && (selectedContact.users || selectedContact.participants)) || []);
+        try { console.log('[Mention] onKeyDown members count', (members || []).length); } catch(e) {}
+        const filtered = (members || [])
+          .filter(u => u && (u.name || u.email || u.username))
+          .filter(u => String(u._id || u.id || u).toString() !== (currentUser && (currentUser._id || currentUser.id)))
+          .slice(0, 8);
+        setMentionSuggestions(filtered);
+        setShowMentionList(filtered.length > 0);
+        setTimeout(() => { try { if (inputRef.current) inputRef.current.focus(); } catch (e) {} }, 0);
+      }
+    } catch (e) {}
+  }, [selectedContact, currentUser, isGroupChat]);
 
   const handleSendClick = useCallback(async (isScheduled = false) => {
     if (uploading) return;
@@ -187,6 +349,10 @@ const MessageInput = React.memo(({
         chatId,
         userId,
       };
+      if (selectedMentions && selectedMentions.length) {
+        // include validated mention ids
+        payload.mentions = selectedMentions;
+      }
       if (isScheduled && scheduledDate && scheduledTime) {
         const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
         payload.isScheduled = true;
@@ -194,6 +360,8 @@ const MessageInput = React.memo(({
       }
       onSendMessage(payload);
       setMessageInput("");
+      setSelectedMentions([]);
+      setSelectedMentionMap({});
       setScheduledDate('');
       setScheduledTime('');
       setShowScheduleModal(false);
@@ -278,6 +446,34 @@ const MessageInput = React.memo(({
       }
     };
   }, [socket, selectedContact, currentUser]);
+
+  // Ensure group members are available for mention suggestions.
+  useEffect(() => {
+    try {
+      // Resolve whether this is a group and pick the most likely id to fetch members with.
+      const isGroup = Boolean(
+        isGroupChat ||
+        (selectedContact && (selectedContact.isGroup || selectedContact.isGroupChat)) ||
+        (selectedContact && (selectedContact.participants || selectedContact.admins || selectedContact.inviteEnabled))
+      );
+
+      const resolvedId = selectedContact?.groupId || selectedContact?.chatId || selectedContact?.chat || selectedContact?.id || selectedContact?._id;
+      try { console.log('[MessageInput] ensureGroupMembers', { resolvedId, isGroup }); } catch (e) {}
+      if (!isGroup || !resolvedId) return;
+
+      // If the selectedContact already contains members/users/participants, reuse them.
+      const existing = selectedContact?.members || selectedContact?.users || selectedContact?.participants;
+      if (existing && Array.isArray(existing) && existing.length) {
+        setGroupMembers(existing);
+        return;
+      }
+
+      // Otherwise fetch from server (fetchGroupMembers tries several endpoints).
+      fetchGroupMembers(resolvedId);
+    } catch (e) {
+      try { console.warn('[MessageInput] failed to ensure group members', e && e.message); } catch(e){}
+    }
+  }, [selectedContact, isGroupChat, fetchGroupMembers]);
 
   return (
     <div className={`${effectiveTheme.secondary} p-4 relative`}>
@@ -464,14 +660,109 @@ const MessageInput = React.memo(({
               </div>
             )}
 
-            <input
-              type="text"
-              placeholder="Type a message..."
-              value={messageInput}
-              onChange={handleInputChange}
-              onKeyPress={handleKeyPress}
-              className={`w-full bg-transparent ${effectiveTheme.text} placeholder-gray-400 focus:outline-none`}
-            />
+            <div className="relative w-full">
+              <div style={{ position: 'relative' }}>
+                {/* Highlight overlay (shows mentions in blue) */}
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    color: effectiveTheme.mode === 'dark' ? '#e5e7eb' : '#111827',
+                    pointerEvents: 'none',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    paddingRight: 2,
+                  }}
+                  className="mention-overlay"
+                  dangerouslySetInnerHTML={{ __html: (() => {
+                    const escapeHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    if (!messageInput) {
+                      return `<span style=\"color: ${effectiveTheme.mode === 'dark' ? '#9ca3af' : '#6b7280'};\">Type a message...</span>`;
+                    }
+                    let out = escapeHtml(messageInput);
+                    // Replace mentions by display name spans
+                    Object.values(selectedMentionMap || {}).forEach((name) => {
+                      if (!name) return;
+                      try {
+                        const re = new RegExp('(@' + escapeRegExp(name) + ')(?=\\s|$)', 'g');
+                        out = out.replace(re, `<span style=\"color: #2563EB; font-weight: 600;\">$1</span>`);
+                      } catch (e) {}
+                    });
+                    return out;
+                  })() }}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder=""
+                  value={messageInput}
+                  onChange={handleInputChange}
+                  onKeyPress={handleKeyPress}
+                  onKeyDown={handleKeyDown}
+                  className={`w-full bg-transparent placeholder-gray-400 focus:outline-none`}
+                  style={{ color: 'transparent', caretColor: effectiveTheme.mode === 'dark' ? '#fff' : '#1f2937' }}
+                />
+              </div>
+
+              {showMentionList && mentionSuggestions && mentionSuggestions.length > 0 && inputRef.current && typeof document !== 'undefined' && createPortal(
+                <div
+                  className="w-72 max-h-56 overflow-auto rounded-lg shadow-lg"
+                  style={{
+                    position: 'absolute',
+                    zIndex: 9999,
+                    background: effectiveTheme.mode === 'dark' ? '#0b1220' : '#fff',
+                    left: (inputRef.current.getBoundingClientRect().left) + 'px',
+                    top: (inputRef.current.getBoundingClientRect().top - 8 - Math.min(56 * mentionSuggestions.length, 224)) + 'px',
+                    boxShadow: '0 6px 20px rgba(0,0,0,0.12)'
+                  }}
+                >
+                  {mentionSuggestions.map((u) => (
+                    <div
+                      key={u._id || u.id}
+                      onMouseDown={(e) => { e.preventDefault(); }}
+                      onClick={() => {
+                        try {
+                          const name = u.name || u.email || u.username || 'User';
+                              // Replace any trailing @token and append the selected display name
+                              const nameToInsert = name;
+                              const id = u._id || u.id || u;
+                              const before = messageInput.replace(/(?:^|\s)@([^\s@]*)$/, '').trimEnd();
+                              const newMessage = (before ? before + ' ' : '') + '@' + nameToInsert + ' ';
+                              setMessageInput(newMessage);
+                              setShowMentionList(false);
+                              setMentionQuery('');
+                              setMentionSuggestions([]);
+                              setSelectedMentions(prev => {
+                                if (!Array.isArray(prev)) return [id];
+                                if (prev.includes(id)) return prev;
+                                return [...prev, id];
+                              });
+                              setSelectedMentionMap(prev => ({ ...prev, [id]: name }));
+                        } catch (e) {
+                          setShowMentionList(false);
+                        }
+                      }}
+                          className={`px-3 py-2 cursor-pointer hover:${effectiveTheme.hover || 'bg-gray-100'} flex items-center gap-3 border-b border-transparent`}
+                    >
+                          {u.avatar ? (
+                            <img src={u.avatar} alt={u.name || 'U'} className="w-7 h-7 rounded-full object-cover" />
+                          ) : (
+                            <div className="w-7 h-7 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-medium text-gray-700 dark:text-gray-200">
+                              {getInitials(u.name || u.email || u.username || '')}
+                            </div>
+                          )}
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-medium truncate ${effectiveTheme.text || 'text-gray-900'}`}>{u.name || u.email || u.username}</div>
+                        <div className={`text-xs truncate ${effectiveTheme.textSecondary || 'text-gray-500'}`}>{u.email || ''}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>,
+                document.body
+              )}
+            </div>
           </div>
         </div>
 
@@ -810,7 +1101,7 @@ const MessageInput = React.memo(({
         onCreatePoll={handleCreatePoll}
         effectiveTheme={effectiveTheme}
         isLoading={creatingPoll}
-      />
+      />      
     </div>
   );
 }, (prevProps, nextProps) => {

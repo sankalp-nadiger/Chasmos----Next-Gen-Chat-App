@@ -10,6 +10,7 @@ import {
   fetchPreviousChats,
   deleteChat,
    getGroupChatById,
+    getChatParticipants,
   // leaveGroup,
   // updateGroupSettings,
   
@@ -34,6 +35,7 @@ router.route("/previous").get(protect, fetchPreviousChats);
 // router.route("/join").post(protect, joinGroupByInvite);
 router.route("/:chatId").delete(protect, deleteChat);
 router.route("/group/:chatId").get(protect, getGroupChatById);
+router.route("/:chatId/participants").get(protect, getChatParticipants);
 // router.route("/:chatId/leave").put(protect, leaveGroup);
 
 export default router;

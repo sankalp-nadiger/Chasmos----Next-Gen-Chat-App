@@ -404,7 +404,7 @@ const avatarFallbackText =
 
 // MessageBubble component definition
 const MessageBubble = React.memo(
-  ({ message, isPinned, onPinToggle, onDeleteMessage, onStartForwardSelection, onToggleSelectForward, forwardSelectionActive, selectedForwards, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange, onPollVote, onPollRemoveVote, onPollClose, replySelectionActive, selectedReplies, onStartReplySelection, onToggleSelectReply, allMessages }) => {
+  ({ message, isPinned, onPinToggle, onDeleteMessage, onStartForwardSelection, onToggleSelectForward, forwardSelectionActive, selectedForwards, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange, onPollVote, onPollRemoveVote, onPollClose, replySelectionActive, selectedReplies, onStartReplySelection, onToggleSelectReply, allMessages, selectedContact }) => {
     const sender = message.sender;
     const isOwnMessage = (() => {
       if (!sender) return false;
@@ -417,6 +417,9 @@ const MessageBubble = React.memo(
     const [isEditing, setIsEditing] = useState(false);
     const [editedText, setEditedText] = useState(message.content || '');
     const editInputRef = useRef(null);
+    const bubbleRef = useRef(null);
+    const [overlayPos, setOverlayPos] = useState(null);
+    const [avatarHover, setAvatarHover] = useState(false);
 
     const handlePinClick = useCallback(() => {
       onPinToggle(message.id);
@@ -487,6 +490,63 @@ const MessageBubble = React.memo(
     const repliesTotal = repliesToThis.length;
     const repliesTotalPages = Math.max(1, Math.ceil(repliesTotal / REPLIES_PER_PAGE));
 
+    // Normalize sender info for overlay display (handles string ids, nested objects, and legacy fields)
+    const isGroupChat = Boolean(
+      // prefer parent-selected contact flag when available
+      (selectedContact && (selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat)) ||
+      message.chat?.isGroupChat || message.chat?.isGroup || message.chat?.isgroupchat || message.isGroup || message.isgroupchat || message.isGroupChat
+    );
+
+    const overlaySender = (() => {
+      if (!sender) {
+        // Try alternate fields often present on message objects
+        if (message.senderName || message.sender_name || message.senderLabel) {
+          return {
+            name: message.senderName || message.sender_name || message.senderLabel,
+            avatar: message.senderAvatar || message.sender_avatar || message.senderAvatarUrl || message.senderAvatarURL || null,
+          };
+        }
+        if (message.createdBy) {
+          return typeof message.createdBy === 'object' ? message.createdBy : { id: message.createdBy, name: String(message.createdBy) };
+        }
+        return null;
+      }
+      if (typeof sender === 'string') {
+        return { id: sender, name: message.senderName || message.sender_label || sender };
+      }
+      // sender is an object
+      return sender;
+    })();
+
+    // Update overlay position when bubble or viewport changes
+    useEffect(() => {
+      if (!( !isOwnMessage && isGroupChat && overlaySender && bubbleRef.current )) {
+        setOverlayPos(null);
+        return;
+      }
+      const update = () => {
+        try {
+          if (!bubbleRef.current) return;
+          const r = bubbleRef.current.getBoundingClientRect();
+          // Position the overlay so it hugs the bubble's bottom-left similar to the own-message overlay
+          // left: slightly left of the bubble's left edge, top: slightly above the bubble bottom so it appears attached
+          // use bubble's left and bottom as base; we'll apply the same translate offsets
+          const left = Math.max(6, r.left);
+          const top = Math.max(6, r.bottom);
+          setOverlayPos({ left, top });
+        } catch (e) {
+          // ignore
+        }
+      };
+      update();
+      window.addEventListener('resize', update);
+      window.addEventListener('scroll', update, true);
+      return () => {
+        window.removeEventListener('resize', update);
+        window.removeEventListener('scroll', update, true);
+      };
+    }, [bubbleRef, isGroupChat, overlaySender, isOwnMessage, message._id, message.id]);
+
     const getReplyAuthorLabel = (ref) => {
       if (!ref) return 'Unknown';
       const s = ref.sender;
@@ -541,6 +601,7 @@ const MessageBubble = React.memo(
             </div>
           )}
           <motion.div
+          ref={bubbleRef}
           className={`${
             isShortMessage ? 'inline-flex flex-col' : 'max-w-xs lg:max-w-md'
           } px-4 ${bubblePaddingClass} rounded-lg relative ${
@@ -776,7 +837,50 @@ const MessageBubble = React.memo(
             </a>
           );
         }
-        return part;
+
+        // Prefer server-provided mention metadata to highlight full display names (may include spaces)
+        const mentionNames = Array.isArray(message.mentions)
+          ? message.mentions.map((m) => {
+              if (!m) return null;
+              if (typeof m === 'string') return m;
+              return m.displayName || m.name || m.fullName || m.username || m.label || null;
+            }).filter(Boolean)
+          : [];
+
+        const escapeRegExp = (s) => String(s || '').replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+
+        if (mentionNames.length > 0) {
+          // Sort by length to prefer longest matches (avoid partial matching shorter names)
+          const namesSortedPlain = [...new Set(mentionNames)].sort((a,b) => b.length - a.length);
+          const escapedNames = namesSortedPlain.map(n => '@' + escapeRegExp(n));
+          const combined = escapedNames.join('|');
+          const parts = part.split(new RegExp('(' + combined + ')', 'g'));
+          const mentionSet = new Set(namesSortedPlain.map(n => '@' + n));
+          return parts.map((p2, idx2) => {
+            if (!p2) return null;
+            if (mentionSet.has(p2)) {
+              return (
+                <span key={`${index}-${idx2}`} style={{ color: '#2563EB', fontWeight: 600 }}>
+                  {p2}
+                </span>
+              );
+            }
+            return <React.Fragment key={`${index}-${idx2}`}>{p2}</React.Fragment>;
+          });
+        }
+
+        // Fallback: highlight simple @tokens (no spaces)
+        return part.split(/(@[^\s@]+)/g).map((p2, idx2) => {
+          if (!p2) return null;
+          if (p2.startsWith('@')) {
+            return (
+              <span key={`${index}-${idx2}`} style={{ color: '#2563EB', fontWeight: 600 }}>
+                {p2}
+              </span>
+            );
+          }
+          return <React.Fragment key={`${index}-${idx2}`}>{p2}</React.Fragment>;
+        });
       })}
     </span>
   )}
@@ -863,6 +967,40 @@ const MessageBubble = React.memo(
             </motion.div>
           )}
         </motion.div>
+        {/* Inline sender overlay for group chats (replicates own-message overlay UI) */}
+        {!isOwnMessage && isGroupChat && overlaySender && String(overlaySender?.id || overlaySender?._id || overlaySender?.userId) !== String(currentUserId) && (
+          <div className="absolute left-0 bottom-0 transform translate-y-3 -translate-x-4 z-40 pointer-events-auto">
+            <div
+              className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-md bg-gray-200 flex items-center justify-center text-sm font-medium text-white"
+              onMouseEnter={() => setAvatarHover(true)}
+              onMouseLeave={() => setAvatarHover(false)}
+            >
+              {(overlaySender.avatar || overlaySender.pic || overlaySender.avatarUrl || overlaySender.picUrl) ? (
+                <img
+                  src={overlaySender.avatar || overlaySender.pic || overlaySender.avatarUrl || overlaySender.picUrl}
+                  alt={overlaySender.name || overlaySender.displayName || overlaySender.username || 'User'}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-400 to-blue-500 text-white">{(overlaySender.name || overlaySender.displayName || overlaySender.username || String(overlaySender.id || 'U')).charAt(0)}</div>
+              )}
+            </div>
+            {/* Name label shows only when hovering the avatar (avatarHover state) */}
+            <div className={`absolute left-9 bottom-0 -translate-y-4 transform transition-all duration-200 pointer-events-none ${avatarHover ? 'opacity-100 translate-y-0' : 'opacity-0'}`}>
+              <div className="text-[10px] rounded-md px-2 py-1 shadow-lg whitespace-nowrap" style={{
+                background: effectiveTheme.mode === 'dark'
+                  ? 'linear-gradient(135deg, rgba(255,255,255,0.10), rgba(243,244,246,0.06))'
+                  : 'linear-gradient(135deg, rgba(17,24,39,0.9), rgba(79,70,229,0.85))',
+                color: effectiveTheme.mode === 'dark' ? '#0f172a' : '#ffffff',
+                backdropFilter: 'blur(6px)',
+                boxShadow: effectiveTheme.mode === 'dark' ? '0 6px 20px rgba(2,6,23,0.6)' : '0 6px 20px rgba(14,18,48,0.35)',
+                textShadow: effectiveTheme.mode === 'dark' ? '0 1px 0 rgba(255,255,255,0.6)' : '0 1px 0 rgba(0,0,0,0.35)'
+              }}>
+                {overlaySender.name || overlaySender.displayName || overlaySender.username || String(overlaySender.id || 'User')}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Action buttons - show after message bubble */}
         {!isEditing && (
@@ -1293,6 +1431,7 @@ const MessagesArea = ({
   effectiveTheme,
   isTyping,
   selectedContactId,
+  selectedContact,
   currentUserId,
   onDeleteMessage,
   onEditMessage,
@@ -1509,6 +1648,7 @@ const MessagesArea = ({
                     onPollClose={onPollClose}
                     // Reply props
                     allMessages={filteredMessages}
+                    selectedContact={selectedContact}
                     replySelectionActive={replySelectionActive}
                     selectedReplies={selectedReplies}
                     onStartReplySelection={onStartReplySelection}
@@ -3519,13 +3659,18 @@ const handleOpenGroupInfo = (group) => {
   })
     .then(res => res.json())
     .then(fullGroupData => {
-      setCurrentGroup(fullGroupData);
+      const normalized = {
+        ...fullGroupData,
+        name: fullGroupData.name || fullGroupData.chatName || (fullGroupData.groupSettings && fullGroupData.groupSettings.name) || group.name || group.chatName || 'Group'
+      };
+      setCurrentGroup(normalized);
       setShowGroupInfoModal(true);
     })
     .catch(err => {
       console.error('Failed to fetch group details:', err);
       // Fallback: use the data we have
-      setCurrentGroup(group);
+      const fallback = { ...group, name: group.name || group.chatName || (group.groupSettings && group.groupSettings.name) || 'Group' };
+      setCurrentGroup(fallback);
       setShowGroupInfoModal(true);
     });
 };
@@ -4244,6 +4389,9 @@ const handleSendMessageFromInput = useCallback(
 
         try {
           const bodyObj = { content: payload.content, chatId, userId, repliedTo: selectedReplies || [] };
+          if (payload.mentions && Array.isArray(payload.mentions) && payload.mentions.length) {
+            bodyObj.mentions = payload.mentions;
+          }
           if (payload.isScheduled) {
             bodyObj.isScheduled = true;
             if (payload.scheduledFor) bodyObj.scheduledFor = payload.scheduledFor;
@@ -4417,6 +4565,9 @@ const handleSendMessageFromInput = useCallback(
             type: payload.type,
             repliedTo: selectedReplies || [],
           };
+          if (payload.mentions && Array.isArray(payload.mentions) && payload.mentions.length) {
+            bodyObj.mentions = payload.mentions;
+          }
           if (payload.isScheduled) {
             bodyObj.isScheduled = true;
             if (payload.scheduledFor) bodyObj.scheduledFor = payload.scheduledFor;
@@ -4675,6 +4826,9 @@ const handleSendMessageFromInput = useCallback(
             type: 'poll',
             poll: payload.pollId,
           };
+          if (payload.mentions && Array.isArray(payload.mentions) && payload.mentions.length) {
+            bodyObj.mentions = payload.mentions;
+          }
           if (payload.isScheduled) {
             bodyObj.isScheduled = true;
             if (payload.scheduledFor) bodyObj.scheduledFor = payload.scheduledFor;
@@ -5095,11 +5249,18 @@ const handleSendMessageFromInput = useCallback(
           // Always show in-app notification if notifications are enabled
           if (showNotifications) {
             setNotifications(prev => {
+              // attempt to determine if this chatId refers to a group from recentChats
+              const chatEntry = recentChats.find(c => String(c.chatId) === String(key) || String(c.id) === String(key));
+              // Prefer group/chat avatar (including groupSettings.avatar) if available, then recentChats avatar, then sender avatar
+              const resolvedAvatar = (newMessage && newMessage.chat && ((newMessage.chat.groupSettings && newMessage.chat.groupSettings.avatar) || newMessage.chat.avatar || newMessage.chat.pic)) || (chatEntry && (chatEntry.avatar || chatEntry.pic)) || senderAvatar || null;
               const newNotif = {
                 id: `notif-${Date.now()}-${notificationIdCounter.current++}`,
                 chatId: key,
                 senderName,
-                avatar: senderAvatar,
+                avatar: resolvedAvatar,
+                // Prefer explicit chat metadata, fall back to recentChats lookup
+                isGroup: !!( (newMessage && newMessage.chat && (newMessage.chat.isGroupChat || newMessage.chat.isGroup)) || (chatEntry && (chatEntry.isGroup || chatEntry.isGroupChat)) ),
+                groupName: (newMessage && newMessage.chat && (newMessage.chat.chatName || newMessage.chat.name)) || (chatEntry && (chatEntry.chatName || chatEntry.name)) || null,
                 message: messageText,
                 unreadCount: currentUnread + 1,
                 timestamp: Date.now()
@@ -5227,7 +5388,13 @@ const handleSendMessageFromInput = useCallback(
 
         // Only increment unread count if this chat is not currently open
         if (!isCurrentChat) {
-          setRecentChats((prev) => prev.map((c) => (c.chatId === key || c.id === key ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c)));
+          setRecentChats((prev) => prev.map((c) => {
+            if (!(c.chatId === key || c.id === key)) return c;
+            const existing = c || {};
+            const newUnread = (existing.unreadCount || 0) + 1;
+            const providedMentionCount = (newMessage && (newMessage.mentionCount || newMessage.mentionsCount)) || null;
+            return { ...existing, unreadCount: newUnread, ...(providedMentionCount !== null ? { mentionCount: providedMentionCount } : {}) };
+          }));
         } else {
           // If chat is currently open and this message is NOT from me, mark the message as read
           if (!isFromMe) {
@@ -8547,6 +8714,7 @@ useEffect(() => {
                     selectedContact.id,
                     chatSearchTerm
                   )}
+                  selectedContact={selectedContact}
                   pinnedMessages={pinnedMessages}
                   onPinMessage={handlePinMessage}
                   onHoverDateChange={handleHoverDateChange}
@@ -8772,8 +8940,67 @@ useEffect(() => {
             toast.error("Failed to send reply");
           }
         }}
-        onOpen={(notification) => {
-          // Open the chat when notification is clicked
+        onOpen={async (notification) => {
+          // If this notification refers to a group, open the group chat then navigate to groups page
+          try {
+            if (notification && (notification.isGroup || notification.groupName)) {
+              // Try to find the chat entry in recentChats
+              const chatEntry = recentChats.find(c => 
+                String(c.chatId) === String(notification.chatId) || 
+                String(c.id) === String(notification.chatId)
+              );
+
+              const token = localStorage.getItem("token") || localStorage.getItem("chasmos_auth_token");
+              let chatToOpen = null;
+
+              // Prefer recentChats entry when available
+              if (chatEntry) {
+                chatToOpen = chatEntry;
+              } else if (token) {
+                try {
+                  const resp = await fetch(`${API_BASE_URL}/api/chat/${notification.chatId}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                  });
+                  if (resp.ok) {
+                    const chatData = await resp.json();
+                    const normalizedChatId = String(chatData._id || chatData.chatId || chatData.id || notification.chatId);
+                    chatToOpen = {
+                      id: normalizedChatId,
+                      chatId: normalizedChatId,
+                      name: chatData.chatName || chatData.name || notification.groupName || notification.senderName,
+                      avatar: chatData.avatar || chatData.pic || notification.avatar || null,
+                      participants: chatData.participants || chatData.users || [],
+                      isGroup: chatData.isGroupChat || chatData.isGroup || true,
+                    };
+                  }
+                } catch (e) {
+                  console.warn('Failed to fetch group chat details for notification', e);
+                }
+              }
+
+              // Fallback minimal object if fetch/lookup didn't produce a full object
+              if (!chatToOpen) {
+                const normalizedChatId = String(notification.chatId || notification.chatId || Date.now());
+                chatToOpen = {
+                  id: normalizedChatId,
+                  chatId: normalizedChatId,
+                  name: notification.groupName || notification.senderName,
+                  avatar: notification.avatar || null,
+                  participants: [],
+                  isGroup: true,
+                };
+              }
+
+              try { await handleOpenChat(chatToOpen); } catch (e) { console.warn('handleOpenChat failed for group notification', e); }
+              try { navigate('/groups'); } catch (e) { /* ignore navigation errors */ }
+              setNotifications(prev => prev.filter(n => n.id !== notification.id));
+              return;
+            }
+          } catch (e) {
+            // ignore unexpected errors
+          }
+
+          // Otherwise, open the chat when notification is clicked
           const chat = recentChats.find(c => 
             String(c.chatId) === String(notification.chatId) || 
             String(c.id) === String(notification.chatId)

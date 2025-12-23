@@ -9,19 +9,18 @@ import {
   LogOut,
   Trash,
 } from "lucide-react";
-import Logo from "./Logo";
+import CosmosBackground from "./CosmosBg";
 
-const TabButton = ({ active, icon: Icon, label, onClick, color }) => (
-  <button
-    onClick={onClick}
-    className={`flex-1 flex flex-col items-center py-2 rounded-lg transition ${
-      active ? `bg-gray-800 text-${color}-400` : "bg-gray-900 text-gray-400"
-    }`}
-  >
-    <Icon className="w-5 h-5" />
-    <span className="text-xs mt-1">{label}</span>
-  </button>
-);
+const TabButton = ({ active, icon: Icon, label, onClick, color }) => {
+  const themeModeLocal = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
+  const base = themeModeLocal === 'dark' ? (active ? `bg-gray-800 text-${color}-400` : 'bg-gray-900 text-gray-400') : (active ? `bg-white/90 text-${color}-600` : 'bg-white text-gray-700');
+  return (
+    <button onClick={onClick} className={`flex-1 flex flex-col items-center py-2 rounded-lg transition ${base}`}>
+      <Icon className="w-5 h-5" />
+      <span className="text-xs mt-1">{label}</span>
+    </button>
+  );
+};
 
 const GroupInfoModalWhatsApp = ({
   open,
@@ -96,9 +95,35 @@ const GroupInfoModalWhatsApp = ({
     }
   };
 
+  // Determine theme mode based on document class (falls back to 'light')
+  const themeMode = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
+
+  const styles = {
+    sectionBg: themeMode === 'dark' ? 'bg-gray-900' : 'bg-white/90',
+    sectionHover: themeMode === 'dark' ? 'hover:bg-gray-800' : 'hover:bg-gray-100',
+    cardBg: themeMode === 'dark' ? 'bg-gray-900' : 'bg-white',
+    cardHover: themeMode === 'dark' ? 'hover:bg-gray-800' : 'hover:bg-gray-100',
+    avatarBg: themeMode === 'dark' ? 'bg-gray-700' : 'bg-white border border-gray-200',
+    titleText: themeMode === 'dark' ? 'text-white' : 'text-gray-900',
+    subText: themeMode === 'dark' ? 'text-gray-400' : 'text-gray-600',
+    panelBg: themeMode === 'dark' ? 'bg-gray-900' : 'bg-white',
+    borderColor: themeMode === 'dark' ? 'border-gray-800' : 'border-gray-200'
+  };
+
   const mediaContent = group.media || [];
   const docsContent = group.docs || [];
   const linksContent = group.links || [];
+
+  // Derive a reliable display name for the group/chat across different API shapes
+  const displayName = (
+    group?.name ||
+    group?.chatName ||
+    group?.groupName ||
+    group?.groupSettings?.name ||
+    group?.groupSettings?.chatName ||
+    (group?.chat && (group.chat.chatName || group.chat.name)) ||
+    "Group"
+  );
 
   const handleLeaveGroup = async () => {
   if (!confirm('Are you sure you want to leave this group?')) return;
@@ -137,54 +162,69 @@ const GroupInfoModalWhatsApp = ({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[20000] bg-[#121212] flex flex-col"
+          className={`fixed inset-0 z-[20000] flex flex-col ${themeMode === 'dark' ? 'bg-[#121212]' : ''}`}
+          style={themeMode === 'light' ? { background: 'transparent' } : {}}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
+          {/* Cosmos background behind the modal */}
+          <CosmosBackground
+            theme={themeMode}
+            opacity={1}
+            className="absolute inset-0 pointer-events-none"
+            zIndex={-1}
+            showNebula={true}
+            showComets={true}
+            showParticles={true}
+            showStars={true}
+          />
+          {/* White overlay in day mode to match GroupCreation styling */}
+          {themeMode === 'light' && (
+            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm pointer-events-none z-0" />
+          )}
           {/* ================= HEADER ================= */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div className={`relative z-10 flex items-center justify-between px-5 py-4 border-b ${themeMode === 'dark' ? 'border-gray-800' : 'border-gray-200'}`}>
+            {/* Left: avatar + members count (left aligned) */}
             <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-lg bg-gray-800 flex items-center justify-center overflow-hidden">
-                {group.avatar || group.icon ? (
-                  <img
-                    src={group.avatar || group.icon}
-                    alt={group.name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="text-white text-xl font-bold">
-                    {group.name?.charAt(0)}
-                  </span>
-                )}
+              <div className={`w-14 h-14 rounded-lg ${styles.avatarBg} flex items-center justify-center overflow-hidden`}>
+                {(() => {
+                  const avatarSrc = group?.avatar || group?.icon || group?.groupSettings?.avatar || group?.groupSettings?.icon || group?.groupSettings?.avatarUrl || "";
+                  if (avatarSrc) {
+                    return (
+                      <img src={avatarSrc} alt={displayName} className="w-full h-full object-cover" />
+                    );
+                  }
+                  return <span className={`${styles.titleText} text-xl font-bold`}>{String(displayName || "G").charAt(0)}</span>;
+                })()}
               </div>
 
-              <div>
-                <h2 className="text-white font-semibold text-lg">
-                  {group.name}
-                </h2>
-                <p className="text-gray-400 text-sm">
-                  {members.length} members
-                </p>
+              <div className="flex flex-col">
+                <p className={`${styles.subText} text-sm`}>{members.length} members</p>
               </div>
             </div>
 
-            <button
-              onClick={onClose}
-              className="p-2 rounded hover:bg-gray-800 transition"
-            >
-              <X className="text-white w-6 h-6" />
-            </button>
+            {/* Center: group name (centered between avatar and close button) */}
+            <div className="absolute left-1/2 transform -translate-x-1/2 text-center z-20 pointer-events-none">
+              <h2 className={`${styles.titleText} font-semibold text-lg`}>{group.name}</h2>
+            </div>
+
+            {/* Right: close button */}
+            <div className="relative z-30">
+              <button onClick={onClose} className={`p-2 rounded transition group ${themeMode === 'dark' ? 'hover:bg-gray-800' : 'hover:bg-red-600'}`}>
+                <X className={`${styles.titleText} w-6 h-6 group-hover:text-white`} />
+              </button>
+            </div>
           </div>
 
           {/* ================= BODY ================= */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-6">
+          <div className="relative z-10 flex-1 overflow-y-auto p-5 space-y-6">
 
             {/* ================= DESCRIPTION ================= */}
             {group.description && (
               <Section title="About">
-                <div className="bg-gray-900 rounded-xl p-4">
-                  <p className="text-gray-300 text-sm">{group.description}</p>
+                <div className={`${styles.sectionBg} rounded-xl p-4`}>
+                  <p className={`${styles.subText} text-sm`}>{group.description}</p>
                 </div>
               </Section>
             )}
@@ -207,10 +247,10 @@ const GroupInfoModalWhatsApp = ({
                 return (
                   <div
                     key={memberId}
-                    className="flex justify-between items-center bg-gray-900 rounded-xl p-3 hover:bg-gray-800 transition"
+                    className={`flex justify-between items-center ${styles.cardBg} rounded-xl p-3 ${styles.cardHover} transition`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-white overflow-hidden">
+                      <div className={`w-10 h-10 rounded-full ${styles.avatarBg} flex items-center justify-center ${themeMode === 'dark' ? 'text-white' : 'text-gray-900'} overflow-hidden`}>
                         {member.avatar ? (
                           <img src={member.avatar} alt={member.name} className="w-full h-full rounded-full object-cover" />
                         ) : (
@@ -220,18 +260,14 @@ const GroupInfoModalWhatsApp = ({
 
                       <div>
                         <div className="flex gap-2 items-center flex-wrap">
-                          <span className="text-white text-sm font-medium">
-                            {member.name}
-                          </span>
+                            <span className={`${styles.titleText} text-sm font-medium`}>{member.name}</span>
 
                           {isMemberCreator && Badge("Creator", "purple")}
                           {isMemberAdmin && !isMemberCreator && Badge("Admin", "blue")}
                           {me && Badge("You", "gray")}
                         </div>
 
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {member.username || member.email || "Member"}
-                        </p>
+                        <p className={`text-xs ${styles.subText} mt-0.5`}>{member.username || member.email || "Member"}</p>
                       </div>
                     </div>
 
@@ -259,11 +295,11 @@ const GroupInfoModalWhatsApp = ({
 
             {/* ================= INVITE LINK ================= */}
             <Section title="Invite Link">
-              <div className="bg-gray-900 rounded-xl p-4">
+              <div className={`${styles.sectionBg} rounded-xl p-4`}>
                 <div className="flex justify-between items-center mb-3">
                   <div>
-                    <span className="text-white text-sm font-medium block">Invite via link</span>
-                    <span className="text-xs text-gray-400 mt-1 block">
+                    <span className={`${styles.titleText} text-sm font-medium block`}>Invite via link</span>
+                        <span className={`text-xs ${styles.subText} mt-1 block`}>
                       {group.inviteEnabled ? "Members can join using the invite link" : "Invite link is currently disabled"}
                     </span>
                   </div>
@@ -358,7 +394,7 @@ const GroupInfoModalWhatsApp = ({
                 />
               </div>
 
-              <div className="bg-gray-900 rounded-xl p-4 min-h-[200px]">
+              <div className={`${styles.sectionBg} rounded-xl p-4 min-h-[200px]`}>
                 {activeTab === "media" && (
                   <div className="grid grid-cols-3 gap-2">
                     {mediaContent.length > 0 ? (
@@ -379,7 +415,7 @@ const GroupInfoModalWhatsApp = ({
                       docsContent.map((doc, i) => (
                         <div key={i} className="flex items-center gap-3 p-3 bg-gray-800 rounded-lg hover:bg-gray-750 transition">
                           <FileText className="w-5 h-5 text-blue-400" />
-                          <span className="text-white text-sm">{doc.name}</span>
+                          <span className={`${styles.titleText} text-sm`}>{doc.name}</span>
                         </div>
                       ))
                     ) : (
@@ -413,7 +449,7 @@ const GroupInfoModalWhatsApp = ({
     <ActionButton 
       icon={LogOut} 
       label="Leave group" 
-      color="orange"
+      color="red"
       onClick={handleLeaveGroup}
     />
   )}
@@ -427,14 +463,18 @@ const GroupInfoModalWhatsApp = ({
 
 /* ================= REUSABLE COMPONENTS ================= */
 
-const Section = ({ title, children }) => (
-  <section className="space-y-3">
-    {title && (
-      <h4 className="text-white font-semibold text-base mb-3">{title}</h4>
-    )}
-    <div className="space-y-3">{children}</div>
-  </section>
-);
+const Section = ({ title, children }) => {
+  const themeModeLocal = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
+  const titleClass = themeModeLocal === 'dark' ? 'text-white' : 'text-gray-800';
+  return (
+    <section className="space-y-3">
+      {title && (
+        <h4 className={`${titleClass} font-semibold text-base mb-3`}>{title}</h4>
+      )}
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+};
 
 const StatusBadge = ({ enabled }) => (
   <span
@@ -448,34 +488,46 @@ const StatusBadge = ({ enabled }) => (
   </span>
 );
 
-const PermissionRow = ({ label, description, enabled }) => (
-  <div className="flex justify-between items-center bg-gray-900 rounded-xl p-4 hover:bg-gray-800 transition">
-    <div className="flex-1">
-      <span className="text-white text-sm font-medium block">{label}</span>
-      {description && (
-        <span className="text-gray-400 text-xs mt-1 block">{description}</span>
-      )}
-    </div>
-    <StatusBadge enabled={enabled} />
-  </div>
-);
-
-const FeatureRow = ({ icon: Icon, label, description, enabled, color }) => (
-  <div className="flex items-center justify-between bg-gray-900 rounded-xl p-4 hover:bg-gray-800 transition">
-    <div className="flex items-center gap-3 flex-1">
-      <div className={`w-10 h-10 rounded-lg bg-${color}-500/10 flex items-center justify-center`}>
-        <Icon className={`w-5 h-5 text-${color}-400`} />
-      </div>
-      <div>
-        <span className="text-white text-sm font-medium block">{label}</span>
+const PermissionRow = ({ label, description, enabled }) => {
+  const themeModeLocal = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
+  const bg = themeModeLocal === 'dark' ? 'bg-gray-900 hover:bg-gray-800' : 'bg-white hover:bg-gray-50 border border-gray-200';
+  const titleClass = themeModeLocal === 'dark' ? 'text-white' : 'text-gray-900';
+  const descClass = themeModeLocal === 'dark' ? 'text-gray-400' : 'text-gray-600';
+  return (
+    <div className={`flex justify-between items-center ${bg} rounded-xl p-4 transition`}>
+      <div className="flex-1">
+        <span className={`${titleClass} text-sm font-medium block`}>{label}</span>
         {description && (
-          <span className="text-gray-400 text-xs mt-1 block">{description}</span>
+          <span className={`${descClass} text-xs mt-1 block`}>{description}</span>
         )}
       </div>
+      <StatusBadge enabled={enabled} />
     </div>
-    <StatusBadge enabled={enabled} />
-  </div>
-);
+  );
+};
+
+const FeatureRow = ({ icon: Icon, label, description, enabled, color }) => {
+  const themeModeLocal = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
+  const bg = themeModeLocal === 'dark' ? 'bg-gray-900 hover:bg-gray-800' : 'bg-white hover:bg-gray-50 border border-gray-200';
+  const titleClass = themeModeLocal === 'dark' ? 'text-white' : 'text-gray-900';
+  const descClass = themeModeLocal === 'dark' ? 'text-gray-400' : 'text-gray-600';
+  return (
+    <div className={`flex items-center justify-between ${bg} rounded-xl p-4 transition`}>
+      <div className="flex items-center gap-3 flex-1">
+        <div className={`w-10 h-10 rounded-lg bg-${color}-500/10 flex items-center justify-center`}>
+          <Icon className={`w-5 h-5 text-${color}-400`} />
+        </div>
+        <div>
+          <span className={`${titleClass} text-sm font-medium block`}>{label}</span>
+          {description && (
+            <span className={`${descClass} text-xs mt-1 block`}>{description}</span>
+          )}
+        </div>
+      </div>
+      <StatusBadge enabled={enabled} />
+    </div>
+  );
+};
 
 const Badge = (text, color) => {
   const colorClasses = {
@@ -492,19 +544,34 @@ const Badge = (text, color) => {
 };
 
 const ActionButton = ({ icon: Icon, label, color, onClick }) => {
+  const themeModeLocal = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
+  const isDanger = color === 'red';
+
+  // base classes depending on theme and danger flag
+  let base;
+  if (isDanger) {
+    base = themeModeLocal === 'dark'
+      ? 'bg-gray-900 hover:bg-red-700 text-gray-400 group'
+      : 'bg-white hover:bg-red-600 border border-gray-200 text-gray-700 group';
+  } else {
+    base = themeModeLocal === 'dark'
+      ? 'bg-gray-900 hover:bg-gray-800 text-gray-400'
+      : 'bg-white hover:bg-gray-50 border border-gray-200 text-gray-700';
+  }
+
   const colorClasses = {
-    red: "text-red-400 hover:bg-red-500/10",
-    orange: "text-orange-400 hover:bg-orange-500/10",
-    yellow: "text-yellow-400 hover:bg-yellow-500/10",
+    red: 'text-red-400',
+    orange: 'text-orange-400',
+    yellow: 'text-yellow-400',
   };
 
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-3 py-3 px-4 rounded-xl bg-gray-900 ${colorClasses[color] || "text-gray-400"} hover:bg-gray-800 transition`}
+      className={`w-full flex items-center gap-3 py-3 px-4 rounded-xl ${base} ${colorClasses[color] || ''} transition`}
     >
-      {Icon && <Icon className="w-5 h-5" />}
-      <span className="font-medium">{label}</span>
+      {Icon && <Icon className={`w-5 h-5 ${isDanger ? 'group-hover:text-white' : ''}`} />}
+      <span className={`font-medium ${isDanger ? 'group-hover:text-white' : ''}`}>{label}</span>
     </button>
   );
 };

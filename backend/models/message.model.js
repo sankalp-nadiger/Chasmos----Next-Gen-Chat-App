@@ -40,6 +40,8 @@ const messageSchema = new Schema(
     // Poll reference
     poll: { type: Schema.Types.ObjectId, ref: "Poll" }
     ,
+    // Mentioned users in this message (for @mentions in group chats)
+    mentions: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     // Delivery / read tracking
     status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
     // For group chats: list of users who have read this message
@@ -60,5 +62,7 @@ messageSchema.index({ isScheduled: 1, scheduledFor: 1, scheduledSent: 1 });
 messageSchema.index({ repliedTo: 1 });
 // Index keepFor for faster lookups when filtering media visibility
 messageSchema.index({ keepFor: 1 });
+// Index mentions for fast unread-mention queries
+messageSchema.index({ mentions: 1 });
 
 export default mongoose.model("Message", messageSchema);

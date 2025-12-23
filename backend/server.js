@@ -323,7 +323,8 @@ io.on("connection", (socket) => {
         const members = (chatDoc?.participants && chatDoc.participants.length) ? chatDoc.participants : (chatDoc?.users || []);
         (members || []).forEach((m) => {
           try {
-            const uid = String(m._id || m.id || m);
+            if (!m) return;
+            const uid = String(m?._id ?? m?.id ?? m);
             if (!uid) return;
             // don't redundantly emit to the same socket origin
             if (socket.userId && String(socket.userId) === uid) return;
@@ -374,7 +375,8 @@ io.on("connection", (socket) => {
         const members = (chatDoc?.participants && chatDoc.participants.length) ? chatDoc.participants : (chatDoc?.users || []);
         (members || []).forEach((m) => {
           try {
-            const uid = String(m._id || m.id || m);
+            if (!m) return;
+            const uid = String(m?._id ?? m?.id ?? m);
             if (!uid) return;
             if (socket.userId && String(socket.userId) === uid) return;
             io.to(uid).emit('stop typing', payload);
@@ -452,6 +454,10 @@ io.on("connection", (socket) => {
                 path: 'repliedTo',
                 populate: { path: 'sender', select: 'name avatar _id' }
               })
+              // Populate mentions so socket recipients receive user objects (name/avatar)
+              .populate('mentions', 'name avatar _id')
+              // Populate chat minimally so clients can detect group metadata (include group avatar)
+              .populate({ path: 'chat', select: 'chatName isGroupChat groupSettings.avatar' })
               .lean();
             if (populated) payload = populated;
           } else if (newMessageRecieved.repliedTo && newMessageRecieved.repliedTo.length) {
@@ -502,9 +508,84 @@ io.on("connection", (socket) => {
             } catch (e3) {
               // ignore population errors - best-effort only
             }
+                // Populate mentions (best-effort) so payload.mentions contains user objects
+                try {
+                  if (payload && Array.isArray(payload.mentions) && payload.mentions.length) {
+                    const mentionIds = (payload.mentions || []).map(m => {
+                      if (!m) return null;
+                      if (typeof m === 'string') return m;
+                      return m._id || m.id || null;
+                    }).filter(Boolean);
+                    if (mentionIds.length) {
+                      const mentionDocs = await User.find({ _id: { $in: mentionIds } }).select('name avatar _id').lean();
+                      const map = {};
+                      mentionDocs.forEach(d => { map[String(d._id)] = d; });
+                      payload.mentions = mentionIds.map(id => map[String(id)] || id);
+                    }
+                  }
+                } catch (e4) {
+                  // ignore mention population errors
+                }
           }
         } catch (e) {
           console.warn('Could not populate message before broadcast', e);
+        }
+
+        // Ensure payload contains minimal chat metadata so clients can
+        // detect group messages even if the message object lacked chat fields.
+        try {
+          if (chat && payload) {
+            payload.chat = payload.chat || {};
+            if (typeof payload.chat.isGroupChat === 'undefined' && typeof chat.isGroupChat !== 'undefined') {
+              payload.chat.isGroupChat = chat.isGroupChat;
+            }
+            if (!payload.chat._id && chat._id) {
+              payload.chat._id = chat._id;
+            }
+            if (!payload.chat.chatName && chat.chatName) {
+              payload.chat.chatName = chat.chatName;
+            }
+            // Prefer any group avatar available on the chat document
+            if ((!payload.chat.groupSettings || !payload.chat.groupSettings.avatar) && chat.groupSettings && chat.groupSettings.avatar) {
+              payload.chat.groupSettings = payload.chat.groupSettings || {};
+              payload.chat.groupSettings.avatar = chat.groupSettings.avatar;
+            }
+          }
+        } catch (e) {
+          // best-effort only
+        }
+
+        // Ensure payload.sender is a populated user object (best-effort).
+        try {
+          if (payload) {
+            let senderId = null;
+            if (payload.sender) {
+              if (typeof payload.sender === 'string') senderId = payload.sender;
+              else if (payload.sender._id) senderId = String(payload.sender._id);
+              else if (payload.sender.id) senderId = String(payload.sender.id);
+            }
+            // fallback to original incoming object if payload lacks sender id
+            if (!senderId && newMessageRecieved && newMessageRecieved.sender) {
+              if (typeof newMessageRecieved.sender === 'string') senderId = newMessageRecieved.sender;
+              else if (newMessageRecieved.sender._id) senderId = String(newMessageRecieved.sender._id);
+              else if (newMessageRecieved.sender.id) senderId = String(newMessageRecieved.sender.id);
+            }
+
+            if (senderId) {
+              // Only fetch if we don't already have a populated sender with a name/avatar
+              const needFetch = !(payload.sender && (payload.sender.name || payload.sender.avatar));
+              if (needFetch) {
+                try {
+                  const userDoc = await User.findById(senderId).select('name avatar _id').lean();
+                  if (userDoc) payload.sender = userDoc;
+                } catch (e) {
+                  // ignore fetch errors
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // best-effort only
         }
 
         // Broadcast to the chat room (connected sockets in the chat)
@@ -518,20 +599,35 @@ io.on("connection", (socket) => {
         }
 
         // Also emit to each user's personal room (fallback for users not joined to chat room)
-        users.forEach((user) => {
+        // Compute per-user mention counts and include in personal emit payload
+        for (const user of users) {
           const userId = user._id ? String(user._id) : String(user);
           const senderId = newMessageRecieved.sender?._id
             ? String(newMessageRecieved.sender._id)
             : String(newMessageRecieved.sender);
 
-          if (userId === senderId) return;
+          if (userId === senderId) continue;
 
           try {
-            io.to(userId).emit('message recieved', payload);
+            // compute mention count for this user for this chat (unread mentions)
+            let mentionCountForUser = 0;
+            try {
+              mentionCountForUser = await Message.countDocuments({
+                chat: chat._id,
+                mentions: userId,
+                isDeleted: { $ne: true },
+                readBy: { $not: { $elemMatch: { $eq: userId } } },
+              });
+            } catch (e) {
+              mentionCountForUser = 0;
+            }
+
+            const personalPayload = { ...payload, mentionCount: mentionCountForUser || 0 };
+            io.to(userId).emit('message recieved', personalPayload);
           } catch (e) {
             console.warn(`Failed to emit to user room ${userId}`, e);
           }
-        });
+        }
       } catch (err) {
         console.error("Error in socket 'new message' handler:", err);
       }

@@ -49,7 +49,10 @@ export const accessChat = asyncHandler(async (req, res) => {
         }
       } catch (e) {}
     }
-    res.send(chat);
+    // Produce a plain object and ensure a `name` property exists for frontend
+    const chatObj = (chat && chat.toObject && typeof chat.toObject === 'function') ? chat.toObject() : { ...chat };
+    chatObj.name = chatObj.chatName || chatObj.name || (chatObj.groupSettings && chatObj.groupSettings.name) || "";
+    res.send(chatObj);
   } else {
     var chatData = {
       chatName: "sender",
@@ -64,7 +67,9 @@ export const accessChat = asyncHandler(async (req, res) => {
         "users",
         "-password"
       );
-      res.status(200).json(FullChat);
+      const fullObj = (FullChat && FullChat.toObject && typeof FullChat.toObject === 'function') ? FullChat.toObject() : { ...FullChat };
+      fullObj.name = fullObj.chatName || fullObj.name || (fullObj.groupSettings && fullObj.groupSettings.name) || "";
+      res.status(200).json(fullObj);
     } catch (error) {
       res.status(400);
       throw new Error(error.message);
@@ -140,6 +145,8 @@ export const fetchChats = asyncHandler(async (req, res) => {
         // attach unreadCount to the chat object (lean/POJO safe)
         const chatObj = (chat && chat.toObject && typeof chat.toObject === 'function') ? chat.toObject() : { ...chat };
         chatObj.unreadCount = unreadCount || 0;
+        // ensure frontend has a stable `name` field
+        chatObj.name = chatObj.chatName || chatObj.name || (chatObj.groupSettings && chatObj.groupSettings.name) || (chatObj.users && chatObj.users[0] && (chatObj.users[0].name || chatObj.users[0].email)) || "";
         resultsWithUnread.push(chatObj);
       } catch (e) {
         // on error, push chat without unread count
@@ -303,7 +310,9 @@ export const createGroupChat = asyncHandler(async (req, res) => {
   } catch (e) {
     console.error("Failed to emit group created socket event:", e);
   }
-  res.status(201).json(fullGroupChat);
+  const fullObj = (fullGroupChat && fullGroupChat.toObject && typeof fullGroupChat.toObject === 'function') ? fullGroupChat.toObject() : { ...fullGroupChat };
+  fullObj.name = fullObj.chatName || fullObj.name || (fullObj.groupSettings && fullObj.groupSettings.name) || "";
+  res.status(201).json(fullObj);
 });
 
 
@@ -547,6 +556,19 @@ export const getRecentChats = async (req, res) => {
         unread = 0;
       }
 
+      // Count mention notifications for this user (messages that mention this user and are unread for them)
+      let mentionCount = 0;
+      try {
+        mentionCount = await Message.countDocuments({
+          chat: chat._id,
+          mentions: userId,
+          isDeleted: { $ne: true },
+          readBy: { $not: { $elemMatch: { $eq: userId } } },
+        });
+      } catch (e) {
+        mentionCount = 0;
+      }
+
       // preserve existing mapping logic but inject unread
        const otherUser =
         (Array.isArray(chat.participants) &&
@@ -601,8 +623,10 @@ export const getRecentChats = async (req, res) => {
         lastMessage: lastMessageText || "Say hi!",
         timestamp: previewTimestamp,
         unreadCount: unread,
+        mentionCount: mentionCount || 0,
         isGroupChat: !!chat.isGroupChat,
         chatName: chat.chatName,
+        name: chat.chatName || chat.name || (chat.groupSettings && chat.groupSettings.name) || (chat.isGroupChat ? "Group" : (otherUser?.name || otherUser?.email || "")),
       };
 
       if (chat.isGroupChat) {
@@ -704,6 +728,7 @@ export const fetchPreviousChats = asyncHandler(async (req, res) => {
         unreadCount: unread,
         isGroupChat: !!chat.isGroupChat,
         chatName: chat.chatName,
+        name: chat.chatName || chat.name || (chat.groupSettings && chat.groupSettings.name) || (chat.isGroupChat ? "Group" : (otherUser?.name || otherUser?.email || "")),
       };
 
       if (chat.isGroupChat) {
@@ -1020,9 +1045,34 @@ const groupChat = await Chat.findById(chatId)
       return res.status(404).json({ message: "Group not found" });
     }
 
-    res.status(200).json(groupChat);
+    const groupObj = (groupChat && groupChat.toObject && typeof groupChat.toObject === 'function') ? groupChat.toObject() : { ...groupChat };
+    groupObj.name = groupObj.chatName || groupObj.name || (groupObj.groupSettings && groupObj.groupSettings.name) || "";
+    res.status(200).json(groupObj);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to fetch group chat" });
+  }
+});
+
+// Return participants for a chat (convenience endpoint for frontend mentions)
+export const getChatParticipants = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  if (!chatId) return res.status(400).json({ message: 'chatId is required' });
+  try {
+    const chat = await Chat.findById(chatId)
+      .select('participants users')
+      .populate('participants', '_id name email avatar username')
+      .populate('users', '_id name email avatar username')
+      .lean();
+
+    if (!chat) return res.status(404).json({ message: 'Chat not found' });
+
+    // Prefer populated participants, fallback to users
+    const participants = (chat.participants && chat.participants.length) ? chat.participants : (chat.users || []);
+    console.log(`[getChatParticipants] chatId=${chatId} participantCount=${participants.length}`);
+    return res.status(200).json({ members: participants });
+  } catch (err) {
+    console.error('getChatParticipants error:', err);
+    return res.status(500).json({ message: 'Failed to fetch participants' });
   }
 });

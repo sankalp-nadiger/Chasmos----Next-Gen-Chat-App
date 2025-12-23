@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Send } from 'lucide-react';
 import Logo from './Logo';
+import { useNavigate } from 'react-router-dom';
 
 const MessageNotification = ({ notification, onClose, onReply, onOpen }) => {
   const [replyText, setReplyText] = useState('');
+  const navigate = useNavigate();
 
   useEffect(() => {
     console.log('🔔 MessageNotification mounted:', notification);
@@ -75,7 +77,20 @@ const MessageNotification = ({ notification, onClose, onReply, onOpen }) => {
       {/* Content */}
       <div 
         className="px-4 py-3 cursor-pointer hover:bg-white/5 transition"
-        onClick={onOpen}
+        onClick={() => {
+          // If group message, navigate to /groups and close notification
+          if (notification && (notification.isGroup || notification.groupName)) {
+            try {
+              navigate('/groups');
+            } catch (e) {}
+            try { onOpen && onOpen({ ...notification, openedGroup: true }); } catch (e) {}
+            try { onClose && onClose(); } catch (e) {}
+            return;
+          }
+          // default: open chat
+          try { onOpen && onOpen(notification); } catch (e) {}
+          try { onClose && onClose(); } catch (e) {}
+        }}
       >
         <div className="flex items-start gap-3">
           {/* Avatar */}
@@ -94,7 +109,7 @@ const MessageNotification = ({ notification, onClose, onReply, onOpen }) => {
           {/* Message Info */}
           <div className="flex-1 min-w-0">
             <h3 className="text-white font-semibold text-base mb-1">
-              {notification.senderName || 'Someone'}
+              {notification.isGroup ? (notification.groupName || notification.senderName) : (notification.senderName || 'Someone')}
             </h3>
             <p className="text-gray-300 text-sm line-clamp-2 break-words">
               {notification.message}
@@ -143,9 +158,7 @@ const MessageNotification = ({ notification, onClose, onReply, onOpen }) => {
   );
 };
 
-const MessageNotificationContainer = ({ notifications, onClose, onReply, onOpen }) => {
-  console.log('📬 MessageNotificationContainer rendering with notifications:', notifications);
-  
+const MessageNotificationContainer = ({ notifications, onClose, onReply, onOpen }) => { 
   return (
     <div className="fixed top-0 right-0 z-[9999] pointer-events-none">
       <AnimatePresence mode="sync">

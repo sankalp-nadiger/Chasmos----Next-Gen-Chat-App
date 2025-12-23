@@ -51,6 +51,7 @@ export const allMessages = asyncHandler(async (req, res) => {
       })
       .populate("starredBy.user", "name avatar")
       .populate("reactions.user", "name avatar")
+      .populate("mentions", "name avatar")
       .sort({ createdAt: 1 });
       
     // Attach a normalized `timestamp` field so clients can use scheduledFor when appropriate
@@ -63,7 +64,7 @@ export const allMessages = asyncHandler(async (req, res) => {
 });
 
 export const sendMessage = asyncHandler(async (req, res) => {
-  const { content, chatId, attachments, type = "text", isScheduled, scheduledFor, userId, poll, repliedTo } = req.body;
+  const { content, chatId, attachments, type = "text", isScheduled, scheduledFor, userId, poll, repliedTo, mentions } = req.body;
   // normalize isScheduled which may be boolean or string from client
   const isScheduledFlag = (isScheduled === true || isScheduled === 'true' || isScheduled === '1' || isScheduled === 1);
   // normalize scheduledFor into a Date if present
@@ -153,6 +154,18 @@ export const sendMessage = asyncHandler(async (req, res) => {
     console.warn('[sendMessage] Ignoring invalid repliedTo ids:', invalidRepliedTo);
   }
 
+  // Normalize and validate mentions (array of user ids)
+  let normalizedMentions = Array.isArray(mentions) ? mentions : mentions ? [mentions] : [];
+  const invalidMentions = [];
+  normalizedMentions = normalizedMentions.filter((id) => {
+    if (mongoose.Types.ObjectId.isValid(String(id))) return true;
+    invalidMentions.push(id);
+    return false;
+  });
+  if (invalidMentions.length) {
+    console.warn('[sendMessage] Ignoring invalid mention ids:', invalidMentions);
+  }
+
   var newMessage = {
     sender: req.user._id,
     content: content,
@@ -161,6 +174,8 @@ export const sendMessage = asyncHandler(async (req, res) => {
     attachments: attachments || [],
     // allow replying to one or multiple messages (only valid ObjectIds)
     repliedTo: normalizedRepliedTo,
+    // store mentions (validated ObjectIds)
+    mentions: normalizedMentions,
     isScheduled: !!isScheduledFlag,
     scheduledFor: isScheduledFlag ? scheduledForDate : null,
     scheduledSent: false,
@@ -208,6 +223,10 @@ export const sendMessage = asyncHandler(async (req, res) => {
       ]
     });
     message = await message.populate("chat");
+    // Populate mentions so clients receive user objects (name/avatar) instead of raw ids
+    message = await message.populate("mentions", "name avatar");
+    // Ensure mentions are populated for the just-created message
+    message = await message.populate("mentions", "name avatar");
     message = await User.populate(message, {
       path: "chat.users",
       select: "name avatar email",
@@ -428,6 +447,7 @@ export const getStarredMessages = asyncHandler(async (req, res) => {
     "starredBy.user": userId
   })
     .populate("sender", "name avatar email")
+    .populate({ path: "chat", select: "chatName isGroupChat groupSettings.avatar" })
     .populate("attachments")
     .populate("starredBy.user", "name avatar")
     .sort({ createdAt: -1 });
@@ -502,7 +522,7 @@ export const forwardMessage = asyncHandler(async (req, res) => {
   console.log("📥 Body:", req.body);
   console.log("👤 User:", req.user?._id);
 
-  const { content, chatId, attachments, type = "text", isForwarded = true, repliedTo } = req.body;
+  const { content, chatId, attachments, type = "text", isForwarded = true, repliedTo, mentions } = req.body;
 
   // Validate basic input
   if (!content && (!attachments || attachments.length === 0)) {
@@ -569,6 +589,18 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     console.warn('[forwardMessage] Ignoring invalid repliedTo ids:', invalidForwardRepliedTo);
   }
 
+  // Normalize and validate mentions for forwarded messages
+  let normalizedForwardMentions = Array.isArray(mentions) ? mentions : mentions ? [mentions] : [];
+  const invalidForwardMentions = [];
+  normalizedForwardMentions = normalizedForwardMentions.filter((id) => {
+    if (mongoose.Types.ObjectId.isValid(String(id))) return true;
+    invalidForwardMentions.push(id);
+    return false;
+  });
+  if (invalidForwardMentions.length) {
+    console.warn('[forwardMessage] Ignoring invalid mention ids:', invalidForwardMentions);
+  }
+
   const newMessage = {
     sender: req.user._id,
     content: content,
@@ -577,6 +609,7 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     attachments: attachments || [],
     isForwarded: isForwarded,
     repliedTo: normalizedForwardRepliedTo,
+    mentions: normalizedForwardMentions,
   };
 
   console.log("📝 Creating message:", newMessage);
@@ -603,7 +636,9 @@ export const forwardMessage = asyncHandler(async (req, res) => {
 
     message = await message.populate("chat");
     console.log("💬 Populated chat");
-
+    // Populate mentions so forwarded messages include user info
+    message = await message.populate("mentions", "name avatar");
+    console.log("🔖 Populated mentions");
     message = await User.populate(message, {
       path: "chat.users",
       select: "name avatar email",
