@@ -9,12 +9,7 @@ import ChattingPage from "./components/ChattingPage.jsx";
 import NewChat from "./components/NewChat.jsx";
 import AuthPage from "./components/AuthPage.jsx";
 import { Toaster } from "react-hot-toast";
-
-
-
-import Profile from "./components/Profile.jsx";
-import Settings from "./components/Settings.jsx";
-import GroupInfoModal from "./components/GroupInfoModal.jsx";
+import InviteGroupModal from "./components/InviteGroupModal.jsx";
 
 // OAuth Callback Handler Component
 const OAuthCallback = () => {
@@ -136,6 +131,40 @@ const AppContent = () => {
     }
   }, [isLoading, navigate]);
 
+  // Intercept external invite links clicked inside the app and open invite modal
+  useEffect(() => {
+    const onDocClick = (ev) => {
+      try {
+        const a = ev.target.closest ? ev.target.closest('a') : null;
+        if (!a) return;
+        const href = a.getAttribute('href') || a.href || '';
+        if (!href) return;
+
+        // match invite links like /invite/group-... or absolute links containing /invite/group-
+        const m = href.match(/\/invite\/group-[A-Za-z0-9\-_.]+/);
+        if (m) {
+          // prevent navigation (including target="_blank") and open SPA route/modal
+          ev.preventDefault();
+          ev.stopPropagation();
+          const invitePath = m[0];
+          // push SPA route and keep in-app behavior
+          try {
+            navigate(invitePath, { replace: false });
+          } catch (e) {
+            // fallback: update history and dispatch a custom event
+            try { window.history.pushState({}, '', invitePath); } catch (ee) {}
+            try { window.dispatchEvent(new Event('popstate')); } catch (ee) {}
+          }
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    document.addEventListener('click', onDocClick, true);
+    return () => document.removeEventListener('click', onDocClick, true);
+  }, [navigate]);
+
   const handleAuthentication = (success, userData = null) => {
     if (success) {
       // AuthPage already stores the token and userInfo, just update state
@@ -159,6 +188,7 @@ const AppContent = () => {
   }
 
   return (
+    <>
     <Routes>
       {/* Auth Route */}
       <Route 
@@ -255,12 +285,37 @@ const AppContent = () => {
       <Route path="/new-chat" element={<NewChat />} />
     
 
+      {/* Invite route renders main chat UI; modal is rendered globally below */}
+      <Route
+        path="/invite/:inviteId"
+        element={
+          isAuthenticated ? (
+              <ChattingPage onLogout={handleLogout} activeSection="chats" />
+            ) : (
+              <Navigate to="/auth" replace />
+            )
+        }
+      />
+
       {/* Catch all route */}
       <Route 
         path="*" 
         element={<Navigate to="/auth" replace />} 
       />
     </Routes>
+
+    {/* Global invite modal: mounted outside Routes so it reacts to SPA navigation immediately */}
+    <InviteGroupModal
+      open={location?.pathname?.includes('/invite')}
+      inviteToken={(() => {
+        try {
+          const m = location?.pathname?.match(/\/invite\/(.+)/);
+          return m ? decodeURIComponent(m[1]) : null;
+        } catch (e) { return null; }
+      })()}
+      onClose={() => { navigate('/chats', { replace: true }); }}
+    />
+    </>
   );
 };
 

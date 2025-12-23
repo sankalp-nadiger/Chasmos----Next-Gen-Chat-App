@@ -1,6 +1,7 @@
 import Group from "../models/group.model.js";
 import Chat from "../models/chat.model.js";
 import User from "../models/user.model.js";
+import Message from "../models/message.model.js";
 import crypto from "crypto";
 
 // Helper response functions
@@ -207,9 +208,74 @@ export const joinGroupByInviteLink = async (req, res) => {
       $push: { participants: userId },
     });
 
+    // Create a system message announcing the join and emit to chat participants
+    try {
+      const user = await User.findById(userId).select('name avatar');
+      const actorName = user?.name || 'A user';
+
+      const created = await Message.create({
+        sender: userId,
+        content: `${actorName} joined the group`,
+        type: 'system',
+        chat: group.chat,
+      });
+
+      const populated = await Message.findById(created._id)
+        .populate('sender', 'name avatar email')
+        .populate('attachments')
+        .populate('chat');
+
+      try {
+        const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+        const io = getSocketIOInstance();
+        if (io && group && group.chat) {
+          io.to(String(group.chat)).emit('message recieved', populated);
+          const users = (group.participants && group.participants.length) ? group.participants : [];
+          users.forEach(u => {
+            try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
+          });
+        }
+      } catch (e) {
+        console.warn('joinGroup: failed to emit socket event', e && e.message);
+      }
+    } catch (e) {
+      console.warn('joinGroup: failed to create system message', e && e.message);
+    }
+
     return ok(res, { message: "Joined group successfully", group });
   } catch (error) {
     err(res, error.message, 500);
+  }
+};
+
+// Get group info by invite link (returns a small summary)
+export const getGroupByInviteLink = async (req, res) => {
+  try {
+    const { inviteLink } = req.query;
+    if (!inviteLink) return err(res, 'inviteLink query is required');
+
+    const group = await Group.findOne({ inviteLink })
+      .populate('participants', '_id name avatar email')
+      .populate('admin', '_id name avatar');
+
+    if (!group) return err(res, 'Invite not found', 404);
+
+    const localUser = req.user ? req.user._id : null;
+    const currentUserInGroup = localUser ? (group.participants || []).some(p => String(p._id || p) === String(localUser)) : false;
+
+    const out = {
+      _id: group._id,
+      name: group.name,
+      description: group.description || '',
+      participants: (group.participants || []).map(p => ({ _id: p._id, name: p.name, avatar: p.avatar })),
+      participantsCount: (group.participants || []).length,
+      inviteLink: group.inviteLink,
+      currentUserInGroup,
+    };
+
+    return ok(res, out);
+  } catch (e) {
+    err(res, e.message, 500);
   }
 };
 
@@ -456,15 +522,6 @@ export const getGroupInfo = async (req, res) => {
 
     if (!group) return err(res, "Group not found", 404);
 
-    console.log("📤 Sending group info:", {
-      _id: group._id,
-      name: group.name,
-      inviteEnabled: group.inviteEnabled,
-      inviteLink: group.inviteLink,
-      permissions: group.permissions,
-      features: group.features
-    });
-
     const responseGroup = {
       _id: group._id,
       name: group.name,
@@ -492,6 +549,10 @@ export const getGroupInfo = async (req, res) => {
         docs: group.features?.docs !== false,
         polls: group.features?.polls !== false,
       },
+      // include creation timestamps to help frontend show a created date
+      createdAt: group.createdAt || null,
+      createdAtIso: group.createdAt ? (new Date(group.createdAt)).toISOString() : null,
+      createdAtFormatted: group.createdAt ? (new Date(group.createdAt)).toLocaleString() : null,
     };
 
     return ok(res, responseGroup);

@@ -543,10 +543,6 @@ export const removeReaction = asyncHandler(async (req, res) => {
 });
 
 export const forwardMessage = asyncHandler(async (req, res) => {
-  console.log("➡️ [FORWARD MESSAGE] Request received");
-  console.log("📥 Body:", req.body);
-  console.log("👤 User:", req.user?._id);
-
   const { content, chatId, attachments, type = "text", isForwarded = true, repliedTo, mentions } = req.body;
 
   // Validate basic input
@@ -570,11 +566,33 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     throw new Error("Chat not found");
   }
 
-  console.log("👥 Chat users:", chat.users);
+  //console.log("👥 Chat users:", chat.users, "participants:", chat.participants);
 
-  // Check if user is part of the chat
-  const isUserInChat = chat.users.some(
-    (user) => user.toString() === req.user._id.toString()
+  // Determine membership list. For group chats, prefer the separate Group model's `participants` array
+  // (some groups store members there, linked by `group.chat`), otherwise fall back to chat.users or chat.participants.
+  let chatMembers = [];
+  if (chat.isGroupChat) {
+    try {
+      const groupObj = await Group.findOne({ chat: chatId }).select('participants').lean();
+      if (groupObj && Array.isArray(groupObj.participants) && groupObj.participants.length) {
+        chatMembers = groupObj.participants;
+      } else if (Array.isArray(chat.users) && chat.users.length) {
+        chatMembers = chat.users;
+      } else if (Array.isArray(chat.participants) && chat.participants.length) {
+        chatMembers = chat.participants;
+      }
+    } catch (e) {
+      console.warn('forwardMessage: failed to load Group participants', e && e.message);
+      chatMembers = (Array.isArray(chat.users) && chat.users.length) ? chat.users : (Array.isArray(chat.participants) ? chat.participants : []);
+    }
+  } else {
+    chatMembers = (Array.isArray(chat.users) && chat.users.length > 0)
+      ? chat.users
+      : (Array.isArray(chat.participants) ? chat.participants : []);
+  }
+
+  const isUserInChat = chatMembers.some(
+    (user) => user && user.toString() === req.user._id.toString()
   );
 
   if (!isUserInChat) {
@@ -637,17 +655,17 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     mentions: normalizedForwardMentions,
   };
 
-  console.log("📝 Creating message:", newMessage);
+  //console.log("📝 Creating message:", newMessage);
 
   try {
     var message = await Message.create(newMessage);
-    console.log("✅ Message created:", message._id);
+    //console.log("✅ Message created:", message._id);
 
     message = await message.populate("sender", "name avatar");
-    console.log("📌 Populated sender");
+    //console.log("📌 Populated sender");
 
     message = await message.populate("attachments");
-    console.log("📎 Populated attachments");
+    //console.log("📎 Populated attachments");
 
     // populate replied messages if any
     message = await message.populate({
@@ -657,10 +675,10 @@ export const forwardMessage = asyncHandler(async (req, res) => {
         { path: "attachments" }
       ]
     });
-    console.log("📎 Populated repliedTo messages");
+    //console.log("📎 Populated repliedTo messages");
 
     message = await message.populate("chat");
-    console.log("💬 Populated chat");
+    //console.log("💬 Populated chat");
     // Populate mentions so forwarded messages include user info
     message = await message.populate("mentions", "name avatar");
     console.log("🔖 Populated mentions");
@@ -668,14 +686,14 @@ export const forwardMessage = asyncHandler(async (req, res) => {
       path: "chat.users",
       select: "name avatar email",
     });
-    console.log("👥 Populated chat users info");
+    //console.log("👥 Populated chat users info");
 
-    console.log("🆙 Updating chat lastMessage");
+    //console.log("🆙 Updating chat lastMessage");
     await Chat.findByIdAndUpdate(chatId, { lastMessage: message });
 
     // Attach normalized timestamp for forwarded message
     const forwardOut = normalizeMessage(message);
-    console.log("🎉 Forward message complete");
+    //console.log("🎉 Forward message complete");
     res.json(forwardOut);
 
   } catch (error) {

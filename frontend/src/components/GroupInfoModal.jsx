@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import CosmosBackground from "./CosmosBg";
+import ForwardMessageModal from "./ForwardMessageModal";
 
 const TabButton = ({ active, icon: Icon, label, onClick, color }) => {
   const themeModeLocal = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
@@ -105,11 +106,13 @@ const GroupInfoModalWhatsApp = ({
   const handleCopyInvite = async () => {
     const link = effectiveGroup.inviteLink || settings.inviteLink || "";
     if (!link) return;
+    const text = `Follow this link to join my chasmos group: ${link}`;
     try {
-      await navigator.clipboard.writeText(link);
-      toast.success("Invite link copied!");
+      await navigator.clipboard.writeText(text);
+      toast.success("Invite text copied to clipboard");
     } catch (e) {
-      console.error("Failed to copy invite link", e);
+      console.error("Failed to copy invite text", e);
+      toast.error("Failed to copy invite link");
     }
   };
 
@@ -138,11 +141,40 @@ const GroupInfoModalWhatsApp = ({
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
+  const formatCreatedAt = (g) => {
+    const raw = g?.createdAtIso || g?.createdAt || g?.createdAtFormatted || null;
+    if (!raw) return null;
+    let d = null;
+    try {
+      // If it's already an ISO string or timestamp, parse it
+      if (typeof raw === 'string' || typeof raw === 'number') {
+        d = new Date(raw);
+      } else if (raw instanceof Date) {
+        d = raw;
+      } else {
+        d = new Date(raw);
+      }
+      if (isNaN(d.getTime())) return String(raw);
+    } catch (e) {
+      return String(raw);
+    }
+
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}-${mm}-${yyyy} ${hh}:${min}`;
+  };
+
   const [mediaContent, setMediaContent] = useState(effectiveGroup.media || []);
   const [docsContent, setDocsContent] = useState(effectiveGroup.docs || []);
   const [linksContent, setLinksContent] = useState(effectiveGroup.links || []);
   const [loadingContent, setLoadingContent] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [forwardMessage, setForwardMessage] = useState(null);
+  const [recentChats, setRecentChats] = useState([]);
 
   useEffect(() => {
     if (!open) return;
@@ -184,6 +216,24 @@ const GroupInfoModalWhatsApp = ({
 
     return () => { cancelled = true; };
   }, [open, effectiveGroup.chat, effectiveGroup.chatId, effectiveGroup._id, effectiveGroup.id]);
+
+  // Fetch recent chats for forwarding list (matches ChattingPage behaviour)
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    fetch(`${API_BASE_URL}/api/chat/recent`, { headers })
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Failed to load recent chats');
+        const json = await res.json();
+        if (!cancelled) setRecentChats(Array.isArray(json) ? json : []);
+      })
+      .catch((e) => {
+        console.warn('Failed to fetch recent chats for forward modal', e);
+      });
+    return () => { cancelled = true; };
+  }, [open]);
 
   // Fetch full group info (participants/admins) from backend by chat id
   useEffect(() => {
@@ -322,9 +372,9 @@ const GroupInfoModalWhatsApp = ({
 
               <div className="flex flex-col">
                 <p className={`${styles.subText} text-sm`}>{members.length} members</p>
-                { (effectiveGroup.createdAtFormatted || effectiveGroup.createdAtIso || effectiveGroup.createdAt) && (
-                  <p className={`${styles.subText} text-xs mt-1`}>{`Created ${effectiveGroup.createdAtFormatted || (effectiveGroup.createdAtIso ? new Date(effectiveGroup.createdAtIso).toLocaleString() : new Date(effectiveGroup.createdAt).toLocaleString())}`}</p>
-                ) }
+                {formatCreatedAt(effectiveGroup) && (
+                  <p className={`${styles.subText} text-xs mt-1`}>{`Created ${formatCreatedAt(effectiveGroup)}`}</p>
+                )}
               </div>
             </div>
 
@@ -431,12 +481,27 @@ const GroupInfoModalWhatsApp = ({
                 </div>
 
                 {effectiveGroup.inviteEnabled && (
-                  <button
-                    onClick={handleCopyInvite}
-                    className="w-full mt-2 text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
-                  >
-                    Copy Invite Link
-                  </button>
+                  <div className="w-full mt-2 text-sm grid grid-cols-2 gap-2">
+                    <button
+                      onClick={handleCopyInvite}
+                      className="w-full text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+                    >
+                      Copy Invite Link
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        const link = effectiveGroup.inviteLink || settings.inviteLink || "";
+                        if (!link) return toast.error('No invite link available');
+                        const msg = `Follow this link to join my chasmos group: ${link}`;
+                        setForwardMessage({ content: msg });
+                        setForwardOpen(true);
+                      }}
+                      className="w-full text-sm px-4 py-2 rounded-lg bg-white border border-gray-200 text-gray-800 hover:bg-gray-50 transition"
+                    >
+                      Forward Link
+                    </button>
+                  </div>
                 )}
               </div>
             </Section>
@@ -654,6 +719,64 @@ const GroupInfoModalWhatsApp = ({
   )}
 </Section>
           </div>
+
+          {/* Forward message modal used to forward invite text to other chats */}
+          <ForwardMessageModal
+            isOpen={forwardOpen}
+            onClose={() => setForwardOpen(false)}
+            onForward={async (selectedChats, payload) => {
+              if (!selectedChats || selectedChats.length === 0) return toast.error('Select at least one chat');
+              try {
+                const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+                for (const chat of selectedChats) {
+                  const chatId = chat.chatId || chat._id || chat.id;
+                  const forwardData = {
+                    chatId,
+                    content: (payload && payload.content) || (forwardMessage && forwardMessage.content) || '',
+                    attachments: (payload && payload.attachments) || [],
+                    type: (payload && payload.type) || 'text',
+                    isForwarded: true,
+                  };
+                  await fetch(`${API_BASE_URL}/api/message/forward`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify(forwardData),
+                  });
+                }
+                toast.success('Forward sent');
+                setForwardOpen(false);
+                try {
+                  const forwardedIds = (selectedChats || []).map(c => c.chatId || c._id || c.id).filter(Boolean);
+                  if (typeof window !== 'undefined' && forwardedIds.length) {
+                    window.dispatchEvent(new CustomEvent('chasmos:forwarded', { detail: { chatIds: forwardedIds } }));
+                  }
+                } catch (e) {
+                  console.warn('Failed to dispatch forwarded event', e);
+                }
+              } catch (e) {
+                console.error('Forward failed', e);
+                toast.error('Failed to forward message');
+              }
+            }}
+            contacts={recentChats}
+            effectiveTheme={{
+              mode: themeMode,
+              primary: themeMode === 'dark' ? 'bg-gray-900' : 'bg-white/90',
+              secondary: themeMode === 'dark' ? 'bg-gray-900' : 'bg-white',
+              border: themeMode === 'dark' ? 'border-gray-800' : 'border-gray-200',
+              text: themeMode === 'dark' ? 'text-white' : 'text-gray-900',
+              textSecondary: themeMode === 'dark' ? 'text-gray-400' : 'text-gray-600',
+              accent: themeMode === 'dark' ? 'bg-blue-600' : 'bg-blue-500',
+              hover: themeMode === 'dark' ? 'hover:bg-white/5' : 'hover:bg-gray-50'
+            }}
+            currentUserId={currentUserId}
+            message={forwardMessage}
+            setMessage={setForwardMessage}
+          />
+
         </motion.div>
       )}
     </AnimatePresence>

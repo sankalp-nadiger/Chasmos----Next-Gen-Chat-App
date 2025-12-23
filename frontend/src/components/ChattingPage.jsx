@@ -1827,8 +1827,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
   }, [navigate]);
-
-  // const [selectedContact, setSelectedContact] = useState(null);
+  
   const [searchTerm, setSearchTerm] = useState("");
   const [chatSearchTerm, setChatSearchTerm] = useState("");
   const [contacts, setContacts] = useState([]);
@@ -2748,17 +2747,36 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
               [chatId]: [...existing, forwardedMessage],
             };
           });
+        }
 
-          // Update recent chats preview
-          setRecentChats((prev) =>
-            prev.map((c) =>
-              (String(c.id) === String(chatId) || String(c.chatId) === String(chatId))
-                ? { ...c, lastMessage: forwardedMessage.content || 'Forwarded message', timestamp: Date.now() }
-                : c
-            )
-          );
+        // After forwarding all messages to this `chat`, move/update it to the top of `recentChats`
+        try {
+          const chatIdStr = String(chat.chatId || chat._id || chat.id || chatId);
+          setRecentChats((prev) => {
+            // remove any existing instance of this chat
+            const filtered = prev.filter(
+              (c) => String(c.id || c.chatId || c._id) !== chatIdStr
+            );
+
+            // Create a lightweight preview for the recent chat entry
+            const previewText = messagesToForward.length === 1
+              ? (messagesToForward[0].content || 'Forwarded message')
+              : `${messagesToForward.length} forwarded messages`;
+
+            const updatedChat = {
+              ...(chat || {}),
+              lastMessage: previewText,
+              timestamp: Date.now(),
+            };
+
+            return [updatedChat, ...filtered];
+          });
+        } catch (e) {
+          console.error('Failed to update recentChats after forward', e);
         }
       }
+
+      
 
       console.log(`Messages forwarded to ${selectedChats.length} chat(s)`);
 
@@ -4164,6 +4182,124 @@ const refreshRecentChats = useCallback(async () => {
     setError(err.message);
   }
 }, [API_BASE_URL, onlineUsers]);
+
+  // Listen for forwarded messages from other UI (e.g., GroupInfoModal)
+  useEffect(() => {
+    const handler = async (ev) => {
+      try {
+        const detail = ev && ev.detail;
+        const chatIds = Array.isArray(detail?.chatIds) ? detail.chatIds.map(String) : [];
+        // Refresh recent chats list
+        try { await refreshRecentChats(); } catch (e) { console.warn('refreshRecentChats failed on forwarded event', e); }
+
+        // If the currently open chat is one of the forwarded-to chats, reload its messages
+        const currentChatId = selectedContact?.chatId || selectedContact?.id || selectedContact?._id;
+        if (currentChatId && chatIds.includes(String(currentChatId))) {
+          try {
+            const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+            const msgsRes = await fetch(`${API_BASE_URL}/api/message/${currentChatId}`, {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (msgsRes.ok) {
+              const msgs = await msgsRes.json();
+              const formatted = msgs.map((m) => ({
+                id: m._id,
+                type: m.type || "text",
+                content: m.content || m.text || "",
+                sender: m.sender,
+                timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
+                status: m.status || (m.isRead ? 'read' : 'sent'),
+                attachments: Array.isArray(m.attachments) ? m.attachments : [],
+                isSystemMessage: m.type === 'system',
+                isForwarded: m.isForwarded || false,
+                isEdited: m.isEdited || false,
+                reactions: m.reactions || [],
+                starredBy: m.starredBy || [],
+                repliedTo: Array.isArray(m.repliedTo)
+                  ? m.repliedTo.map((rt) => ({
+                      _id: rt._id || rt.id,
+                      id: rt._id || rt.id,
+                      content: rt.content || rt.text || '',
+                      sender: rt.sender,
+                      attachments: Array.isArray(rt.attachments) ? rt.attachments : [],
+                    }))
+                  : [],
+              }));
+
+              const filteredMessages = filterDuplicateSystemMessages(formatted);
+              setMessages((prev) => ({ ...prev, [currentChatId]: filteredMessages }));
+            }
+          } catch (e) {
+            console.error('Failed to reload messages after forwarded event', e);
+          }
+        }
+      } catch (err) {
+        console.error('chasmos:forwarded handler error', err);
+      }
+    };
+
+    window.addEventListener('chasmos:forwarded', handler);
+    return () => window.removeEventListener('chasmos:forwarded', handler);
+  }, [refreshRecentChats, selectedContact, API_BASE_URL]);
+
+  // Listen for join events (user joined group via invite elsewhere)
+  useEffect(() => {
+    const handler = async (ev) => {
+      try {
+        const detail = ev && ev.detail;
+        // Refresh recent chats so the joined group appears
+        try { await refreshRecentChats(); } catch (e) { console.warn('refreshRecentChats failed on joined-group event', e); }
+
+        // If this group is currently open, reload its messages
+        const group = detail?.group;
+        const currentChatId = selectedContact?.chatId || selectedContact?.id || selectedContact?._id;
+        if (group && currentChatId && (String(group.chat) === String(currentChatId) || String(group._id) === String(currentChatId))) {
+          try {
+            const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+            const msgsRes = await fetch(`${API_BASE_URL}/api/message/${currentChatId}`, {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (msgsRes.ok) {
+              const msgs = await msgsRes.json();
+              const formatted = msgs.map((m) => ({
+                id: m._id,
+                type: m.type || "text",
+                content: m.content || m.text || "",
+                sender: m.sender,
+                timestamp: new Date(m.timestamp || m.scheduledFor || m.createdAt || Date.now()).getTime(),
+                status: m.status || (m.isRead ? 'read' : 'sent'),
+                attachments: Array.isArray(m.attachments) ? m.attachments : [],
+                isSystemMessage: m.type === 'system',
+                isForwarded: m.isForwarded || false,
+                isEdited: m.isEdited || false,
+                reactions: m.reactions || [],
+                starredBy: m.starredBy || [],
+                repliedTo: Array.isArray(m.repliedTo)
+                  ? m.repliedTo.map((rt) => ({
+                      _id: rt._id || rt.id,
+                      id: rt._id || rt.id,
+                      content: rt.content || rt.text || '',
+                      sender: rt.sender,
+                      attachments: Array.isArray(rt.attachments) ? rt.attachments : [],
+                    }))
+                  : [],
+              }));
+
+              const filteredMessages = filterDuplicateSystemMessages(formatted);
+              setMessages((prev) => ({ ...prev, [currentChatId]: filteredMessages }));
+            }
+          } catch (e) {
+            console.error('Failed to reload messages after joined-group event', e);
+          }
+        }
+      } catch (err) {
+        console.error('joined-group handler error', err);
+      }
+    };
+
+    window.addEventListener('chasmos:joined-group', handler);
+    return () => window.removeEventListener('chasmos:joined-group', handler);
+  }, [refreshRecentChats, selectedContact, API_BASE_URL]);
 
   // Listen for successful google sync events (dispatched from the oauth popup message handler)
   React.useEffect(() => {
