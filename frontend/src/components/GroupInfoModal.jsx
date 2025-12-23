@@ -1,5 +1,5 @@
 // GroupInfoModalWhatsApp.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -8,6 +8,8 @@ import {
   Link as LinkIcon,
   LogOut,
   Trash,
+  Download,
+  ExternalLink,
 } from "lucide-react";
 import CosmosBackground from "./CosmosBg";
 
@@ -110,9 +112,74 @@ const GroupInfoModalWhatsApp = ({
     borderColor: themeMode === 'dark' ? 'border-gray-800' : 'border-gray-200'
   };
 
-  const mediaContent = group.media || [];
-  const docsContent = group.docs || [];
-  const linksContent = group.links || [];
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+
+  const [mediaContent, setMediaContent] = useState(group.media || []);
+  const [docsContent, setDocsContent] = useState(group.docs || []);
+  const [linksContent, setLinksContent] = useState(group.links || []);
+  const [loadingContent, setLoadingContent] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const chatId = group.chatId || group._id || group.id;
+    if (!chatId) return;
+
+    let cancelled = false;
+    setLoadingContent(true);
+
+    const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const mediaUrl = `${API_BASE_URL}/api/message/media?chatIds=${encodeURIComponent(chatId)}`;
+    const docsUrl = `${API_BASE_URL}/api/message/documents?chatIds=${encodeURIComponent(chatId)}`;
+    const linksUrl = `${API_BASE_URL}/api/message/links?chatIds=${encodeURIComponent(chatId)}`;
+
+    Promise.all([
+      fetch(mediaUrl, { headers }),
+      fetch(docsUrl, { headers }),
+      fetch(linksUrl, { headers }),
+    ])
+      .then(async ([mRes, dRes, lRes]) => {
+        const m = mRes.ok ? await mRes.json() : [];
+        const d = dRes.ok ? await dRes.json() : [];
+        const l = lRes.ok ? await lRes.json() : [];
+        if (!cancelled) {
+          setMediaContent(Array.isArray(m) ? m : []);
+          setDocsContent(Array.isArray(d) ? d : []);
+          setLinksContent(Array.isArray(l) ? l : []);
+        }
+      })
+      .catch((e) => {
+        console.error('Failed to fetch group content:', e);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingContent(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [open, group.chatId, group._id, group.id]);
+
+  const downloadFile = async (url, filename) => {
+    try {
+      // Always fetch as blob first to ensure browser prompts a save
+      const resp = await fetch(url, { mode: 'cors' });
+      if (!resp.ok) throw new Error('Network response was not ok');
+      const blob = await resp.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename || '';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      console.error('Download failed, opening in new tab as fallback', e);
+      // Fallback: open in new tab
+      window.open(url, '_blank');
+    }
+  };
 
   // Derive a reliable display name for the group/chat across different API shapes
   const displayName = (
@@ -201,6 +268,9 @@ const GroupInfoModalWhatsApp = ({
 
               <div className="flex flex-col">
                 <p className={`${styles.subText} text-sm`}>{members.length} members</p>
+                { (group.createdAtFormatted || group.createdAtIso || group.createdAt) && (
+                  <p className={`${styles.subText} text-xs mt-1`}>{`Created ${group.createdAtFormatted || (group.createdAtIso ? new Date(group.createdAtIso).toLocaleString() : new Date(group.createdAt).toLocaleString())}`}</p>
+                ) }
               </div>
             </div>
 
@@ -394,17 +464,39 @@ const GroupInfoModalWhatsApp = ({
                 />
               </div>
 
-              <div className={`${styles.sectionBg} rounded-xl p-4 min-h-[200px]`}>
+
+                <div className="max-h-[360px] overflow-y-auto">
                 {activeTab === "media" && (
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-6 gap-2">
                     {mediaContent.length > 0 ? (
                       mediaContent.map((item, i) => (
-                        <div key={i} className="aspect-square bg-gray-800 rounded-lg overflow-hidden">
+                        <div key={i} className={`aspect-square rounded-lg overflow-hidden relative ${themeMode === 'dark' ? 'bg-gray-800' : 'bg-gray-100'}`}>
                           <img src={item.url} alt="" className="w-full h-full object-cover" />
+                          <div className="absolute left-0 right-0 bottom-0 p-2 flex justify-between gap-2 bg-gradient-to-t from-black/60 to-transparent">
+                            <button
+                              onClick={() => window.open(item.url, '_blank')}
+                              className="text-xs bg-white/10 hover:bg-white/20 text-white rounded px-2 py-1 flex items-center gap-2"
+                              aria-label="View media"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                              <span>View</span>
+                            </button>
+
+                            <button
+                              onClick={() => downloadFile(item.url, item.fileName || `media-${i}`)}
+                              className="text-xs bg-white/10 hover:bg-white/20 text-white rounded px-2 py-1 flex items-center gap-2"
+                              aria-label="Download media"
+                            >
+                              <Download className="w-4 h-4" />
+                              <span>Download</span>
+                            </button>
+                          </div>
                         </div>
                       ))
                     ) : (
-                      <p className="text-gray-400 text-sm col-span-3 text-center py-8">No media shared yet</p>
+                      <div className="col-span-6 flex items-center justify-center py-12">
+                        <p className="text-gray-400 text-sm text-center">No media shared yet</p>
+                      </div>
                     )}
                   </div>
                 )}
@@ -412,12 +504,35 @@ const GroupInfoModalWhatsApp = ({
                 {activeTab === "docs" && (
                   <div className="space-y-2">
                     {docsContent.length > 0 ? (
-                      docsContent.map((doc, i) => (
-                        <div key={i} className="flex items-center gap-3 p-3 bg-gray-800 rounded-lg hover:bg-gray-750 transition">
-                          <FileText className="w-5 h-5 text-blue-400" />
-                          <span className={`${styles.titleText} text-sm`}>{doc.name}</span>
-                        </div>
-                      ))
+                      docsContent.map((doc, i) => {
+                        const url = doc.url || doc.fileUrl || doc.file || doc.urlNew || doc.link;
+                        const filename = doc.fileName || doc.name || `document-${i}`;
+                        return (
+                          <div key={i} className={`flex items-center gap-3 p-3 rounded-lg transition ${themeMode === 'dark' ? 'bg-gray-900 hover:bg-gray-800' : 'bg-white hover:bg-gray-50 border border-gray-200'}`}>
+                            <FileText className={`w-5 h-5 ${themeMode === 'dark' ? 'text-blue-400' : 'text-blue-600'}`} />
+                            <div className="flex-1">
+                              <span className={`${styles.titleText} text-sm block`}>{doc.name || doc.fileName || doc.file || filename}</span>
+                              {doc.mimeType && <span className={`text-xs ${styles.subText}`}>{doc.mimeType}</span>}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => url ? window.open(url, '_blank') : alert('No URL available')}
+                                className={`text-xs px-3 py-1 rounded ${themeMode === 'dark' ? 'bg-gray-800 hover:bg-gray-700 text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-800'} flex items-center gap-2`}
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                                View
+                              </button>
+                              <button
+                                onClick={() => url ? downloadFile(url, filename) : alert('No URL available')}
+                                className={`text-xs px-3 py-1 rounded ${themeMode === 'dark' ? 'bg-gray-800 hover:bg-gray-700 text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-800'} flex items-center gap-2`}
+                              >
+                                <Download className="w-4 h-4" />
+                                Download
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
                     ) : (
                       <p className="text-gray-400 text-sm text-center py-8">No documents shared yet</p>
                     )}
@@ -428,9 +543,9 @@ const GroupInfoModalWhatsApp = ({
                   <div className="space-y-2">
                     {linksContent.length > 0 ? (
                       linksContent.map((link, i) => (
-                        <div key={i} className="flex items-center gap-3 p-3 bg-gray-800 rounded-lg hover:bg-gray-750 transition">
-                          <LinkIcon className="w-5 h-5 text-purple-400" />
-                          <a href={link.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 text-sm hover:underline">
+                        <div key={i} className={`flex items-center gap-3 p-3 rounded-lg transition ${themeMode === 'dark' ? 'bg-gray-900 hover:bg-gray-800' : 'bg-white hover:bg-gray-50 border border-gray-200'}`}>
+                          <LinkIcon className={`w-5 h-5 ${themeMode === 'dark' ? 'text-purple-400' : 'text-purple-600'}`} />
+                          <a href={link.url} target="_blank" rel="noopener noreferrer" className={`${themeMode === 'dark' ? 'text-blue-400' : 'text-blue-600'} text-sm hover:underline`}>
                             {link.title || link.url}
                           </a>
                         </div>
@@ -441,6 +556,7 @@ const GroupInfoModalWhatsApp = ({
                   </div>
                 )}
               </div>
+              
             </Section>
 
             {/* ================= ACTIONS ================= */}

@@ -178,7 +178,7 @@ export const checkBlockStatus = asyncHandler(async (req, res) => {
   const { userId } = req.params;
   const currentUserId = req.user._id;
 
-  console.log(`[checkBlockStatus] Checking block status for userId: ${userId}, currentUserId: ${currentUserId}`);
+  //console.log(`[checkBlockStatus] Checking block status for userId: ${userId}, currentUserId: ${currentUserId}`);
 
   const currentUser = await User.findById(currentUserId).select("blockedUsers");
   
@@ -192,7 +192,7 @@ export const checkBlockStatus = asyncHandler(async (req, res) => {
     blockedId => blockedId.toString() === userId
   );
 
-  console.log(`[checkBlockStatus] isBlocked: ${isBlocked}`);
+  //console.log(`[checkBlockStatus] isBlocked: ${isBlocked}`);
 
   // Also check if the other user has blocked current user
   const otherUser = await User.findById(userId).select("blockedUsers");
@@ -207,7 +207,7 @@ export const checkBlockStatus = asyncHandler(async (req, res) => {
     blockedId => blockedId.toString() === currentUserId.toString()
   );
 
-  console.log(`[checkBlockStatus] hasBlockedYou: ${hasBlockedYou}, blockStatus: ${isBlocked ? "you_blocked_them" : hasBlockedYou ? "they_blocked_you" : "no_block"}`);
+  //console.log(`[checkBlockStatus] hasBlockedYou: ${hasBlockedYou}, blockStatus: ${isBlocked ? "you_blocked_them" : hasBlockedYou ? "they_blocked_you" : "no_block"}`);
 
   res.status(200).json({
     isBlocked: isBlocked,

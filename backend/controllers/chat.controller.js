@@ -134,12 +134,14 @@ export const fetchChats = asyncHandler(async (req, res) => {
           } catch (e) {}
         }
 
-        // Count unread messages for this user (exclude messages of type 'system' and deleted messages)
+        // Count unread messages for this user (exclude messages of type 'system', deleted messages,
+        // and messages authored by the current user)
         const unreadCount = await Message.countDocuments({
           chat: chat._id,
           isDeleted: { $ne: true },
           type: { $ne: 'system' },
           readBy: { $not: { $elemMatch: { $eq: req.user._id } } },
+          sender: { $ne: req.user._id },
         });
 
         // attach unreadCount to the chat object (lean/POJO safe)
@@ -551,6 +553,8 @@ export const getRecentChats = async (req, res) => {
           isDeleted: { $ne: true },
           type: { $ne: 'system' },
           readBy: { $not: { $elemMatch: { $eq: userId } } },
+          // Exclude messages authored by the requesting user
+          sender: { $ne: userId },
         });
       } catch (e) {
         unread = 0;
@@ -564,6 +568,8 @@ export const getRecentChats = async (req, res) => {
           mentions: userId,
           isDeleted: { $ne: true },
           readBy: { $not: { $elemMatch: { $eq: userId } } },
+          // Exclude messages authored by the requesting user
+          sender: { $ne: userId },
         });
       } catch (e) {
         mentionCount = 0;
@@ -622,6 +628,7 @@ export const getRecentChats = async (req, res) => {
         chatId: chat._id,
         lastMessage: lastMessageText || "Say hi!",
         timestamp: previewTimestamp,
+        // unread is computed per-message (messages authored by the requesting user were excluded above)
         unreadCount: unread,
         mentionCount: mentionCount || 0,
         isGroupChat: !!chat.isGroupChat,
@@ -687,6 +694,7 @@ export const fetchPreviousChats = asyncHandler(async (req, res) => {
       } else if (chat.unreadCount && typeof chat.unreadCount === "object") {
         unread = chat.unreadCount[String(userId)] || chat.unreadCount[userId] || 0;
       }
+      // previous chats: keep unread as provided (do not force-clear based on lastMessage sender)
 
       let previewTimestamp = chat.updatedAt || chat.timestamp;
       if (chat.lastMessage) {
@@ -1047,6 +1055,22 @@ const groupChat = await Chat.findById(chatId)
 
     const groupObj = (groupChat && groupChat.toObject && typeof groupChat.toObject === 'function') ? groupChat.toObject() : { ...groupChat };
     groupObj.name = groupObj.chatName || groupObj.name || (groupObj.groupSettings && groupObj.groupSettings.name) || "";
+
+    // Format createdAt based on provided locale (frontend may pass navigator.language)
+    try {
+      const locale = req.query.locale || (req.headers['accept-language'] ? req.headers['accept-language'].split(',')[0] : 'en-US');
+      if (groupObj.createdAt) {
+        const d = new Date(groupObj.createdAt);
+        groupObj.createdAtIso = d.toISOString();
+        groupObj.createdAtFormatted = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(d);
+      }
+    } catch (e) {
+      // If formatting fails, still return ISO timestamp
+      if (groupObj.createdAt) {
+        groupObj.createdAtIso = new Date(groupObj.createdAt).toISOString();
+      }
+    }
+
     res.status(200).json(groupObj);
   } catch (err) {
     console.error(err);
@@ -1069,7 +1093,6 @@ export const getChatParticipants = asyncHandler(async (req, res) => {
 
     // Prefer populated participants, fallback to users
     const participants = (chat.participants && chat.participants.length) ? chat.participants : (chat.users || []);
-    console.log(`[getChatParticipants] chatId=${chatId} participantCount=${participants.length}`);
     return res.status(200).json({ members: participants });
   } catch (err) {
     console.error('getChatParticipants error:', err);
