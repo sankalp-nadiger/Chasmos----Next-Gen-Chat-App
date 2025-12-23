@@ -4130,7 +4130,7 @@ useEffect(() => {
         break;
       case "groups":
         filtered = filtered.filter((contact) => {
-          const result = contact.isGroup;
+          const result = contact.isGroup || contact.isGroupChat;
           console.log(`[RecentChats] Nav filter (groups):`, contact, "Result:", result);
           return result;
         });
