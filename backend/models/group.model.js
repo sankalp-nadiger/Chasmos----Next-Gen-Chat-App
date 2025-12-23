@@ -44,6 +44,9 @@ const groupSchema = new mongoose.Schema(
     
     groupType: { type: String, enum: ["Casual", "Business"], default: "Casual" },
     inviteEnabled: { type: Boolean, default: false },
+    // Track users who left and when. Arrays kept in parallel order: leftBy[i] leftAt[i]
+    leftBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    leftAt: [{ type: Date }],
   },
   { timestamps: true }
 );

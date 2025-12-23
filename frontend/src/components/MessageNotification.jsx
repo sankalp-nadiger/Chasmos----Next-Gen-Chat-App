@@ -9,7 +9,6 @@ const MessageNotification = ({ notification, onClose, onReply, onOpen }) => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    console.log('🔔 MessageNotification mounted:', notification);
     
     // Play a subtle notification sound (optional) - only if sound is enabled
     const soundEnabled = localStorage.getItem('soundEnabled');

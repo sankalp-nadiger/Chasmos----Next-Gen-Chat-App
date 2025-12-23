@@ -1,5 +1,6 @@
 // GroupInfoModalWhatsApp.jsx
 import React, { useState, useEffect } from "react";
+import { toast } from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -34,52 +35,67 @@ const GroupInfoModalWhatsApp = ({
 }) => {
   const [activeTab, setActiveTab] = useState("media");
 
-  if (!group) return null;
+  const [fetchedGroup, setFetchedGroup] = useState(null);
+  const effectiveGroup = fetchedGroup || group;
+
+  if (!group && !fetchedGroup) return null;
 
   console.log("📊 GroupInfoModal received group data:", {
-    inviteEnabled: group.inviteEnabled,
-    inviteLink: group.inviteLink,
-    permissions: group.permissions,
-    features: group.features
+    inviteEnabled: effectiveGroup.inviteEnabled,
+    inviteLink: effectiveGroup.inviteLink,
+    permissions: effectiveGroup.permissions,
+    features: effectiveGroup.features
   });
 
-  const members = group.members || group.participants || [];
-  const settings = group.settings || {};
-  
-  // ✅ Use actual values from group with proper fallbacks
+  const members = effectiveGroup.members || effectiveGroup.participants || [];
+  const settings = effectiveGroup.settings || {};
+
+  // Derive invite/settings/permissions/features from various possible payload shapes
+  const derivedInviteEnabled = (typeof effectiveGroup.inviteEnabled !== 'undefined')
+    ? Boolean(effectiveGroup.inviteEnabled)
+    : (effectiveGroup.group && typeof effectiveGroup.group.inviteEnabled !== 'undefined')
+      ? Boolean(effectiveGroup.group.inviteEnabled)
+      : Boolean(effectiveGroup.groupSettings && effectiveGroup.groupSettings.allowInvites);
+
+  const derivedInviteLink = effectiveGroup.inviteLink || (effectiveGroup.group && effectiveGroup.group.inviteLink) || (effectiveGroup.groupSettings && effectiveGroup.groupSettings.inviteLink) || "";
+
+  const derivedPermissionsRaw = effectiveGroup.permissions || (effectiveGroup.group && effectiveGroup.group.permissions) || {};
   const permissions = {
-    allowCreatorAdmin: group.permissions?.allowCreatorAdmin !== false,
-    allowOthersAdmin: group.permissions?.allowOthersAdmin === true,
-    allowMembersAdd: group.permissions?.allowMembersAdd !== false,
-  };
-  
-  const features = {
-    media: group.features?.media !== false,
-    gallery: group.features?.gallery !== false,
-    docs: group.features?.docs !== false,
-    polls: group.features?.polls !== false,
+    allowCreatorAdmin: derivedPermissionsRaw.allowCreatorAdmin !== false,
+    allowOthersAdmin: Boolean(derivedPermissionsRaw.allowOthersAdmin),
+    allowMembersAdd: derivedPermissionsRaw.allowMembersAdd !== false,
   };
 
+  const derivedFeaturesRaw = effectiveGroup.features || (effectiveGroup.group && effectiveGroup.group.features) || {};
+  const features = {
+    media: derivedFeaturesRaw.media !== false,
+    gallery: derivedFeaturesRaw.gallery !== false,
+    docs: derivedFeaturesRaw.docs !== false,
+    polls: derivedFeaturesRaw.polls !== false,
+  };
+
+  console.log('📊 GroupInfoModal derived values:', { derivedInviteEnabled, derivedInviteLink, permissions, features });
+
   // ✅ Determine creator ID
-  const creatorId = group.admin?._id?.toString() || group.admin?.toString() || group.groupAdmin?._id?.toString() || group.groupAdmin?.toString();
+  const creatorId = effectiveGroup.admin?._id?.toString() || effectiveGroup.admin?.toString() || effectiveGroup.groupAdmin?._id?.toString() || effectiveGroup.groupAdmin?.toString();
 
   const isCreator = currentUserId?.toString() === creatorId;
 
-  const isAdmin = isCreator || group.admins?.some(admin => {
+  const isAdmin = isCreator || effectiveGroup.admins?.some(admin => {
     const adminId = admin._id?.toString() || admin.toString();
     return adminId === currentUserId?.toString();
   });
 
   const handleRemoveMember = (memberId) => {
     onUpdateGroup?.({
-      ...group,
+      ...effectiveGroup,
       members: members.filter((m) => m.id !== memberId && m._id !== memberId),
     });
   };
 
   const handlePromoteToggle = (memberId) => {
     onUpdateGroup?.({
-      ...group,
+      ...effectiveGroup,
       members: members.map((m) =>
         (m.id === memberId || m._id === memberId) ? { ...m, isAdmin: !m.isAdmin } : m
       ),
@@ -87,11 +103,11 @@ const GroupInfoModalWhatsApp = ({
   };
 
   const handleCopyInvite = async () => {
-    const link = group.inviteLink || settings.inviteLink || "";
+    const link = effectiveGroup.inviteLink || settings.inviteLink || "";
     if (!link) return;
     try {
       await navigator.clipboard.writeText(link);
-      alert("Invite link copied!");
+      toast.success("Invite link copied!");
     } catch (e) {
       console.error("Failed to copy invite link", e);
     }
@@ -112,17 +128,26 @@ const GroupInfoModalWhatsApp = ({
     borderColor: themeMode === 'dark' ? 'border-gray-800' : 'border-gray-200'
   };
 
+  const modalOverlayClass = themeMode === 'dark' ? 'bg-black/60' : 'bg-black/20';
+  const modalContainerBgClass = themeMode === 'dark' ? 'bg-gray-900' : 'bg-white';
+  const modalTitleClass = themeMode === 'dark' ? 'text-white' : 'text-gray-900';
+  const modalDescClass = themeMode === 'dark' ? 'text-gray-400' : 'text-gray-600';
+  const cancelBtnClass = themeMode === 'dark'
+    ? 'px-4 py-2 rounded-lg border border-gray-700 text-sm text-gray-300 bg-transparent hover:bg-gray-800'
+    : 'px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 bg-transparent hover:bg-gray-50';
+
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
-  const [mediaContent, setMediaContent] = useState(group.media || []);
-  const [docsContent, setDocsContent] = useState(group.docs || []);
-  const [linksContent, setLinksContent] = useState(group.links || []);
+  const [mediaContent, setMediaContent] = useState(effectiveGroup.media || []);
+  const [docsContent, setDocsContent] = useState(effectiveGroup.docs || []);
+  const [linksContent, setLinksContent] = useState(effectiveGroup.links || []);
   const [loadingContent, setLoadingContent] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
   useEffect(() => {
     if (!open) return;
 
-    const chatId = group.chatId || group._id || group.id;
+    const chatId = effectiveGroup.chat || effectiveGroup.chatId || effectiveGroup._id || effectiveGroup.id;
     if (!chatId) return;
 
     let cancelled = false;
@@ -158,7 +183,31 @@ const GroupInfoModalWhatsApp = ({
       });
 
     return () => { cancelled = true; };
-  }, [open, group.chatId, group._id, group.id]);
+  }, [open, effectiveGroup.chat, effectiveGroup.chatId, effectiveGroup._id, effectiveGroup.id]);
+
+  // Fetch full group info (participants/admins) from backend by chat id
+  useEffect(() => {
+    if (!open) return;
+    const chatId = group.chat || group.chatId || group._id || group.id;
+    if (!chatId) return;
+
+    let cancelled = false;
+    const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const url = `${API_BASE_URL}/api/group/group/${encodeURIComponent(chatId)}`;
+    fetch(url, { headers })
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.message || 'Failed to fetch group');
+        if (!cancelled) setFetchedGroup(json);
+      })
+      .catch((e) => {
+        console.error('Failed to fetch group info by chat id:', e);
+      });
+
+    return () => { cancelled = true; };
+  }, [open, group.chat, group.chatId, group._id, group.id]);
 
   const downloadFile = async (url, filename) => {
     try {
@@ -183,47 +232,52 @@ const GroupInfoModalWhatsApp = ({
 
   // Derive a reliable display name for the group/chat across different API shapes
   const displayName = (
-    group?.name ||
-    group?.chatName ||
-    group?.groupName ||
-    group?.groupSettings?.name ||
-    group?.groupSettings?.chatName ||
-    (group?.chat && (group.chat.chatName || group.chat.name)) ||
+    effectiveGroup?.name ||
+    effectiveGroup?.chatName ||
+    effectiveGroup?.groupName ||
+    effectiveGroup?.groupSettings?.name ||
+    effectiveGroup?.groupSettings?.chatName ||
+    (effectiveGroup?.chat && (effectiveGroup.chat.chatName || effectiveGroup.chat.name)) ||
     "Group"
   );
 
-  const handleLeaveGroup = async () => {
-  if (!confirm('Are you sure you want to leave this group?')) return;
-  
-  try {
-    console.log('Leaving group with ID:', group?._id);
+  // Performs the leave-group request (no UI confirmation)
+  const performLeaveGroup = async () => {
+    try {
+      console.log('Leaving group with ID:', effectiveGroup?._id);
+      const id = effectiveGroup?._id || effectiveGroup?.groupId || effectiveGroup?.chat || effectiveGroup?.chatId;
+      if (!id) throw new Error('Group id not found');
 
-    const response = await fetch('/api/group/exit-group', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}` // Adjust based on how you store auth token
-      },
-      body: JSON.stringify({ groupId: group._id }) // or whatever the group ID variable is
-      
-    });
+      const url = `${API_BASE_URL}/api/group/exit-group`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ groupId: id })
+      });
 
-    const data = await response.json();
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Failed to leave group');
 
-    if (!response.ok) {
-      throw new Error(data.message || 'Failed to leave group');
+      toast.success(data.message || 'Left group');
+      // Inform parent to update UI if provided, else close modal
+      if (onUpdateGroup) {
+        try {
+          const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+          const removeId = String(_local._id || _local.id || _local.userId || '');
+          const filterIds = (arr) => (Array.isArray(arr) ? arr.filter(a => String((a && (a._id || a.id || a))) !== removeId) : arr);
+          onUpdateGroup({ ...effectiveGroup, participants: filterIds(effectiveGroup.participants || effectiveGroup.members || []), members: filterIds(effectiveGroup.participants || effectiveGroup.members || []) });
+        } catch (e) { console.error('onUpdateGroup failed', e); }
+      }
+      onClose && onClose();
+    } catch (error) {
+      console.error('Failed to leave group:', error);
+      toast.error(error.message || 'Failed to leave group. Please try again.');
     }
-
-    // Success - redirect or update UI
-    alert('Successfully left the group');
-    // Redirect to groups list or home
-    window.location.href = '/groups'; // or use your router's navigation
-    
-  } catch (error) {
-    console.error('Failed to leave group:', error);
-    alert(error.message || 'Failed to leave group. Please try again.');
-  }
-};
+    setShowLeaveConfirm(false);
+  };
 
   return (
     <AnimatePresence>
@@ -256,7 +310,7 @@ const GroupInfoModalWhatsApp = ({
             <div className="flex items-center gap-4">
               <div className={`w-14 h-14 rounded-lg ${styles.avatarBg} flex items-center justify-center overflow-hidden`}>
                 {(() => {
-                  const avatarSrc = group?.avatar || group?.icon || group?.groupSettings?.avatar || group?.groupSettings?.icon || group?.groupSettings?.avatarUrl || "";
+                  const avatarSrc = effectiveGroup?.avatar || effectiveGroup?.icon || effectiveGroup?.groupSettings?.avatar || effectiveGroup?.groupSettings?.icon || effectiveGroup?.groupSettings?.avatarUrl || "";
                   if (avatarSrc) {
                     return (
                       <img src={avatarSrc} alt={displayName} className="w-full h-full object-cover" />
@@ -268,15 +322,15 @@ const GroupInfoModalWhatsApp = ({
 
               <div className="flex flex-col">
                 <p className={`${styles.subText} text-sm`}>{members.length} members</p>
-                { (group.createdAtFormatted || group.createdAtIso || group.createdAt) && (
-                  <p className={`${styles.subText} text-xs mt-1`}>{`Created ${group.createdAtFormatted || (group.createdAtIso ? new Date(group.createdAtIso).toLocaleString() : new Date(group.createdAt).toLocaleString())}`}</p>
+                { (effectiveGroup.createdAtFormatted || effectiveGroup.createdAtIso || effectiveGroup.createdAt) && (
+                  <p className={`${styles.subText} text-xs mt-1`}>{`Created ${effectiveGroup.createdAtFormatted || (effectiveGroup.createdAtIso ? new Date(effectiveGroup.createdAtIso).toLocaleString() : new Date(effectiveGroup.createdAt).toLocaleString())}`}</p>
                 ) }
               </div>
             </div>
 
             {/* Center: group name (centered between avatar and close button) */}
             <div className="absolute left-1/2 transform -translate-x-1/2 text-center z-20 pointer-events-none">
-              <h2 className={`${styles.titleText} font-semibold text-lg`}>{group.name}</h2>
+              <h2 className={`${styles.titleText} font-semibold text-lg`}>{effectiveGroup.name}</h2>
             </div>
 
             {/* Right: close button */}
@@ -291,10 +345,10 @@ const GroupInfoModalWhatsApp = ({
           <div className="relative z-10 flex-1 overflow-y-auto p-5 space-y-6">
 
             {/* ================= DESCRIPTION ================= */}
-            {group.description && (
+            {effectiveGroup.description && (
               <Section title="About">
                 <div className={`${styles.sectionBg} rounded-xl p-4`}>
-                  <p className={`${styles.subText} text-sm`}>{group.description}</p>
+                  <p className={`${styles.subText} text-sm`}>{effectiveGroup.description}</p>
                 </div>
               </Section>
             )}
@@ -309,7 +363,7 @@ const GroupInfoModalWhatsApp = ({
                 const isMemberCreator = memberId?.toString() === creatorId;
                 
                 // ✅ Check if this member is an admin
-                const isMemberAdmin = group.admins?.some(admin => {
+                const isMemberAdmin = effectiveGroup.admins?.some(admin => {
                   const adminId = admin._id?.toString() || admin.toString();
                   return adminId === memberId?.toString();
                 }) || false;
@@ -370,13 +424,13 @@ const GroupInfoModalWhatsApp = ({
                   <div>
                     <span className={`${styles.titleText} text-sm font-medium block`}>Invite via link</span>
                         <span className={`text-xs ${styles.subText} mt-1 block`}>
-                      {group.inviteEnabled ? "Members can join using the invite link" : "Invite link is currently disabled"}
+                      {effectiveGroup.inviteEnabled ? "Members can join using the invite link" : "Invite link is currently disabled"}
                     </span>
                   </div>
-                  <StatusBadge enabled={group.inviteEnabled} />
+                  <StatusBadge enabled={effectiveGroup.inviteEnabled} />
                 </div>
 
-                {group.inviteEnabled && (
+                {effectiveGroup.inviteEnabled && (
                   <button
                     onClick={handleCopyInvite}
                     className="w-full mt-2 text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
@@ -562,12 +616,41 @@ const GroupInfoModalWhatsApp = ({
             {/* ================= ACTIONS ================= */}
             <Section title="Actions">
   {!isCreator && (
-    <ActionButton 
-      icon={LogOut} 
-      label="Leave group" 
-      color="red"
-      onClick={handleLeaveGroup}
-    />
+    <>
+      <ActionButton 
+        icon={LogOut} 
+        label="Leave group" 
+        color="red"
+        onClick={() => setShowLeaveConfirm(true)}
+      />
+
+      {/* Leave confirmation modal */}
+      <AnimatePresence>
+        {showLeaveConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[21000] flex items-center justify-center"
+          >
+            <div className={`absolute inset-0 ${modalOverlayClass}`} onClick={() => setShowLeaveConfirm(false)} />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className={`relative z-10 w-full max-w-md rounded-xl p-6 ${modalContainerBgClass} shadow-lg`}
+            >
+              <h3 className={`${modalTitleClass} text-lg font-semibold mb-2`}>Leave group</h3>
+              <p className={`${modalDescClass} text-sm mb-4`}>Are you sure you want to leave this group? You will lose access to group messages.</p>
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowLeaveConfirm(false)} className={cancelBtnClass}>Cancel</button>
+                <button onClick={performLeaveGroup} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm">Leave</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   )}
 </Section>
           </div>

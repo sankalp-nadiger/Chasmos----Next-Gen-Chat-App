@@ -696,7 +696,7 @@ const MessageInput = React.memo(({
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder=""
+                  placeholder={''}
                   value={messageInput}
                   onChange={handleInputChange}
                   onKeyPress={handleKeyPress}
@@ -779,7 +779,7 @@ const MessageInput = React.memo(({
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          onClick={() => handleSendClick(false)}
+          onClick={() => { handleSendClick(false); }}
           className={`${effectiveTheme.accent} p-2 rounded-full hover:opacity-90 transition-opacity`}
         >
           <Send

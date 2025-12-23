@@ -6,6 +6,7 @@ import Chat from "./models/chat.model.js";
 import User from "./models/user.model.js";
 import Message from "./models/message.model.js";
 import Screenshot from "./models/screenshot.model.js";
+import Group from "./models/group.model.js";
 import colors from "colors";
 import path from "path";
 import userRoutes from "./routes/user.routes.js";
@@ -165,7 +166,7 @@ io.on("connection", (socket) => {
     // rooms and a `group online count` event to each chat room and each member's personal room.
     try {
       const uid = socket.userId;
-      const chatDocs = await Chat.find({ $or: [{ users: uid }, { participants: uid }] }).select('users participants').lean();
+      const chatDocs = await Chat.find({ $or: [{ users: uid }, { participants: uid }] }).select('users participants isGroupChat').lean();
       if ((chatDocs || []).length === 0) {
         // nothing to broadcast
       } else {
@@ -196,26 +197,46 @@ io.on("connection", (socket) => {
 
         // Now compute and emit per-chat online counts. For each chat, count how many
         // of its members are currently connected (based on onlineUserConnections map),
-        // then emit `group online count` to the chat room and to each member's personal room.
-        chatDocs.forEach(cd => {
+        // then emit `group online count` to personal rooms (and to chat room only for non-group chats).
+        for (const cd of chatDocs) {
           try {
-            const members = (cd.users || cd.participants || []);
-            const memberIds = members
-              .map(m => String(m && (m._id || m.id || m)))
-              .filter(Boolean);
-
-            const onlineCount = memberIds.reduce((acc, id) => acc + (isOnline(id) ? 1 : 0), 0);
             const chatId = String(cd._id);
+            let memberIds = [];
 
-            // Emit to the chat room (sockets that have joined the chat room)
-            try {
-              io.to(chatId).emit('group online count', { chatId, onlineCount });
-            } catch (e) {
-              console.error(`[SOCKET] error emitting group online count to chat room ${chatId}`, e);
+            // If this chat is a group, prefer the authoritative Group.participants list
+            // (some Chat docs may have stale participants). Fall back to chat members when needed.
+            if (cd.isGroupChat) {
+              try {
+                const groupDoc = await Group.findOne({ chat: cd._id }).select('participants').lean();
+                if (groupDoc && Array.isArray(groupDoc.participants) && groupDoc.participants.length) {
+                  memberIds = groupDoc.participants.map(p => String(p)).filter(Boolean);
+                }
+              } catch (e) {
+                // ignore and fallback to chat members
+                console.warn('[SOCKET] failed to load Group.participants for chat', chatId, e && e.message);
+              }
             }
 
-            // Also emit to each member's personal room as a fallback for sockets not
-            // currently in the chat room.
+            // Fallback: use chat-level members if memberIds still empty
+            if (!memberIds || memberIds.length === 0) {
+              const members = (cd.users || cd.participants || []);
+              memberIds = members.map(m => String(m && (m._id || m.id || m))).filter(Boolean);
+            }
+
+            const onlineCount = memberIds.reduce((acc, id) => acc + (isOnline(id) ? 1 : 0), 0);
+            const isGroup = Boolean(cd.isGroupChat);
+
+            // For non-group chats emit to the chat room as well; for groups emit only to personal rooms
+            if (!isGroup) {
+              try {
+                io.to(chatId).emit('group online count', { chatId, onlineCount });
+              } catch (e) {
+                console.error(`[SOCKET] error emitting group online count to chat room ${chatId}`, e);
+              }
+            }
+
+            // Emit to each member's personal room as a fallback for sockets not
+            // currently in the chat room (applies to both group and non-group chats).
             memberIds.forEach(mid => {
               try {
                 io.to(mid).emit('group online count', { chatId, onlineCount });
@@ -226,7 +247,7 @@ io.on("connection", (socket) => {
           } catch (e2) {
             console.error('[SOCKET] error computing group online count for a chat', e2);
           }
-        });
+        }
 
         //console.log(`[SOCKET] broadcasted online users list to ${otherUserIds.size} other chat participant(s) for user ${uid}`);
       }
@@ -445,7 +466,18 @@ io.on("connection", (socket) => {
           }
         }
 
-        const users = chat.users || chat.participants || [];
+        // Prefer participants defined on Group model for group chats
+        let users = chat.users || chat.participants || [];
+        if (chat.isGroupChat) {
+          try {
+            const group = await Group.findOne({ chat: chat._id }).select('participants').lean();
+            if (group && Array.isArray(group.participants) && group.participants.length) {
+              users = group.participants;
+            }
+          } catch (e) {
+            console.warn('[SOCKET] new message: failed to load group participants from Group model', e && e.message);
+          }
+        }
 
         if (!users || users.length === 0) {
           return console.log("chat has no participants to notify");
@@ -850,6 +882,29 @@ io.on("connection", (socket) => {
       if (!chat.users.includes(userId)) {
         socket.emit("leave group error", { message: "You are not a member of this group" });
         return;
+      }
+
+      // Update Group model to remove participant and record leftAt/leftBy
+      try {
+        const group = await Group.findOne({ chat: chatId });
+        if (group) {
+          const uidStr = String(userId);
+          group.participants = (group.participants || []).filter(p => String(p) !== uidStr);
+          group.admins = (group.admins || []).filter(a => String(a) !== uidStr);
+          // append left record
+          group.leftBy = Array.isArray(group.leftBy) ? group.leftBy : [];
+          group.leftAt = Array.isArray(group.leftAt) ? group.leftAt : [];
+          group.leftBy.push(userId);
+          group.leftAt.push(new Date());
+          // if primary admin left, set a new primary admin
+          if (group.admin && String(group.admin) === uidStr) {
+            const remainingAdmins = (group.admins || []).filter(a => String(a) !== uidStr);
+            group.admin = (remainingAdmins[0] && remainingAdmins[0]) || (group.participants && group.participants[0]) || null;
+          }
+          await group.save();
+        }
+      } catch (e) {
+        console.warn('[SOCKET] leave group: failed to update Group model', e && e.message);
       }
 
       const updatedChat = await Chat.findByIdAndUpdate(

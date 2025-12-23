@@ -9,6 +9,7 @@ import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
 import path from "path";
 import { getSocketIOInstance } from "../services/scheduledMessageCron.js";
 import { uploadBase64ImageToSupabase } from "../utils/uploadToSupabase.js";
+import crypto from "crypto";
 
 export const accessChat = asyncHandler(async (req, res) => {
   const { userId } = req.body;
@@ -218,7 +219,21 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
 
 
 export const createGroupChat = asyncHandler(async (req, res) => {
-  const { name, users, description, isPublic, avatarBase64 } = req.body;
+  const { name, users, description, isPublic, avatarBase64, inviteEnabled, inviteLink, permissions, features, groupType } = req.body;
+
+  console.log('[createGroupChat] incoming payload:', {
+    name,
+    users: Array.isArray(users) ? users.length : typeof users,
+    description,
+    isPublic,
+    hasAvatar: !!avatarBase64,
+    inviteEnabled,
+    inviteLink,
+    permissions,
+    features,
+    groupType,
+    requester: req.user && req.user._id ? req.user._id.toString() : null,
+  });
 
   if (!name || !users) {
     return res.status(400).json({ message: "Please fill all the fields" });
@@ -259,24 +274,92 @@ export const createGroupChat = asyncHandler(async (req, res) => {
     parsedUsers.push(creatorId);
   }
 
-  const groupChat = await Chat.create({
-    chatName: name,
-    users: parsedUsers,
-    participants: parsedUsers,
-    isGroupChat: true,
-    groupAdmin: req.user._id,
-    admins: [req.user._id],
-    groupSettings: {
-      description: description || "",
-      avatar, // ✅ SUPABASE PUBLIC URL
-      isPublic: Boolean(isPublic),
-    },
-  });
+  let groupChat;
+  try {
+    groupChat = await Chat.create({
+      chatName: name,
+      users: parsedUsers,
+      participants: parsedUsers,
+      isGroupChat: true,
+      groupAdmin: req.user._id,
+      admins: [req.user._id],
+      groupSettings: {
+        description: description || "",
+        avatar, // ✅ SUPABASE PUBLIC URL
+        isPublic: Boolean(isPublic),
+      },
+    });
+  } catch (createErr) {
+    console.error('[createGroupChat] Failed to create Chat record:', createErr && (createErr.message || createErr));
+    return res.status(500).json({ message: 'Failed to create chat record' });
+  }
 
   const fullGroupChat = await Chat.findById(groupChat._id)
     .populate("users", "-password")
     .populate("groupAdmin", "-password")
     .populate("admins", "name email avatar");
+  // Ensure a Group document exists and is linked to this Chat
+  // Create or fetch linked Group document and ensure it's persisted with provided settings
+  const inviteEnabledBool = inviteEnabled === true || inviteEnabled === 'true' || inviteEnabled === '1' || inviteEnabled === 1;
+  let group = await Group.findOne({ chat: fullGroupChat._id });
+  let finalInviteLink = '';
+  if (inviteEnabledBool) {
+    finalInviteLink = inviteLink || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/invite/group-${crypto.randomBytes(8).toString('hex')}`;
+  }
+
+  if (!group) {
+    const groupData = {
+      name: name.trim(),
+      description: description || "",
+      avatar: avatar || "",
+      icon: avatar || "",
+      participants: parsedUsers,
+      admin: req.user._id,
+      admins: [req.user._id],
+      chat: fullGroupChat._id,
+      inviteLink: finalInviteLink,
+      inviteEnabled: inviteEnabledBool === true,
+      permissions: {
+        allowCreatorAdmin: permissions && permissions.allowCreatorAdmin !== false,
+        allowOthersAdmin: permissions && permissions.allowOthersAdmin === true,
+        allowMembersAdd: permissions && permissions.allowMembersAdd !== false,
+      },
+      features: {
+        media: features && features.media !== false,
+        gallery: features && features.gallery !== false,
+        docs: features && features.docs !== false,
+        polls: features && features.polls !== false,
+      },
+      groupType: groupType || 'Casual',
+    };
+
+    try {
+      group = await Group.create(groupData);
+      console.log('[createGroupChat] Group created:', { groupId: group._id ? String(group._id) : null });
+    } catch (err) {
+      console.error('[createGroupChat] Failed to create Group document:', err && (err.message || err));
+      return res.status(500).json({ message: 'Failed to create group record' });
+    }
+
+    try {
+      await Chat.findByIdAndUpdate(fullGroupChat._id, {
+        $set: {
+          'groupSettings.inviteLink': finalInviteLink || null,
+          'groupSettings.allowInvites': inviteEnabledBool === true,
+          'groupSettings.avatar': avatar || null,
+          'groupSettings.description': description || '',
+          'groupSettings.isPublic': Boolean(isPublic),
+          'groupSettings.maxMembers': 100,
+        }
+      });
+    } catch (e) {
+      console.warn('[createGroupChat] failed to sync Chat.groupSettings:', e && e.message);
+    }
+  }
+
+  // Attach group to response for frontend convenience
+  fullGroupChat._doc = fullGroupChat._doc || {};
+  fullGroupChat._doc.group = group;
 // Emit socket event to participants so other connected users update immediately
   try {
     const io = getSocketIOInstance();
@@ -314,7 +397,9 @@ export const createGroupChat = asyncHandler(async (req, res) => {
   }
   const fullObj = (fullGroupChat && fullGroupChat.toObject && typeof fullGroupChat.toObject === 'function') ? fullGroupChat.toObject() : { ...fullGroupChat };
   fullObj.name = fullObj.chatName || fullObj.name || (fullObj.groupSettings && fullObj.groupSettings.name) || "";
-  res.status(201).json(fullObj);
+  console.log('[createGroupChat] responding with chat:', { chatId: String(fullGroupChat._id), hasGroup: !!group, groupId: group && group._id ? String(group._id) : null });
+  // Return explicit shape so frontend doesn't rely on driver-internal _doc hacks
+  return res.status(201).json({ chat: fullObj, group: group || null });
 });
 
 
@@ -788,9 +873,78 @@ export const deleteChat = asyncHandler(async (req, res) => {
   if (isGroupChatFlag) {
     // Compare ObjectIds as strings to avoid type mismatch
     if (!chat.admins.map(String).includes(String(userId))) {
-      console.log("User is not admin, cannot delete group chat");
-      res.status(403);
-      throw new Error("Only admins can delete group chats");
+      // If user is still a member, require them to leave group before deleting for themselves
+      const isStillMember = (chat.participants && chat.participants.map(String).includes(String(userId))) || (chat.users && chat.users.map(String).includes(String(userId)));
+      if (isStillMember) {
+        res.status(400);
+        throw new Error("You must leave the group before deleting the chat for yourself. Administrators can delete the group for everyone.");
+      }
+
+      // User is not admin and not a member (already left) — perform the same soft-delete flow as for 1-on-1 chats
+      try {
+        const keepMedia = String(req.query.keepMedia || '').toLowerCase() === 'true';
+
+        try {
+          await Message.updateMany(
+            { chat: chatId },
+            { $addToSet: { deletedFor: userId } }
+          );
+        } catch (mErr) {
+          console.warn('[deleteChat] Failed to mark messages deletedFor user (left-group):', mErr && mErr.message);
+        }
+
+        if (keepMedia) {
+          try {
+            await Message.updateMany(
+              { chat: chatId, attachments: { $exists: true, $ne: [] } },
+              { $addToSet: { keepFor: userId } }
+            );
+          } catch (kErr) {
+            console.warn('[deleteChat] Failed to add user to keepFor for messages with attachments (left-group):', kErr && kErr.message);
+          }
+        }
+
+        try {
+          await Screenshot.updateMany(
+            { chat: chatId },
+            { $addToSet: { deletedFor: userId } }
+          );
+        } catch (sErr) {
+          console.warn('[deleteChat] Failed to mark screenshots deletedFor user (left-group):', sErr && sErr.message);
+        }
+
+        if (keepMedia) {
+          try {
+            await Screenshot.updateMany(
+              { chat: chatId },
+              { $addToSet: { keepFor: userId } }
+            );
+          } catch (kSErr) {
+            console.warn('[deleteChat] Failed to add user to keepFor for screenshots (left-group):', kSErr && kSErr.message);
+          }
+        }
+
+        await Chat.findByIdAndUpdate(
+          chatId,
+          { $addToSet: { deletedBy: userId }, $set: { deletedAt: new Date() } },
+          { new: true }
+        );
+
+        try {
+          const io = getSocketIOInstance();
+          if (io) {
+            try { io.to(String(userId)).emit('chat deleted', { chatId: String(chatId) }); } catch (e) { console.error('emit chat deleted to requester failed (left-group)', e); }
+          }
+        } catch (e) {
+          console.error('Failed to emit chat deleted event (left-group):', e);
+        }
+
+        return res.status(200).json({ message: 'Chat deleted for you', chatId });
+      } catch (err) {
+        console.error('Failed to soft-delete chat for left-group user:', err);
+        res.status(500);
+        throw new Error('Failed to delete chat');
+      }
     }
     
     // Get all messages with attachments
@@ -825,6 +979,12 @@ export const deleteChat = asyncHandler(async (req, res) => {
     }
     
     await Message.deleteMany({ chat: chatId });
+    // Also remove any Group document that references this chat so group record is cleaned up
+    try {
+      await Group.findOneAndDelete({ chat: chatId });
+    } catch (gErr) {
+      console.warn('[deleteChat] Failed to remove Group record for chat:', gErr && gErr.message);
+    }
     await Chat.findByIdAndDelete(chatId);
     console.log("Group chat deleted successfully");
     // Emit socket event to participants so they can remove the chat from UI
@@ -842,6 +1002,8 @@ export const deleteChat = asyncHandler(async (req, res) => {
             try { io.to(uid).emit('chat deleted', { chatId: String(chatId) }); } catch (e) { console.error('emit chat deleted to user failed', uid, e); }
           }
         });
+        // Additionally emit a group-level event so frontends treating this as a group can react
+        try { io.to(`group_${String(chatId)}`).emit('group deleted', { chatId: String(chatId) }); } catch (e) { /* ignore */ }
       }
     } catch (e) {
       console.error('Failed to emit chat deleted event:', e);
@@ -1069,6 +1231,29 @@ const groupChat = await Chat.findById(chatId)
       if (groupObj.createdAt) {
         groupObj.createdAtIso = new Date(groupObj.createdAt).toISOString();
       }
+    }
+
+    // Try to fetch linked Group document to obtain invite/permissions/features
+    try {
+      const linkedGroup = await Group.findOne({ chat: groupChat._id })
+        .populate('participants', '_id name avatar email username')
+        .populate('admin', '_id name avatar email username')
+        .populate('admins', '_id name avatar email username');
+
+      if (linkedGroup) {
+        console.log('[getGroupChatById] linked Group found for chat', String(chatId), String(linkedGroup._id));
+        groupObj.group = linkedGroup;
+        // copy important settings to top-level for backward-compatibility
+        groupObj.inviteEnabled = Boolean(linkedGroup.inviteEnabled);
+        groupObj.inviteLink = linkedGroup.inviteLink || '';
+        groupObj.permissions = linkedGroup.permissions || {};
+        groupObj.features = linkedGroup.features || {};
+        groupObj.groupId = linkedGroup._id;
+      } else {
+        console.log('[getGroupChatById] no linked Group document for chat', String(chatId));
+      }
+    } catch (e) {
+      console.warn('[getGroupChatById] failed to load linked Group:', e && e.message);
     }
 
     res.status(200).json(groupObj);

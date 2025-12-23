@@ -28,7 +28,7 @@ const formatTimestamp = (timestamp) => {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
-const ContactItem = ({ contact, onSelect, effectiveTheme }) => {
+const ContactItem = ({ contact, onSelect, effectiveTheme, computedIsOnline }) => {
   const cleanText = (text) => {
     if (!text) return '';
     const s = typeof text === 'string' ? text : (text.content || text.text || '');
@@ -106,7 +106,7 @@ const avatarFallbackText =
   </div>
 )}
 
-          {contact.isOnline && (
+          {(typeof computedIsOnline !== 'undefined' ? computedIsOnline : contact.isOnline) && (
             <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
           )}
         </div>

@@ -21,7 +21,8 @@ export const createGroup = async (req, res) => {
       inviteLink,
       inviteEnabled,
       permissions = {},
-      features = {}
+      features = {},
+      isPublic = false,
     } = req.body;
     
     const adminId = req.user._id;
@@ -44,9 +45,13 @@ export const createGroup = async (req, res) => {
       }
     }
 
+    // Normalize inviteEnabled (accept true, 'true', '1', 1)
+    const inviteEnabledBool =
+      inviteEnabled === true || inviteEnabled === "true" || inviteEnabled === "1" || inviteEnabled === 1;
+
     // Generate invite link if enabled
     let finalInviteLink = "";
-    if (inviteEnabled) {
+    if (inviteEnabledBool) {
       if (inviteLink) {
         finalInviteLink = inviteLink;
       } else {
@@ -55,10 +60,27 @@ export const createGroup = async (req, res) => {
       }
     }
 
-    const chat = await Chat.create({
-      isGroupChat: true,
-      participants: [adminId]
-    });
+    // Idempotency: if a chat/group with same name and participants exists, reuse it
+    let chat = null;
+    try {
+      const existingChat = await Chat.findOne({
+        isGroupChat: true,
+        'groupSettings.description': description || '',
+        participants: { $all: [adminId] },
+      }).lean();
+      if (existingChat) {
+        chat = await Chat.findById(existingChat._id);
+      }
+    } catch (e) {
+      console.warn('group.controller: idempotency check failed', e && e.message);
+    }
+
+    if (!chat) {
+      chat = await Chat.create({
+        isGroupChat: true,
+        participants: [adminId]
+      });
+    }
 
     // ✅ Create group with all settings - EXPLICIT VALUES
     const groupData = {
@@ -71,7 +93,7 @@ export const createGroup = async (req, res) => {
       admins: [adminId],
       chat: chat._id,
       inviteLink: finalInviteLink,
-      inviteEnabled: inviteEnabled === true, // Explicit boolean
+      inviteEnabled: inviteEnabledBool === true, // Explicit boolean
       
       // ✅ Save permissions with explicit boolean conversion
       permissions: {
@@ -95,6 +117,27 @@ export const createGroup = async (req, res) => {
     console.log("- Features:", groupData.features);
 
     const group = await Group.create(groupData);
+
+    // Ensure the related Chat document has matching groupSettings (invite link, allowInvites, avatar, description)
+    try {
+      const maxMembers = 100;
+      await Chat.findByIdAndUpdate(
+        chat._id,
+        {
+          $set: {
+            'groupSettings.inviteLink': finalInviteLink || null,
+            'groupSettings.allowInvites': inviteEnabledBool === true,
+            'groupSettings.avatar': avatarUrl || null,
+            'groupSettings.description': description || '',
+            'groupSettings.isPublic': Boolean(isPublic),
+            'groupSettings.maxMembers': maxMembers,
+          },
+        },
+        { new: true }
+      );
+    } catch (e) {
+      console.warn('Failed to update Chat.groupSettings after group creation:', e && e.message);
+    }
 
     console.log("✅ Group saved to database:");
     console.log("- ID:", group._id);
@@ -182,7 +225,7 @@ export const regenerateLink = async (req, res) => {
     const group = await Group.findById(groupId);
     if (!group) return err(res, "Group not found");
 
-    if (group.admin.toString() !== userId.toString())
+    if (!group.admin || String(group.admin) !== String(userId))
       return err(res, "Only admin can regenerate link", 403);
 
     const newLink = crypto.randomBytes(16).toString("hex");
@@ -234,7 +277,7 @@ export const removeMember = async (req, res) => {
     const group = await Group.findById(groupId);
     if (!group) return err(res, "Group not found");
 
-    if (group.admin.toString() !== userId.toString())
+    if (!group.admin || String(group.admin) !== String(userId))
       return err(res, "Only admin can remove members", 403);
 
     group.participants = group.participants.filter(
@@ -264,7 +307,7 @@ export const addAdmin = async (req, res) => {
     const group = await Group.findById(groupId);
     if (!group) return err(res, "Group not found");
 
-    if (group.admin.toString() !== userId.toString())
+    if (!group.admin || String(group.admin) !== String(userId))
       return err(res, "Only group admin can promote", 403);
 
     // Add to admins array if not already there
@@ -285,26 +328,73 @@ export const addAdmin = async (req, res) => {
 // ----------------------------
 export const exitGroup = async (req, res) => {
   try {
-    const { groupId } = req.body;
+    // Accept either `groupId` (Group._id) or `chatId` (Chat._id) from frontend for convenience
+    const { groupId: incomingId } = req.body;
+    let groupId = incomingId;
     const userId = req.user._id;
-    console.log("User", userId, "is exiting group", groupId);
+    console.log("exitGroup called. body:", req.body);
+    console.log("User", userId, "is attempting to exit group", groupId);
 
-    const group = await Group.findById(groupId);
+    // Try to resolve Group by id or by linked chat id
+    let group = null;
+    if (groupId) {
+      group = await Group.findById(groupId);
+    }
+    // If not found and an id was provided, it might be a chatId — try lookup
+    if (!group && incomingId) {
+      group = await Group.findOne({ chat: incomingId });
+      if (group) groupId = String(group._id);
+    }
+
     if (!group) return err(res, "Group not found");
 
-    if (!group.participants.includes(userId))
+    console.warn('exitGroup: resolved group', { groupId: String(group._id), receivedId: incomingId });
+
+    const participantStrings = Array.isArray(group.participants) ? group.participants.map(p => String(p)) : [];
+    if (!participantStrings.includes(String(userId))) {
+      console.warn('exitGroup: user not in group', { groupId: String(group._id), userId: String(userId) });
       return err(res, "User not in group");
+    }
 
-    group.participants = group.participants.filter(
-      (id) => id.toString() !== userId.toString()
-    );
+    // Prevent sole admin from leaving without promoting someone else
+    const userIdStr = userId.toString();
+    const adminsArr = Array.isArray(group.admins) ? group.admins : (group.admin ? [group.admin] : []);
+    const isAdminMember = adminsArr.some(a => a && a.toString() === userIdStr) || (group.admin && group.admin.toString() === userIdStr);
+    if (isAdminMember) {
+      const otherAdmins = adminsArr.filter(a => a && a.toString() !== userIdStr);
+      if (otherAdmins.length === 0) {
+        console.warn('exitGroup: user is sole admin and cannot exit without promoting another member', { groupId: String(group._id), userId: userIdStr });
+        return err(res, "You are the only admin in this group. Please promote another member to admin before leaving.", 400);
+      }
+    }
 
-    // auto promote if admin leaves
-    if (group.admin.toString() === userId.toString()) {
-      group.admin = group.participants[0] || null;
+    // Remove user from participants and admins arrays
+    group.participants = Array.isArray(group.participants)
+      ? group.participants.filter((id) => String(id) !== userIdStr)
+      : [];
+    if (Array.isArray(group.admins)) {
+      group.admins = group.admins.filter(a => a && a.toString() !== userIdStr);
+    }
+
+    // Record that this user left and when (parallel arrays)
+    try {
+      group.leftBy = Array.isArray(group.leftBy) ? group.leftBy : [];
+      group.leftAt = Array.isArray(group.leftAt) ? group.leftAt : [];
+      group.leftBy.push(userId);
+      group.leftAt.push(new Date());
+    } catch (e) {
+      console.warn('exitGroup: failed to record leftBy/leftAt', e && e.message);
+    }
+
+    // If leaving user was primary admin, set a new primary admin from remaining admins (or participants)
+    if (group.admin && group.admin.toString() === userIdStr) {
+      const remainingAdmins = Array.isArray(group.admins) ? group.admins : [];
+      group.admin = (remainingAdmins[0] && remainingAdmins[0]) || (group.participants[0] || null);
+      console.log('exitGroup: primary admin left, new admin set to', String(group.admin));
     }
 
     await group.save();
+
     return ok(res, { message: "Exited group", group });
   } catch (error) {
     err(res, error.message, 500);
@@ -323,7 +413,7 @@ export const deleteGroup = async (req, res) => {
     const group = await Group.findById(groupId);
     if (!group) return err(res, "Group not found");
 
-    if (group.admin.toString() !== userId.toString())
+    if (!group.admin || String(group.admin) !== String(userId))
       return err(res, "Only admin can delete group");
 
     await Chat.findByIdAndDelete(group.chat);
@@ -343,10 +433,26 @@ export const getGroupInfo = async (req, res) => {
   try {
     const { groupId } = req.params;
 
-    const group = await Group.findById(groupId)
-      .populate("participants", "_id name avatar email username")
-      .populate("admin", "_id name avatar email username")
-      .populate("admins", "_id name avatar email username");
+    // Try find by Group._id first, then fallback to chat id (some callers pass chatId)
+    let group = null;
+    if (groupId) {
+      try {
+        group = await Group.findById(groupId)
+          .populate("participants", "_id name avatar email username")
+          .populate("admin", "_id name avatar email username")
+          .populate("admins", "_id name avatar email username");
+      } catch (e) {
+        // ignore and try chat lookup
+        group = null;
+      }
+    }
+
+    if (!group && groupId) {
+      group = await Group.findOne({ chat: groupId })
+        .populate("participants", "_id name avatar email username")
+        .populate("admin", "_id name avatar email username")
+        .populate("admins", "_id name avatar email username");
+    }
 
     if (!group) return err(res, "Group not found", 404);
 

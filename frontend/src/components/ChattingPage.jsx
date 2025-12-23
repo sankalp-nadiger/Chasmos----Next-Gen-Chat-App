@@ -118,6 +118,7 @@ const ChatHeader = React.memo(
     // New props passed from parent
     isOnline,
     groupOnlineCount,
+    selectedHasLeftGroup,
   }) => {
     const [menuOpen, setMenuOpen] = React.useState(false);
     const menuRef = React.useRef(null);
@@ -144,7 +145,7 @@ const avatarFallbackText =
       <div className={`${effectiveTheme.secondary} relative`}>
         <div className="p-4 flex items-center justify-between">
           <div 
-            className="flex items-center space-x-3 flex-1 cursor-pointer hover:bg-white/5 transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1"
+            className={`flex items-center space-x-3 flex-1 ${selectedHasLeftGroup ? 'cursor-default opacity-95' : 'cursor-pointer hover:bg-white/5'} transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1`}
             onClick={() => {
               console.log('❌ Header clicked - selectedContact:', selectedContact);
               console.log('🔍 isDocument:', selectedContact.isDocument);
@@ -155,6 +156,11 @@ const avatarFallbackText =
               if (selectedContact.isDocument) return;
               const isGroup = selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat;
               console.log('✅ isGroup calculated as:', isGroup);
+              // If user has left the group, suppress header clicks for group info
+              if (isGroup && selectedHasLeftGroup) {
+                console.log('⛔ Header click suppressed: user not a member of this group');
+                return;
+              }
               if (isGroup) {
                 console.log('📋 Opening GroupInfoModal');
                 onOpenGroupInfo(selectedContact);
@@ -370,7 +376,7 @@ const avatarFallbackText =
                     </li> */}
                         {selectedContact?.chatId && (
                           <li>
-                            <button className={`w-full text-left px-4 py-3 flex items-center gap-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900`} onClick={() => { setShowDeleteChatModal(true); setChatToDelete(selectedContact); setMenuOpen(false); }}>
+                            <button className={`w-full text-left px-4 py-3 flex items-center gap-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900`} onClick={() => { onDeleteChat && onDeleteChat(selectedContact); setMenuOpen(false); }}>
                               <Trash2 className="w-4 h-4 opacity-90" />
                               <span>Delete Chat</span>
                             </button>
@@ -397,7 +403,8 @@ const avatarFallbackText =
       prevProps.isBlocked === nextProps.isBlocked &&
       prevProps.isArchived === nextProps.isArchived &&
       prevProps.isOnline === nextProps.isOnline &&
-      prevProps.groupOnlineCount === nextProps.groupOnlineCount
+      prevProps.groupOnlineCount === nextProps.groupOnlineCount &&
+      prevProps.selectedHasLeftGroup === nextProps.selectedHasLeftGroup
     );
   }
 );
@@ -2096,6 +2103,8 @@ useEffect(() => {
   fetchDocuments();
 }, []);
 
+
+
 const deleteDocument = async (documentId) => {
   try {
     const res = await fetch(`/api/document/${documentId}`, {
@@ -2228,6 +2237,210 @@ const togglePin = async (docId, isPinnedNow) => {
     }
   }, [activeSection]);
   const [recentChats, setRecentChats] = useState([]);
+
+  // Guard: set to avoid duplicate in-flight group participant fetches
+  const fetchingGroupParticipantsRef = useRef(new Set());
+
+  // Ensure group chats have authoritative participants (prefer group.participants over chat.participants)
+  useEffect(() => {
+    if (!Array.isArray(recentChats) || recentChats.length === 0) return;
+    const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+
+    recentChats.forEach((c) => {
+      const isGroup = c.isGroup || c.isGroupChat || c.isgroupchat || c.isGroupChat;
+      if (!isGroup) return;
+      const hasMembers = (c.group && (c.group.participants || c.group.users) && (c.group.participants || c.group.users).length > 0) || (c.participants && c.participants.length > 0) || (c.users && c.users.length > 0);
+      const chatId = c.chatId || c.id || c._id || c.chatId;
+      if (hasMembers) return;
+      if (!chatId) return;
+      // avoid duplicate fetches
+      if (fetchingGroupParticipantsRef.current.has(String(chatId))) return;
+      fetchingGroupParticipantsRef.current.add(String(chatId));
+
+      (async () => {
+        try {
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const url = `${API_BASE_URL}/api/group/group/${encodeURIComponent(chatId)}`;
+          const res = await fetch(url, { headers });
+          if (!res.ok) return;
+          const data = await res.json();
+          const group = data && data.success && data.group ? data.group : data;
+          const members = group && (group.participants || group.users) ? (group.participants || group.users) : [];
+          setRecentChats(prev => (prev || []).map(x => {
+            if (String(x.chatId || x.id || x._id) === String(chatId)) {
+              return { ...x, participants: members, users: members, group };
+            }
+            return x;
+          }));
+        } catch (e) {
+          // ignore
+        } finally {
+          fetchingGroupParticipantsRef.current.delete(String(chatId));
+        }
+      })();
+    });
+  }, [recentChats]);
+
+  // Track whether selected contact (group) has the current user removed/left
+  const [selectedHasLeftGroup, setSelectedHasLeftGroup] = useState(false);
+
+  // Recompute when selectedContact changes
+  useEffect(() => {
+    if (!selectedContact) {
+      setSelectedHasLeftGroup(false);
+      return;
+    }
+    const isGroup = Boolean(selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat || selectedContact.group || selectedContact.chat?.isGroupChat);
+    if (!isGroup) {
+      setSelectedHasLeftGroup(false);
+      return;
+    }
+
+    // Derive members from multiple possible payload shapes to avoid false negatives.
+    // If participants are missing or empty, fetch authoritative group info from backend.
+    (async () => {
+      try {
+        let members =
+          selectedContact.users ||
+          selectedContact.participants ||
+          (selectedContact.group && (selectedContact.group.participants || selectedContact.group.users)) ||
+          (selectedContact.chat && (selectedContact.chat.participants || selectedContact.chat.users)) ||
+          [];
+
+        // If participants array is empty or not present but we have a chatId/group id, fetch from API
+        const groupId = selectedContact.group?._id || selectedContact.groupId || selectedContact.chatId || selectedContact._id || selectedContact.id;
+        if ((!members || members.length === 0) && groupId) {
+          try {
+            const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            // Use the same authoritative endpoint as GroupInfoModal which accepts either groupId or chatId
+            const url = `${API_BASE_URL}/api/group/group/${encodeURIComponent(groupId)}`;
+            const res = await fetch(url, { headers });
+            if (res.ok) {
+              const data = await res.json();
+              // API returns success wrapper { success: true, ... } or plain group — handle both
+              const group = data && data.success && data.group ? data.group : data;
+              if (group && (group.participants || group.users)) {
+                members = group.participants || group.users || [];
+                // Update selectedContact to include authoritative participants so UI uses it
+                setSelectedContact(prev => prev ? ({ ...prev, participants: members }) : prev);
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to fetch group info for membership check', e && e.message);
+          }
+        }
+
+        const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+        const currentUserIdLocal = _local._id || _local.id || _local.userId || null;
+
+        const isMember = (members || []).some(m => {
+          const uid = m && (m._id || m.id || m.userId || m);
+          return uid && String(uid) === String(currentUserIdLocal);
+        });
+
+        setSelectedHasLeftGroup(!isMember);
+      } catch (err) {
+        console.error('selectedContact membership check failed', err);
+        setSelectedHasLeftGroup(false);
+      }
+    })();
+  }, [selectedContact]);
+
+  // Attempt to leave a group (calls backend then updates local state)
+  const leaveGroupFromChat = async (contact, keepMedia = false) => {
+    if (!contact) return;
+    const groupId = (contact.group && (contact.group._id || contact.group.id)) || contact.chatId || contact._id || contact.id;
+    if (!groupId) return;
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const res = await fetch(`${API_BASE_URL}/api/group/exit-group`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ groupId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to leave group');
+      }
+      const json = await res.json();
+      // Update selectedContact locally to remove current user
+      setSelectedContact((prev) => {
+        if (!prev) return prev;
+        const clone = { ...prev };
+        const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+        const removeId = String(_local._id || _local.id || '');
+        const filterIds = (arr) => (Array.isArray(arr) ? arr.filter(a => String((a._id||a||a.id)) !== removeId) : arr);
+        clone.users = filterIds(clone.users || clone.participants || []);
+        clone.participants = clone.users;
+        if (clone.admins) clone.admins = filterIds(clone.admins);
+        return clone;
+      });
+      // After successfully leaving the group, perform soft-delete of the chat for this user
+      try {
+        const chatId = contact.chatId || contact._id || contact.id || (contact.group && contact.group.chat) || (contact.chat && contact.chat._id);
+        if (chatId) {
+          const deleteUrl = `${API_BASE_URL}/api/chat/${chatId}?keepMedia=${keepMedia ? 'true' : 'false'}`;
+          const dres = await fetch(deleteUrl, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (dres.ok) {
+            try { const dj = await dres.json(); console.log('deleteChat result', dj); } catch (e) {}
+          } else {
+            // If chat already deleted or not found, ignore
+            try { const dex = await dres.json().catch(()=>({})); console.warn('deleteChat response not ok', dex); } catch(e){}
+          }
+        }
+      } catch (e) {
+        console.warn('Soft-delete chat after leaving failed', e);
+      }
+
+      setSelectedHasLeftGroup(true);
+      toast.success('You have left the group');
+    } catch (e) {
+      console.error('Leave group failed', e);
+      toast.error(e.message || 'Failed to leave group');
+    }
+  };
+
+  // When user clicks Delete Chat in menu, ensure group members cannot hard-delete the group chat
+  const checkAndOpenDeleteChat = (contact) => {
+    if (!contact) return;
+    const isGroup = Boolean(contact.isGroup || contact.isGroupChat || contact.isgroupchat);
+    if (!isGroup) {
+      setChatToDelete(contact);
+      setShowDeleteChatModal(true);
+      return;
+    }
+
+    // Derive members from possible payload shapes (mirrors message input membership check)
+    const members = contact.users || contact.participants || contact.group?.participants || contact.group?.users || contact.chat?.participants || contact.chat?.users || [];
+    const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+    const currentUserIdLocal = _local._id || _local.id || null;
+    const isMember = (members || []).some(m => {
+      const uid = m && (m._id || m.id || m.userId || m);
+      return uid && String(uid) === String(currentUserIdLocal);
+    });
+
+    // If current user is still a participant of the group, do not allow delete here.
+    // Prompt a warning instructing them to leave the group first (no leave logic executed here).
+    if (isMember) {
+      Swal.fire({
+        title: 'Leave group first',
+        html: `You must leave the group before you can delete it. Open Group Info and leave the group first.`,
+        icon: 'warning',
+        confirmButtonText: 'OK',
+        background: effectiveTheme.secondary,
+        color: effectiveTheme.toastText,
+      });
+      return;
+    }
+
+    // User already left the group: allow delete/keep options (soft-delete for this user)
+    setChatToDelete(contact);
+    setShowDeleteChatModal(true);
+  };
 
   // Deduplicate recent chats by chatId/id to avoid duplicates
   // (occurs when a group is created via API and also arrives via sockets)
@@ -2751,6 +2964,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [groupOnlineCounts, setGroupOnlineCounts] = useState({});
+  
   // Current user id (used for message alignment)
   const _localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
   const currentUserId = _localUser._id || _localUser.id || null;
@@ -2764,13 +2978,22 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
           const copy = { ...c };
           const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
           if (isGroup) {
-            const members = copy.users || copy.participants || [];
-            const count = (members || []).filter(m => {
-              const uid = m && (m._id || m.id || m);
-              if (!uid) return false;
-              if (String(uid) === String(currentUserId)) return false;
-              return onlineUsers.has(String(uid));
-            }).length;
+            const members = copy.group?.participants || copy.group?.users || copy.users || copy.participants || [];
+            // Prefer server-provided group online counts when available
+            const chatIdKey = copy.chatId || copy._id || copy.id || '';
+            let count = 0;
+            if (groupOnlineCounts && typeof groupOnlineCounts[String(chatIdKey)] !== 'undefined') {
+              const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+              // server count may include this user's own connection — subtract 1
+              count = Math.max(0, raw - 1);
+            } else {
+              count = (members || []).filter(m => {
+                const uid = m && (m._id || m.id || m);
+                if (!uid) return false;
+                if (String(uid) === String(currentUserId)) return false;
+                return onlineUsers.has(String(uid));
+              }).length;
+            }
             copy.__computedGroupOnlineCount = count;
             copy.isOnline = count > 0;
           } else {
@@ -2787,13 +3010,21 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
           const copy = { ...c };
           const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
           if (isGroup) {
-            const members = copy.users || copy.participants || [];
-            const count = (members || []).filter(m => {
-              const uid = m && (m._id || m.id || m);
-              if (!uid) return false;
-              if (String(uid) === String(currentUserId)) return false;
-              return onlineUsers.has(String(uid));
-            }).length;
+            const members = copy.group?.participants || copy.group?.users || copy.users || copy.participants || [];
+            const chatIdKey = copy.chatId || copy._id || copy.id || '';
+            let count = 0;
+            if (groupOnlineCounts && typeof groupOnlineCounts[String(chatIdKey)] !== 'undefined') {
+              const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+              count = Math.max(0, raw - 1);
+            } else {
+              const membersArr = members || [];
+              count = membersArr.filter(m => {
+                const uid = m && (m._id || m.id || m);
+                if (!uid) return false;
+                if (String(uid) === String(currentUserId)) return false;
+                return onlineUsers && typeof onlineUsers.has === 'function' ? onlineUsers.has(String(uid)) : false;
+              }).length;
+            }
             copy.__computedGroupOnlineCount = count;
             copy.isOnline = count > 0;
           } else {
@@ -2806,7 +3037,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
     } catch (e) {
       // ignore
     }
-  }, [onlineUsers, currentUserId]);
+  }, [onlineUsers, currentUserId, groupOnlineCounts]);
 
   // Guarded recompute: when `recentChats` is first populated (or updated),
   // ensure presence flags reflect current `onlineUsers`. Only write back
@@ -2819,13 +3050,22 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
         const copy = { ...c };
         const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat || (Array.isArray(copy.users) && copy.users.length > 0) || (Array.isArray(copy.participants) && copy.participants.length > 0);
         if (isGroup) {
-          const members = copy.users || copy.participants || [];
-          const count = (members || []).filter(m => {
-            const uid = m && (m._id || m.id || m);
-            if (!uid) return false;
-            if (String(uid) === String(currentUserId)) return false;
-            return onlineUsers && typeof onlineUsers.has === 'function' ? onlineUsers.has(String(uid)) : false;
-          }).length;
+          const chatIdKey = copy.chatId || copy._id || copy.id || '';
+          let count = 0;
+          if (groupOnlineCounts && typeof groupOnlineCounts[String(chatIdKey)] !== 'undefined') {
+            const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+            count = Math.max(0, raw - 1);
+          } else if (copy.group && (Array.isArray(copy.group.participants) && copy.group.participants.length > 0 || Array.isArray(copy.group.users) && copy.group.users.length > 0)) {
+            const members = copy.group?.participants || copy.group?.users || [];
+            count = (members || []).filter(m => {
+              const uid = m && (m._id || m.id || m);
+              if (!uid) return false;
+              if (String(uid) === String(currentUserId)) return false;
+              return onlineUsers && typeof onlineUsers.has === 'function' ? onlineUsers.has(String(uid)) : false;
+            }).length;
+          } else {
+            count = 0;
+          }
           copy.__computedGroupOnlineCount = count;
           copy.isOnline = count > 0;
         } else {
@@ -2858,7 +3098,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
     } catch (e) {
       // non-fatal
     }
-  }, [recentChats, onlineUsers, currentUserId]);
+  }, [recentChats, onlineUsers, currentUserId, groupOnlineCounts]);
 
   // When selected contact changes, refresh block/archive status for that chat/user
   useEffect(() => {
@@ -3229,68 +3469,6 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
     })();
   };
 
-  // Fetch both received and accepted requests
-  // useEffect(() => {
-  //   const fetchRequests = async () => {
-  //     try {
-  //       const token = localStorage.getItem("token");
-  //       if (!token) {
-  //         console.error("No token found — user might not be logged in.");
-  //         return;
-  //       }
-
-  //       // 1️⃣ Fetch received chat requests
-  //       const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
-  //         headers: { Authorization: `Bearer ${token}` },
-  //       });
-  //       const receivedData = await resReceived.json();
-  //       console.log("Received Emails:", receivedData);
-  //       const receivedEmails = Array.isArray(receivedData) ? receivedData : [];
-
-  //       // 2️⃣ Fetch accepted chat requests
-  //       const resAccepted = await fetch(
-  //         `${API_BASE_URL}/api/user/requests/accepted`,
-  //         {
-  //           headers: { Authorization: `Bearer ${token}` },
-  //         }
-  //       );
-  //       const acceptedData = await resAccepted.json();
-  //       const acceptedEmails = Array.isArray(acceptedData) ? acceptedData : [];
-
-  //       // 3️⃣ Helper: fetch user profiles by email
-  //       const fetchUsersByEmails = async (emails) => {
-  //         if (!Array.isArray(emails) || emails.length === 0) return [];
-  //         const results = await Promise.all(
-  //           emails.map(async (email) => {
-  //             const res = await fetch(
-  //               `${API_BASE_URL}/api/user?search=${email}`,
-  //               {
-  //                 headers: { Authorization: `Bearer ${token}` },
-  //               }
-  //             );
-  //             const data = await res.json();
-  //             return Array.isArray(data) ? data[0] : data; // handle array response
-  //           })
-  //         );
-  //         return results.filter(Boolean);
-  //       };
-
-  //       // 4️⃣ Fetch both user lists
-  //       const [receivedUsers, acceptedUsers] = await Promise.all([
-  //         fetchUsersByEmails(receivedEmails),
-  //         fetchUsersByEmails(acceptedEmails),
-  //       ]);
-
-  //       // 5️⃣ Update states
-  //       setReceivedChats(receivedUsers);
-  //       setAcceptedChats(acceptedUsers);
-  //     } catch (err) {
-  //       console.error("Error fetching chat requests:", err);
-  //     }
-  //   };
-
-  //   fetchRequests();
-  // }, []);
   useEffect(() => {
   let mounted = true;
 
@@ -4963,13 +5141,23 @@ const handleSendMessageFromInput = useCallback(
               const copy = { ...c };
               const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
               if (isGroup) {
-                const members = copy.users || copy.participants || [];
-                const count = (members || []).filter(m => {
-                  const uid = m && (m._id || m.id || m);
-                  if (!uid) return false;
-                  if (String(uid) === String(currentUserId)) return false;
-                  return s.has(String(uid));
-                }).length;
+                const chatIdKey = copy.chatId || copy._id || copy.id || '';
+                let count = 0;
+                if (groupOnlineCounts && typeof groupOnlineCounts[String(chatIdKey)] !== 'undefined') {
+                  const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+                  count = Math.max(0, raw - 1);
+                } else if (copy.group && (Array.isArray(copy.group.participants) && copy.group.participants.length > 0 || Array.isArray(copy.group.users) && copy.group.users.length > 0)) {
+                  const members = copy.group?.participants || copy.group?.users || [];
+                  count = (members || []).filter(m => {
+                    const uid = m && (m._id || m.id || m);
+                    if (!uid) return false;
+                    if (String(uid) === String(currentUserId)) return false;
+                    return s.has(String(uid));
+                  }).length;
+                } else {
+                  // No authoritative group members available and no server count — treat as offline until authoritative data arrives
+                  count = 0;
+                }
                 copy.__computedGroupOnlineCount = count;
                 copy.isOnline = count > 0;
               } else {
@@ -5003,7 +5191,7 @@ const handleSendMessageFromInput = useCallback(
               const copy = { ...c };
               const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
               if (isGroup) {
-                const members = copy.users || copy.participants || [];
+                const members = copy.group?.participants || copy.group?.users || copy.users || copy.participants || [];
                 const count = (members || []).filter(m => {
                   const uid = m && (m._id || m.id || m);
                   if (!uid) return false;
@@ -5816,13 +6004,22 @@ const handleSendMessageFromInput = useCallback(
           const copy = { ...c };
           const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat || (Array.isArray(copy.users) && copy.users.length > 0) || (Array.isArray(copy.participants) && copy.participants.length > 0);
           if (isGroup) {
-            const members = copy.users || copy.participants || [];
-            const count = (members || []).filter(m => {
-              const uid = m && (m._id || m.id || m);
-              if (!uid) return false;
-              if (String(uid) === String(currentUserId)) return false;
-              return onlineUsers.has(String(uid));
-            }).length;
+            const chatIdKey = copy.chatId || copy._id || copy.id || '';
+            let count = 0;
+            if (groupOnlineCounts && typeof groupOnlineCounts[String(chatIdKey)] !== 'undefined') {
+              const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+              count = Math.max(0, raw - 1);
+            } else if (copy.group && (Array.isArray(copy.group.participants) && copy.group.participants.length > 0 || Array.isArray(copy.group.users) && copy.group.users.length > 0)) {
+              const members = copy.group?.participants || copy.group?.users || [];
+              count = (members || []).filter(m => {
+                const uid = m && (m._id || m.id || m);
+                if (!uid) return false;
+                if (String(uid) === String(currentUserId)) return false;
+                return onlineUsers.has(String(uid));
+              }).length;
+            } else {
+              count = 0;
+            }
             copy.__computedGroupOnlineCount = count;
             copy.isOnline = count > 0;
           } else {
@@ -5854,7 +6051,7 @@ const handleSendMessageFromInput = useCallback(
           const copy = { ...c };
           const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat || (Array.isArray(copy.users) && copy.users.length > 0) || (Array.isArray(copy.participants) && copy.participants.length > 0);
           if (isGroup) {
-            const members = copy.users || copy.participants || [];
+            const members = copy.group?.participants || copy.group?.users || copy.users || copy.participants || [];
             const count = (members || []).filter(m => {
               const uid = m && (m._id || m.id || m);
               if (!uid) return false;
@@ -5895,6 +6092,11 @@ const handleSendMessageFromInput = useCallback(
       if (!selectedContact) return;
       const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
       if (!chatId) return;
+      const isGroupChatOpen = Boolean(selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat);
+      if (isGroupChatOpen) {
+        try { console.log('[CHAT OPEN] Group chat opened — do not auto-mark read, show DB state only for', chatId); } catch(e){}
+        return;
+      }
       // If we just sent a message very recently, don't mark previous messages as read
       try {
         const now = Date.now();
@@ -6482,24 +6684,30 @@ const handleCreateGroup = useCallback(() => {
   }, []);
 
   const handleCreateGroupComplete = useCallback((newGroup) => {
-    // Normalize group object so UI detects it is a group/chat
-    const chatId = String(newGroup.chat?._id || newGroup._id || newGroup._id || newGroup.chat || newGroup.id || "");
-    const participants = newGroup.participants || newGroup.users || [];
-    const name = newGroup.chatName || newGroup.name || newGroup.groupName || "New Group";
-    const avatar = (newGroup.groupSettings && newGroup.groupSettings.avatar) || newGroup.avatar || newGroup.icon || "";
+    // Normalize response: backend may return { chat, group } or a chat object directly
+    const raw = newGroup && newGroup.chat ? newGroup.chat : newGroup;
+
+    const chatId = String(raw?._id || raw?.chatId || newGroup?.chat?._id || newGroup?._id || raw?.id || "");
+    const participants = raw?.participants || raw?.users || newGroup?.participants || newGroup?.users || [];
+
+    // Prefer chat-level fields, then group wrapper fields, then fallbacks
+    const name = raw?.chatName || raw?.name || (newGroup?.group && (newGroup.group.name || newGroup.group.groupName)) || (raw?.groupSettings && raw.groupSettings.name) || "New Group";
+    const avatar = (raw?.groupSettings && raw.groupSettings.avatar) || raw?.avatar || raw?.icon || (newGroup?.group && (newGroup.group.avatar || newGroup.group.icon)) || "";
 
     const formatted = {
-      ...newGroup,
+      ...raw,
+      // keep original wrappers for debugging
+      originalResponse: newGroup,
       isGroup: true,
       isGroupChat: true,
       chatId,
       id: chatId,
-      _id: chatId || newGroup._id,
+      _id: chatId || raw?._id,
       participants,
       users: participants,
       name,
       avatar,
-      chat: newGroup, // keep raw chat payload available
+      chat: raw,
     };
 
     // Add to contacts and recent chats so sidebar updates immediately
@@ -6681,152 +6889,6 @@ const handleCreateGroup = useCallback(() => {
     fetchDocumentHistory();
   }, []);
   
-//   // Fetch recent chats
-//   useEffect(() => {
-//   const fetchRecentChats = async () => {
-//     try {
-//       const token = localStorage.getItem("token");
-//       if (!token) throw new Error("No token found.");
-
-//       const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
-//         headers: { Authorization: `Bearer ${token}` },
-//       });
-
-//       if (!res.ok) throw new Error("Failed to fetch recent chats");
-
-//       const data = await res.json();
-
-//       const localUser = JSON.parse(
-//         localStorage.getItem("chasmos_user_data") || "{}"
-//       );
-//       const loggedInUserId = localUser._id || localUser.id || null;
-
-//       const formatted = (Array.isArray(data) ? data : [])
-//         .map((chat) => {
-//           const participants = chat.participants || [];
-
-//           const isGroup = chat.isGroupChat === true || chat.isGroupChat === "true";
-
-//           // 👤 find other user ONLY for 1–1 chat
-//           let otherUser = null;
-//           if (!isGroup) {
-//             otherUser =
-//               chat.otherUser ||
-//               participants.find(
-//                 (p) =>
-//                   String(p._id || p.id) !== String(loggedInUserId)
-//               );
-//           }
-
-//           // 🚫 skip true self-chat
-//           const allAreSelf =
-//             !isGroup &&
-//             participants.length > 0 &&
-//             participants.every(
-//               (p) =>
-//                 String(p._id || p.id) === String(loggedInUserId)
-//             );
-//           if (allAreSelf) return null;
-
-//           /* ---------- DISPLAY NAME ---------- */
-//           const displayName = isGroup
-//             ? chat.chatName || "Unnamed Group"
-//             : otherUser?.username ||
-//               otherUser?.name ||
-//               (otherUser?.email
-//                 ? otherUser.email.split("@")[0]
-//                 : "Unknown");
-
-//           /* ---------- AVATAR (FIXED) ---------- */
-//           const avatar = isGroup
-//             ? chat.groupSettings?.avatar || null
-//             : otherUser?.avatar || otherUser?.pic || null;
-
-//           /* ---------- LAST MESSAGE ---------- */
-//           let preview = "";
-//           let hasAttachment = false;
-//           let attachmentMime = null;
-
-//           if (chat.lastMessage) {
-//             if (typeof chat.lastMessage === "string") {
-//               hasAttachment = chat.lastMessage.includes("📎");
-//               preview = chat.lastMessage.replace(/📎/g, "").trim();
-//             } else if (typeof chat.lastMessage === "object") {
-//               const lm = chat.lastMessage;
-//               const text = (lm.content || lm.text || "").trim();
-//               const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
-//               hasAttachment = atts.length > 0;
-
-//               if (text) {
-//                 preview =
-//                   text.split(/\s+/).slice(0, 8).join(" ") +
-//                   (hasAttachment ? " 📎" : "");
-//               } else if (hasAttachment) {
-//                 const first = atts[0] || {};
-//                 preview =
-//                   first.fileName ||
-//                   first.name ||
-//                   (first.fileUrl
-//                     ? first.fileUrl.split("/").pop()
-//                     : "Attachment");
-//                 attachmentMime = first.mimeType || first.type || null;
-//               }
-//             }
-//           }
-
-//           const chatIdValue = chat.chatId || chat._id;
-
-//           return {
-//             id: chatIdValue,
-//             chatId: chatIdValue,
-
-//             // ✅ FIXED: correct userId
-//             userId: isGroup ? null : (otherUser?._id || otherUser?.id || null),
-
-//             name: displayName,
-//             avatar,
-
-//             lastMessage: preview || "",
-//             hasAttachment,
-//             attachmentMime,
-
-//             timestamp: chat.updatedAt || chat.timestamp,
-//             isOnline: !isGroup && otherUser?.isOnline === true,
-
-//             isGroupChat: isGroup,
-
-//             unreadCount:
-//               typeof chat.unreadCount === "number"
-//                 ? chat.unreadCount
-//                 : chat.unreadCount?.[loggedInUserId] || 0,
-//           };
-//         })
-//         .filter(Boolean);
-
-//       // 🧠 Deduplicate by chatId
-//       const seen = new Map();
-//       formatted.forEach((chat) => {
-//         const key = String(chat.chatId);
-//         if (
-//           !seen.has(key) ||
-//           new Date(chat.timestamp) >
-//             new Date(seen.get(key).timestamp)
-//         ) {
-//           seen.set(key, chat);
-//         }
-//       });
-
-//       setRecentChats(Array.from(seen.values()));
-//     } catch (err) {
-//       setError(err.message);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   fetchRecentChats();
-// }, []);
-
 useEffect(() => {
   const fetchRecentChats = async () => {
     try {
@@ -6989,138 +7051,6 @@ useEffect(() => {
   fetchRecentChats();
 }, []);
 
-
-// useEffect(() => {
-//   const fetchRecentChats = async () => {
-//     try {
-//       const token = localStorage.getItem("token");
-//       if (!token) throw new Error("No token found.");
-
-//       const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
-//         headers: { Authorization: `Bearer ${token}` },
-//       });
-
-//       if (!res.ok) throw new Error("Failed to fetch recent chats");
-
-//       const data = await res.json();
-
-//       const localUser = JSON.parse(
-//         localStorage.getItem("chasmos_user_data") || "{}"
-//       );
-//       const loggedInUserId = localUser._id || localUser.id || null;
-
-//       const formatted = (Array.isArray(data) ? data : [])
-//         .map((chat) => {
-//           const participants = chat.participants || [];
-
-//           let otherUser = chat.otherUser;
-//           if (!otherUser) {
-//             otherUser = participants.find(
-//               (p) => String(p._id || p.id) !== String(loggedInUserId)
-//             );
-//           }
-
-//           const allAreSelf =
-//             participants.length > 0 &&
-//             participants.every(
-//               (p) => String(p._id || p.id) === String(loggedInUserId)
-//             );
-//           if (allAreSelf) return null;
-
-//           const displayName =
-//             chat.isGroupChat && chat.chatName
-//               ? chat.chatName
-//               : otherUser?.username ||
-//                 otherUser?.name ||
-//                 (otherUser?.email ? otherUser.email.split("@")[0] : "Unknown");
-
-//           let preview = "";
-//           let hasAttachment = false;
-//           let attachmentMime = null;
-
-//           if (chat.lastMessage) {
-//             if (typeof chat.lastMessage === "string") {
-//               hasAttachment = chat.lastMessage.includes("📎");
-//               preview = chat.lastMessage.replace(/📎/g, "").trim();
-//             } else if (typeof chat.lastMessage === "object") {
-//               const lm = chat.lastMessage;
-//               const text = (lm.content || lm.text || "").toString().trim();
-//               const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
-//               hasAttachment = atts.length > 0;
-
-//               if (text) {
-//                 preview =
-//                   text.split(/\s+/).slice(0, 8).join(" ") +
-//                   (hasAttachment ? " 📎" : "");
-//               } else if (hasAttachment) {
-//                 const first = atts[0] || {};
-//                 preview =
-//                   first.fileName ||
-//                   first.file_name ||
-//                   first.filename ||
-//                   (first.fileUrl ? first.fileUrl.split("/").pop() : "Attachment");
-//                 preview = preview.replace(/^[\d\-:.]+_/, "");
-//                 attachmentMime = first.mimeType || first.type || null;
-//               }
-//             }
-//           }
-
-//           const chatIdValue = chat.chatId || chat._id;
-
-//           return {
-//             id: chatIdValue,
-//             chatId: chatIdValue,
-//             userId: otherUser?._id || otherUser?.id || null, // fixed here
-//             name: displayName,
-//             avatar: otherUser?.avatar || otherUser?.pic || null,
-//             lastMessage: preview || "",
-//             hasAttachment,
-//             attachmentMime,
-//             timestamp: chat.timestamp || chat.updatedAt,
-//             isOnline: otherUser?.isOnline || false,
-//             isGroupChat: chat.isGroupChat === true || chat.isGroupChat === "true",
-//             unreadCount:
-//               typeof chat.unreadCount === "number"
-//                 ? chat.unreadCount
-//                 : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
-//           };
-//         })
-//         .filter(Boolean);
-
-//       console.log("Fetched recent chats:", formatted);
-
-//       // Deduplicate by chatId
-//       const seen = new Map();
-//       formatted.forEach((chat) => {
-//         const chatIdKey = String(chat.chatId);
-//         if (
-//           !seen.has(chatIdKey) ||
-//           new Date(chat.timestamp) > new Date(seen.get(chatIdKey).timestamp)
-//         ) {
-//           seen.set(chatIdKey, chat);
-//         }
-//       });
-
-//       const deduplicated = Array.from(seen.values());
-
-//       if (archivedChatIds && archivedChatIds.size > 0) {
-//         const filtered = deduplicated.filter(
-//           (c) => !archivedChatIds.has(String(c.chatId || ""))
-//         );
-//         setRecentChats(filtered);
-//       } else {
-//         setRecentChats(deduplicated);
-//       }
-//     } catch (err) {
-//       setError(err.message);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   fetchRecentChats();
-// }, []);
-
   // Handle responsive design
   useEffect(() => {
     const handleResize = () => {
@@ -7263,26 +7193,57 @@ useEffect(() => {
               <Trash2 className="w-6 h-6 text-red-500" />
               Delete Chat
             </h2>
-              <p className={`mb-4 ${effectiveTheme.textSecondary}`}>
-                This will clear out all messages for you in this chat, but the chat and messages will still be available to the other user.
-              </p>
-              <div className="mb-4 flex items-center gap-3">
-                <input id="keepMedia" type="checkbox" checked={keepMediaOnDelete} onChange={(e) => setKeepMediaOnDelete(e.target.checked)} />
-                <label htmlFor="keepMedia" className={`${effectiveTheme.textSecondary}`}>Keep attachments & screenshots from this chat in the media gallery</label>
-              </div>
+              {
+                (() => {
+                  const c = chatToDelete;
+                  if (!c) return null;
+                  const isGroup = Boolean(c.isGroupChat || c.isgroupchat || c.isGroup || c.isGroupChat);
+                  const members = c.users || c.participants || [];
+                  const isMember = (members || []).some(m => {
+                    const uid = m && (m._id || m.id || m);
+                    return uid && String(uid) === String(currentUserId);
+                  });
+
+                  if (isGroup && isMember) {
+                    return (
+                      <p className={`mb-4 ${effectiveTheme.textSecondary}`}>
+                        You are still a member of this group. You must leave the group before you can delete it. Open Group Info and leave the group first.
+                      </p>
+                    );
+                  }
+
+                  // non-member (user left) or not a group
+                  return (
+                    <p className={`mb-4 ${effectiveTheme.textSecondary}`}>
+                      This will clear out all messages for you in this chat, but the chat and messages will still be available to other members.
+                    </p>
+                  );
+                })()
+              }
+
+              {!(chatToDelete && (chatToDelete.users || chatToDelete.participants || []).some(m => { const uid = m && (m._id || m.id || m); return uid && String(uid) === String(currentUserId); })) && (
+                <div className="mb-4 flex items-center gap-3">
+                  <input id="keepMedia" type="checkbox" checked={keepMediaOnDelete} onChange={(e) => setKeepMediaOnDelete(e.target.checked)} />
+                  <label htmlFor="keepMedia" className={`${effectiveTheme.textSecondary}`}>Keep attachments & screenshots from this chat in the media gallery</label>
+                </div>
+              )}
+
             <div className="flex gap-3 justify-end">
               <button
                 className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition"
                 onClick={() => { setShowDeleteChatModal(false); setChatToDelete(null); }}
               >
-                Cancel
+                Close
               </button>
-              <button
-                className="px-4 py-2 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition"
-                onClick={confirmDeleteChat}
-              >
-                Delete
-              </button>
+
+              {!(chatToDelete && (chatToDelete.users || chatToDelete.participants || []).some(m => { const uid = m && (m._id || m.id || m); return uid && String(uid) === String(currentUserId); })) && (
+                <button
+                  className="px-4 py-2 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition"
+                  onClick={confirmDeleteChat}
+                >
+                  Delete
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -8329,15 +8290,16 @@ useEffect(() => {
       {/* Show filtered results when searching, otherwise show recent chats and contacts */}
       {searchTerm.trim() ? (
         <>
-          {filteredContacts.length > 0 ? (
+              {filteredContacts.length > 0 ? (
             <div className="flex flex-col gap-2">
               {filteredContacts.map((contact) => (
-                <ContactItem
-                  key={contact.id}
-                  contact={contact}
-                  effectiveTheme={effectiveTheme}
-                  onSelect={(c) => handleOpenChat(c)}
-                />
+                    <ContactItem
+                      key={contact.id}
+                      contact={contact}
+                      computedIsOnline={typeof contact.__computedIsOnline !== 'undefined' ? contact.__computedIsOnline : contact.isOnline}
+                      effectiveTheme={effectiveTheme}
+                      onSelect={(c) => handleOpenChat(c)}
+                    />
               ))}
             </div>
           ) : (
@@ -8405,6 +8367,7 @@ useEffect(() => {
             <ContactItem
               key={chat.chatId || chat.id}
               contact={chat}
+              computedIsOnline={typeof chat.__computedIsOnline !== 'undefined' ? chat.__computedIsOnline : chat.isOnline}
               effectiveTheme={effectiveTheme}
               onSelect={(c) => handleOpenChat(c)}
             />
@@ -8741,7 +8704,7 @@ useEffect(() => {
                   let __isOnline = false;
                   let __groupOnlineCount = 0;
                   if (isGroup) {
-                    const members = selectedContact.users || selectedContact.participants || [];
+                    const members = selectedContact.group?.participants || selectedContact.group?.users || selectedContact.users || selectedContact.participants || [];
                     // Prefer server-provided group online count when available (fallback to local computation)
                     const chatIdKey = selectedContact.chatId || selectedContact._id || selectedContact.id || selectedContact.id;
                     if (groupOnlineCounts && (groupOnlineCounts[String(chatIdKey)] != null)) {
@@ -8782,7 +8745,7 @@ useEffect(() => {
                 onUnblockUser={handleUnblockUser}
                 onArchiveChat={handleArchiveChat}
                 onUnarchiveChat={handleUnarchiveChat}
-                onDeleteChat={handleDeleteChat}
+                onDeleteChat={checkAndOpenDeleteChat}
                 isBlocked={isBlockedState}
                 isArchived={isArchivedState}
                 setShowDeleteChatModal={setShowDeleteChatModal}
@@ -8814,6 +8777,7 @@ useEffect(() => {
                     setShowUserProfileModal(true);
                   }
                 }}
+                selectedHasLeftGroup={selectedHasLeftGroup}
               />
 
  {showGroupInfoModal && currentGroup && (
@@ -8978,42 +8942,56 @@ useEffect(() => {
                 </div>
               )}
 
-              <MessageInput
-                onSendMessage={(payload) => {
-                  // Helper to get correct chatId and userId for message sending
-                  let chatId = selectedContact?.chatId || selectedContact?._id;
-                  let userId = null;
-                  // For new 1-on-1 chats, pass userId (other participant)
-                  if (!chatId && selectedContact && !selectedContact.isGroup) {
-                    // Prefer userId, then id, then fallback to _id (but not self)
-                    if (selectedContact.userId && selectedContact.userId !== currentUserId) {
-                      userId = selectedContact.userId;
-                    } else if (selectedContact.id && selectedContact.id !== currentUserId) {
-                      userId = selectedContact.id;
-                    } else if (selectedContact._id && selectedContact._id !== currentUserId) {
-                      userId = selectedContact._id;
-                    } else if (selectedContact.participants && Array.isArray(selectedContact.participants)) {
-                      // Fallback: find the participant that is not the current user
-                      const other = selectedContact.participants.find(pid => pid !== currentUserId);
-                      if (other) userId = other;
-                    }
-                  }
-                  // Log for debugging
-                  console.log('[MessageInput->onSendMessage] chatId:', chatId, 'userId:', userId, 'selectedContact:', selectedContact, 'selectedReplies:', selectedReplies);
-                  handleSendMessageFromInput({
-                    ...payload,
-                    chatId,
-                    userId,
-                    repliedTo: selectedReplies || [],
-                  });
-                }}
-                selectedContact={selectedContact}
-                selectedReplies={selectedReplies}
-                effectiveTheme={effectiveTheme}
-                isGroupChat={selectedContact?.isGroup || selectedContact?.isGroupChat || false}
-                socket={socketRef.current}
-                currentUser={_localUser}
-              />
+              {(() => {
+                const isGroupChatFlag = selectedContact?.isGroup || selectedContact?.isGroupChat || false;
+                const participantsList = selectedContact?.participants || selectedContact?.group?.participants || selectedContact?.chat?.participants || [];
+                const isGroupMember = !isGroupChatFlag || (Array.isArray(participantsList) && participantsList.some(p => String((p && (p._id || p)) || p) === String(currentUserId)));
+                if (isGroupMember) {
+                  return (
+                    <MessageInput
+                      onSendMessage={(payload) => {
+                        // Helper to get correct chatId and userId for message sending
+                        let chatId = selectedContact?.chatId || selectedContact?._id;
+                        let userId = null;
+                        // For new 1-on-1 chats, pass userId (other participant)
+                        if (!chatId && selectedContact && !selectedContact.isGroup) {
+                          // Prefer userId, then id, then fallback to _id (but not self)
+                          if (selectedContact.userId && selectedContact.userId !== currentUserId) {
+                            userId = selectedContact.userId;
+                          } else if (selectedContact.id && selectedContact.id !== currentUserId) {
+                            userId = selectedContact.id;
+                          } else if (selectedContact._id && selectedContact._id !== currentUserId) {
+                            userId = selectedContact._id;
+                          } else if (selectedContact.participants && Array.isArray(selectedContact.participants)) {
+                            // Fallback: find the participant that is not the current user
+                            const other = selectedContact.participants.find(pid => pid !== currentUserId);
+                            if (other) userId = other;
+                          }
+                        }
+                        // Log for debugging
+                        console.log('[MessageInput->onSendMessage] chatId:', chatId, 'userId:', userId, 'selectedContact:', selectedContact, 'selectedReplies:', selectedReplies);
+                        handleSendMessageFromInput({
+                          ...payload,
+                          chatId,
+                          userId,
+                          repliedTo: selectedReplies || [],
+                        });
+                      }}
+                      selectedContact={selectedContact}
+                      selectedReplies={selectedReplies}
+                      effectiveTheme={effectiveTheme}
+                      isGroupChat={selectedContact?.isGroup || selectedContact?.isGroupChat || false}
+                      socket={socketRef.current}
+                      currentUser={_localUser}
+                    />
+                  );
+                }
+                return (
+                  <div className="p-4 border-t text-center text-sm text-yellow-700 bg-yellow-50">
+                    You're no longer part of this group.
+                  </div>
+                );
+              })()}
             </>
           ) : !isMobileView ? (
             // CASE 4: Empty welcome screen
