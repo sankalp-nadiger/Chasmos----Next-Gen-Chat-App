@@ -4140,8 +4140,7 @@ useEffect(() => {
         break;
       case "groups":
         filtered = filtered.filter((contact) => {
-          const result = contact.isGroup;
-         
+          const result = contact.isGroup || contact.isGroupChat;
           return result;
         });
         break;
