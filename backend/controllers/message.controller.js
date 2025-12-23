@@ -2,6 +2,7 @@ import asyncHandler from "express-async-handler";
 import mongoose from "mongoose";
 import Message from "../models/message.model.js";
 import Chat from "../models/chat.model.js";
+import Group from "../models/group.model.js";
 import User from "../models/user.model.js";
 import Attachment from "../models/attachment.model.js";
 import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
@@ -18,8 +19,32 @@ const normalizeMessage = (m) => {
 export const allMessages = asyncHandler(async (req, res) => {
   try {
     // Exclude messages that are scheduled and not yet sent
+    // If this is a group chat and the requesting user has left previously,
+    // only return messages created before their last leftAt timestamp.
+    let createdAtFilter = {};
+    try {
+      const group = await Group.findOne({ chat: req.params.chatId }).select('leftBy leftAt').lean();
+      if (group && Array.isArray(group.leftBy) && group.leftBy.length) {
+        // find last index of this user in leftBy
+        const uid = String(req.user._id);
+        const indices = [];
+        group.leftBy.forEach((entry, idx) => {
+          try { if (String(entry) === uid) indices.push(idx); } catch (e) {}
+        });
+        if (indices.length) {
+          const lastIdx = indices[indices.length - 1];
+          const leftAt = group.leftAt && group.leftAt[lastIdx];
+          if (leftAt) {
+            createdAtFilter = { createdAt: { $lte: new Date(leftAt) } };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('allMessages: failed to compute leftAt filter', e && e.message);
+    }
     const messages = await Message.find({
       chat: req.params.chatId,
+      ...createdAtFilter,
       // Exclude messages that the current user has soft-deleted
       deletedFor: { $not: { $elemMatch: { $eq: req.user._id } } },
       $or: [

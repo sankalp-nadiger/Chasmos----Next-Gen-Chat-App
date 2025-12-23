@@ -55,7 +55,6 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
       return;
     }
 
-    console.log('Screenshot detection enabled for chat:', chatId);
 
     // Removed visibilitychange screenshot detection to avoid false positives (e.g., Alt+Tab)
     // const handleVisibilityChange = async () => {};

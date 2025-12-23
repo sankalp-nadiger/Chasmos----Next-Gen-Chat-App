@@ -9,7 +9,6 @@ const MessageNotification = ({ notification, onClose, onReply, onOpen }) => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    console.log('🔔 MessageNotification mounted:', notification);
     
     // Play a subtle notification sound (optional) - only if sound is enabled
     const soundEnabled = localStorage.getItem('soundEnabled');
@@ -34,11 +33,15 @@ const MessageNotification = ({ notification, onClose, onReply, onOpen }) => {
   }, [onClose, notification]);
 
   const handleSendReply = () => {
-    if (replyText.trim()) {
-      onReply(notification.chatId, replyText.trim());
-      setReplyText('');
-      onClose();
+    if (!replyText.trim()) return;
+    try {
+      // Delegate sending to parent container to avoid duplicate network/socket calls
+      onReply && onReply(notification?.chatId || null, replyText.trim());
+    } catch (e) {
+      console.warn('onReply callback failed', e);
     }
+    setReplyText('');
+    onClose();
   };
 
   const handleKeyPress = (e) => {

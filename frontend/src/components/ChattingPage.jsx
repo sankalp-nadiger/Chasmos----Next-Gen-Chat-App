@@ -118,6 +118,7 @@ const ChatHeader = React.memo(
     // New props passed from parent
     isOnline,
     groupOnlineCount,
+    selectedHasLeftGroup,
   }) => {
     const [menuOpen, setMenuOpen] = React.useState(false);
     const menuRef = React.useRef(null);
@@ -144,7 +145,7 @@ const avatarFallbackText =
       <div className={`${effectiveTheme.secondary} relative`}>
         <div className="p-4 flex items-center justify-between">
           <div 
-            className="flex items-center space-x-3 flex-1 cursor-pointer hover:bg-white/5 transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1"
+            className={`flex items-center space-x-3 flex-1 ${selectedHasLeftGroup ? 'cursor-default opacity-95' : 'cursor-pointer hover:bg-white/5'} transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1`}
             onClick={() => {
               console.log('❌ Header clicked - selectedContact:', selectedContact);
               console.log('🔍 isDocument:', selectedContact.isDocument);
@@ -155,6 +156,11 @@ const avatarFallbackText =
               if (selectedContact.isDocument) return;
               const isGroup = selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat;
               console.log('✅ isGroup calculated as:', isGroup);
+              // If user has left the group, suppress header clicks for group info
+              if (isGroup && selectedHasLeftGroup) {
+                console.log('⛔ Header click suppressed: user not a member of this group');
+                return;
+              }
               if (isGroup) {
                 console.log('📋 Opening GroupInfoModal');
                 onOpenGroupInfo(selectedContact);
@@ -370,7 +376,7 @@ const avatarFallbackText =
                     </li> */}
                         {selectedContact?.chatId && (
                           <li>
-                            <button className={`w-full text-left px-4 py-3 flex items-center gap-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900`} onClick={() => { setShowDeleteChatModal(true); setChatToDelete(selectedContact); setMenuOpen(false); }}>
+                            <button className={`w-full text-left px-4 py-3 flex items-center gap-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900`} onClick={() => { onDeleteChat && onDeleteChat(selectedContact); setMenuOpen(false); }}>
                               <Trash2 className="w-4 h-4 opacity-90" />
                               <span>Delete Chat</span>
                             </button>
@@ -397,7 +403,8 @@ const avatarFallbackText =
       prevProps.isBlocked === nextProps.isBlocked &&
       prevProps.isArchived === nextProps.isArchived &&
       prevProps.isOnline === nextProps.isOnline &&
-      prevProps.groupOnlineCount === nextProps.groupOnlineCount
+      prevProps.groupOnlineCount === nextProps.groupOnlineCount &&
+      prevProps.selectedHasLeftGroup === nextProps.selectedHasLeftGroup
     );
   }
 );
@@ -991,7 +998,7 @@ const MessageBubble = React.memo(
                 background: effectiveTheme.mode === 'dark'
                   ? 'linear-gradient(135deg, rgba(255,255,255,0.10), rgba(243,244,246,0.06))'
                   : 'linear-gradient(135deg, rgba(17,24,39,0.9), rgba(79,70,229,0.85))',
-                color: effectiveTheme.mode === 'dark' ? '#0f172a' : '#ffffff',
+                color: effectiveTheme.mode === 'dark' ? '#FFF7E6' : '#ffffff',
                 backdropFilter: 'blur(6px)',
                 boxShadow: effectiveTheme.mode === 'dark' ? '0 6px 20px rgba(2,6,23,0.6)' : '0 6px 20px rgba(14,18,48,0.35)',
                 textShadow: effectiveTheme.mode === 'dark' ? '0 1px 0 rgba(255,255,255,0.6)' : '0 1px 0 rgba(0,0,0,0.35)'
@@ -2096,6 +2103,8 @@ useEffect(() => {
   fetchDocuments();
 }, []);
 
+
+
 const deleteDocument = async (documentId) => {
   try {
     const res = await fetch(`/api/document/${documentId}`, {
@@ -2228,6 +2237,210 @@ const togglePin = async (docId, isPinnedNow) => {
     }
   }, [activeSection]);
   const [recentChats, setRecentChats] = useState([]);
+
+  // Guard: set to avoid duplicate in-flight group participant fetches
+  const fetchingGroupParticipantsRef = useRef(new Set());
+
+  // Ensure group chats have authoritative participants (prefer group.participants over chat.participants)
+  useEffect(() => {
+    if (!Array.isArray(recentChats) || recentChats.length === 0) return;
+    const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+
+    recentChats.forEach((c) => {
+      const isGroup = c.isGroup || c.isGroupChat || c.isgroupchat || c.isGroupChat;
+      if (!isGroup) return;
+      const hasMembers = (c.group && (c.group.participants || c.group.users) && (c.group.participants || c.group.users).length > 0) || (c.participants && c.participants.length > 0) || (c.users && c.users.length > 0);
+      const chatId = c.chatId || c.id || c._id || c.chatId;
+      if (hasMembers) return;
+      if (!chatId) return;
+      // avoid duplicate fetches
+      if (fetchingGroupParticipantsRef.current.has(String(chatId))) return;
+      fetchingGroupParticipantsRef.current.add(String(chatId));
+
+      (async () => {
+        try {
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const url = `${API_BASE_URL}/api/group/group/${encodeURIComponent(chatId)}`;
+          const res = await fetch(url, { headers });
+          if (!res.ok) return;
+          const data = await res.json();
+          const group = data && data.success && data.group ? data.group : data;
+          const members = group && (group.participants || group.users) ? (group.participants || group.users) : [];
+          setRecentChats(prev => (prev || []).map(x => {
+            if (String(x.chatId || x.id || x._id) === String(chatId)) {
+              return { ...x, participants: members, users: members, group };
+            }
+            return x;
+          }));
+        } catch (e) {
+          // ignore
+        } finally {
+          fetchingGroupParticipantsRef.current.delete(String(chatId));
+        }
+      })();
+    });
+  }, [recentChats]);
+
+  // Track whether selected contact (group) has the current user removed/left
+  const [selectedHasLeftGroup, setSelectedHasLeftGroup] = useState(false);
+
+  // Recompute when selectedContact changes
+  useEffect(() => {
+    if (!selectedContact) {
+      setSelectedHasLeftGroup(false);
+      return;
+    }
+    const isGroup = Boolean(selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat || selectedContact.group || selectedContact.chat?.isGroupChat);
+    if (!isGroup) {
+      setSelectedHasLeftGroup(false);
+      return;
+    }
+
+    // Derive members from multiple possible payload shapes to avoid false negatives.
+    // If participants are missing or empty, fetch authoritative group info from backend.
+    (async () => {
+      try {
+        let members =
+          selectedContact.users ||
+          selectedContact.participants ||
+          (selectedContact.group && (selectedContact.group.participants || selectedContact.group.users)) ||
+          (selectedContact.chat && (selectedContact.chat.participants || selectedContact.chat.users)) ||
+          [];
+
+        // If participants array is empty or not present but we have a chatId/group id, fetch from API
+        const groupId = selectedContact.group?._id || selectedContact.groupId || selectedContact.chatId || selectedContact._id || selectedContact.id;
+        if ((!members || members.length === 0) && groupId) {
+          try {
+            const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            // Use the same authoritative endpoint as GroupInfoModal which accepts either groupId or chatId
+            const url = `${API_BASE_URL}/api/group/group/${encodeURIComponent(groupId)}`;
+            const res = await fetch(url, { headers });
+            if (res.ok) {
+              const data = await res.json();
+              // API returns success wrapper { success: true, ... } or plain group — handle both
+              const group = data && data.success && data.group ? data.group : data;
+              if (group && (group.participants || group.users)) {
+                members = group.participants || group.users || [];
+                // Update selectedContact to include authoritative participants so UI uses it
+                setSelectedContact(prev => prev ? ({ ...prev, participants: members }) : prev);
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to fetch group info for membership check', e && e.message);
+          }
+        }
+
+        const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+        const currentUserIdLocal = _local._id || _local.id || _local.userId || null;
+
+        const isMember = (members || []).some(m => {
+          const uid = m && (m._id || m.id || m.userId || m);
+          return uid && String(uid) === String(currentUserIdLocal);
+        });
+
+        setSelectedHasLeftGroup(!isMember);
+      } catch (err) {
+        console.error('selectedContact membership check failed', err);
+        setSelectedHasLeftGroup(false);
+      }
+    })();
+  }, [selectedContact]);
+
+  // Attempt to leave a group (calls backend then updates local state)
+  const leaveGroupFromChat = async (contact, keepMedia = false) => {
+    if (!contact) return;
+    const groupId = (contact.group && (contact.group._id || contact.group.id)) || contact.chatId || contact._id || contact.id;
+    if (!groupId) return;
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const res = await fetch(`${API_BASE_URL}/api/group/exit-group`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ groupId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to leave group');
+      }
+      const json = await res.json();
+      // Update selectedContact locally to remove current user
+      setSelectedContact((prev) => {
+        if (!prev) return prev;
+        const clone = { ...prev };
+        const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+        const removeId = String(_local._id || _local.id || '');
+        const filterIds = (arr) => (Array.isArray(arr) ? arr.filter(a => String((a._id||a||a.id)) !== removeId) : arr);
+        clone.users = filterIds(clone.users || clone.participants || []);
+        clone.participants = clone.users;
+        if (clone.admins) clone.admins = filterIds(clone.admins);
+        return clone;
+      });
+      // After successfully leaving the group, perform soft-delete of the chat for this user
+      try {
+        const chatId = contact.chatId || contact._id || contact.id || (contact.group && contact.group.chat) || (contact.chat && contact.chat._id);
+        if (chatId) {
+          const deleteUrl = `${API_BASE_URL}/api/chat/${chatId}?keepMedia=${keepMedia ? 'true' : 'false'}`;
+          const dres = await fetch(deleteUrl, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (dres.ok) {
+            try { const dj = await dres.json(); console.log('deleteChat result', dj); } catch (e) {}
+          } else {
+            // If chat already deleted or not found, ignore
+            try { const dex = await dres.json().catch(()=>({})); console.warn('deleteChat response not ok', dex); } catch(e){}
+          }
+        }
+      } catch (e) {
+        console.warn('Soft-delete chat after leaving failed', e);
+      }
+
+      setSelectedHasLeftGroup(true);
+      toast.success('You have left the group');
+    } catch (e) {
+      console.error('Leave group failed', e);
+      toast.error(e.message || 'Failed to leave group');
+    }
+  };
+
+  // When user clicks Delete Chat in menu, ensure group members cannot hard-delete the group chat
+  const checkAndOpenDeleteChat = (contact) => {
+    if (!contact) return;
+    const isGroup = Boolean(contact.isGroup || contact.isGroupChat || contact.isgroupchat);
+    if (!isGroup) {
+      setChatToDelete(contact);
+      setShowDeleteChatModal(true);
+      return;
+    }
+
+    // Derive members from possible payload shapes (mirrors message input membership check)
+    const members = contact.users || contact.participants || contact.group?.participants || contact.group?.users || contact.chat?.participants || contact.chat?.users || [];
+    const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+    const currentUserIdLocal = _local._id || _local.id || null;
+    const isMember = (members || []).some(m => {
+      const uid = m && (m._id || m.id || m.userId || m);
+      return uid && String(uid) === String(currentUserIdLocal);
+    });
+
+    // If current user is still a participant of the group, do not allow delete here.
+    // Prompt a warning instructing them to leave the group first (no leave logic executed here).
+    if (isMember) {
+      Swal.fire({
+        title: 'Leave group first',
+        html: `You must leave the group before you can delete it. Open Group Info and leave the group first.`,
+        icon: 'warning',
+        confirmButtonText: 'OK',
+        background: effectiveTheme.secondary,
+        color: effectiveTheme.toastText,
+      });
+      return;
+    }
+
+    // User already left the group: allow delete/keep options (soft-delete for this user)
+    setChatToDelete(contact);
+    setShowDeleteChatModal(true);
+  };
 
   // Deduplicate recent chats by chatId/id to avoid duplicates
   // (occurs when a group is created via API and also arrives via sockets)
@@ -2522,7 +2735,9 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
 
           // Emit socket event for real-time update
           if (socketRef.current?.emit) {
+            lastSentAtRef.current = Date.now();
             socketRef.current.emit('new message', forwardedMessage);
+            // suppression removed
           }
 
           // Update local messages state if the chat is already loaded
@@ -2745,9 +2960,11 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
 
   // Socket reference
   const socketRef = useRef(null);
+  const lastSentAtRef = useRef(0);
   const [socketConnected, setSocketConnected] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [groupOnlineCounts, setGroupOnlineCounts] = useState({});
+  
   // Current user id (used for message alignment)
   const _localUser = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
   const currentUserId = _localUser._id || _localUser.id || null;
@@ -2761,13 +2978,22 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
           const copy = { ...c };
           const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
           if (isGroup) {
-            const members = copy.users || copy.participants || [];
-            const count = (members || []).filter(m => {
-              const uid = m && (m._id || m.id || m);
-              if (!uid) return false;
-              if (String(uid) === String(currentUserId)) return false;
-              return onlineUsers.has(String(uid));
-            }).length;
+            const members = copy.group?.participants || copy.group?.users || copy.users || copy.participants || [];
+            // Prefer server-provided group online counts when available
+            const chatIdKey = copy.chatId || copy._id || copy.id || '';
+            let count = 0;
+            if (groupOnlineCounts && typeof groupOnlineCounts[String(chatIdKey)] !== 'undefined') {
+              const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+              // server count may include this user's own connection — subtract 1
+              count = Math.max(0, raw - 1);
+            } else {
+              count = (members || []).filter(m => {
+                const uid = m && (m._id || m.id || m);
+                if (!uid) return false;
+                if (String(uid) === String(currentUserId)) return false;
+                return onlineUsers.has(String(uid));
+              }).length;
+            }
             copy.__computedGroupOnlineCount = count;
             copy.isOnline = count > 0;
           } else {
@@ -2784,13 +3010,21 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
           const copy = { ...c };
           const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
           if (isGroup) {
-            const members = copy.users || copy.participants || [];
-            const count = (members || []).filter(m => {
-              const uid = m && (m._id || m.id || m);
-              if (!uid) return false;
-              if (String(uid) === String(currentUserId)) return false;
-              return onlineUsers.has(String(uid));
-            }).length;
+            const members = copy.group?.participants || copy.group?.users || copy.users || copy.participants || [];
+            const chatIdKey = copy.chatId || copy._id || copy.id || '';
+            let count = 0;
+            if (groupOnlineCounts && typeof groupOnlineCounts[String(chatIdKey)] !== 'undefined') {
+              const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+              count = Math.max(0, raw - 1);
+            } else {
+              const membersArr = members || [];
+              count = membersArr.filter(m => {
+                const uid = m && (m._id || m.id || m);
+                if (!uid) return false;
+                if (String(uid) === String(currentUserId)) return false;
+                return onlineUsers && typeof onlineUsers.has === 'function' ? onlineUsers.has(String(uid)) : false;
+              }).length;
+            }
             copy.__computedGroupOnlineCount = count;
             copy.isOnline = count > 0;
           } else {
@@ -2803,7 +3037,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
     } catch (e) {
       // ignore
     }
-  }, [onlineUsers, currentUserId]);
+  }, [onlineUsers, currentUserId, groupOnlineCounts]);
 
   // Guarded recompute: when `recentChats` is first populated (or updated),
   // ensure presence flags reflect current `onlineUsers`. Only write back
@@ -2816,13 +3050,22 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
         const copy = { ...c };
         const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat || (Array.isArray(copy.users) && copy.users.length > 0) || (Array.isArray(copy.participants) && copy.participants.length > 0);
         if (isGroup) {
-          const members = copy.users || copy.participants || [];
-          const count = (members || []).filter(m => {
-            const uid = m && (m._id || m.id || m);
-            if (!uid) return false;
-            if (String(uid) === String(currentUserId)) return false;
-            return onlineUsers && typeof onlineUsers.has === 'function' ? onlineUsers.has(String(uid)) : false;
-          }).length;
+          const chatIdKey = copy.chatId || copy._id || copy.id || '';
+          let count = 0;
+          if (groupOnlineCounts && typeof groupOnlineCounts[String(chatIdKey)] !== 'undefined') {
+            const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+            count = Math.max(0, raw - 1);
+          } else if (copy.group && (Array.isArray(copy.group.participants) && copy.group.participants.length > 0 || Array.isArray(copy.group.users) && copy.group.users.length > 0)) {
+            const members = copy.group?.participants || copy.group?.users || [];
+            count = (members || []).filter(m => {
+              const uid = m && (m._id || m.id || m);
+              if (!uid) return false;
+              if (String(uid) === String(currentUserId)) return false;
+              return onlineUsers && typeof onlineUsers.has === 'function' ? onlineUsers.has(String(uid)) : false;
+            }).length;
+          } else {
+            count = 0;
+          }
           copy.__computedGroupOnlineCount = count;
           copy.isOnline = count > 0;
         } else {
@@ -2855,7 +3098,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
     } catch (e) {
       // non-fatal
     }
-  }, [recentChats, onlineUsers, currentUserId]);
+  }, [recentChats, onlineUsers, currentUserId, groupOnlineCounts]);
 
   // When selected contact changes, refresh block/archive status for that chat/user
   useEffect(() => {
@@ -3226,68 +3469,6 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
     })();
   };
 
-  // Fetch both received and accepted requests
-  // useEffect(() => {
-  //   const fetchRequests = async () => {
-  //     try {
-  //       const token = localStorage.getItem("token");
-  //       if (!token) {
-  //         console.error("No token found — user might not be logged in.");
-  //         return;
-  //       }
-
-  //       // 1️⃣ Fetch received chat requests
-  //       const resReceived = await fetch(`${API_BASE_URL}/api/user/requests`, {
-  //         headers: { Authorization: `Bearer ${token}` },
-  //       });
-  //       const receivedData = await resReceived.json();
-  //       console.log("Received Emails:", receivedData);
-  //       const receivedEmails = Array.isArray(receivedData) ? receivedData : [];
-
-  //       // 2️⃣ Fetch accepted chat requests
-  //       const resAccepted = await fetch(
-  //         `${API_BASE_URL}/api/user/requests/accepted`,
-  //         {
-  //           headers: { Authorization: `Bearer ${token}` },
-  //         }
-  //       );
-  //       const acceptedData = await resAccepted.json();
-  //       const acceptedEmails = Array.isArray(acceptedData) ? acceptedData : [];
-
-  //       // 3️⃣ Helper: fetch user profiles by email
-  //       const fetchUsersByEmails = async (emails) => {
-  //         if (!Array.isArray(emails) || emails.length === 0) return [];
-  //         const results = await Promise.all(
-  //           emails.map(async (email) => {
-  //             const res = await fetch(
-  //               `${API_BASE_URL}/api/user?search=${email}`,
-  //               {
-  //                 headers: { Authorization: `Bearer ${token}` },
-  //               }
-  //             );
-  //             const data = await res.json();
-  //             return Array.isArray(data) ? data[0] : data; // handle array response
-  //           })
-  //         );
-  //         return results.filter(Boolean);
-  //       };
-
-  //       // 4️⃣ Fetch both user lists
-  //       const [receivedUsers, acceptedUsers] = await Promise.all([
-  //         fetchUsersByEmails(receivedEmails),
-  //         fetchUsersByEmails(acceptedEmails),
-  //       ]);
-
-  //       // 5️⃣ Update states
-  //       setReceivedChats(receivedUsers);
-  //       setAcceptedChats(acceptedUsers);
-  //     } catch (err) {
-  //       console.error("Error fetching chat requests:", err);
-  //     }
-  //   };
-
-  //   fetchRequests();
-  // }, []);
   useEffect(() => {
   let mounted = true;
 
@@ -3654,7 +3835,8 @@ const handleOpenGroupInfo = (group) => {
   const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
   if (!token) return;
 
-  fetch(`${API_BASE_URL}/api/chat/group/${group.chatId || group.id}`, {
+  const localeParam = (typeof navigator !== 'undefined' && (navigator.language || navigator.userLanguage)) ? encodeURIComponent(navigator.language || navigator.userLanguage) : 'en-US';
+  fetch(`${API_BASE_URL}/api/chat/group/${group.chatId || group.id}?locale=${localeParam}`, {
     headers: { Authorization: `Bearer ${token}` },
   })
     .then(res => res.json())
@@ -3663,6 +3845,10 @@ const handleOpenGroupInfo = (group) => {
         ...fullGroupData,
         name: fullGroupData.name || fullGroupData.chatName || (fullGroupData.groupSettings && fullGroupData.groupSettings.name) || group.name || group.chatName || 'Group'
       };
+      // Ensure formatted date is available on the frontend object
+      if (!normalized.createdAtFormatted && (fullGroupData.createdAtFormatted || fullGroupData.createdAtIso || fullGroupData.createdAt)) {
+        normalized.createdAtFormatted = fullGroupData.createdAtFormatted || fullGroupData.createdAtIso || fullGroupData.createdAt;
+      }
       setCurrentGroup(normalized);
       setShowGroupInfoModal(true);
     })
@@ -3887,7 +4073,7 @@ const refreshRecentChats = useCallback(async () => {
     if (!res.ok) throw new Error("Failed to fetch recent chats");
 
     const data = await res.json();
-    console.log("[RecentChats] Server response:", data);
+    
 
     const localUser = JSON.parse(localStorage.getItem("chasmos_user_data") || "{}");
     const loggedInUserId = localUser._id || localUser.id || null;
@@ -3913,6 +4099,10 @@ const refreshRecentChats = useCallback(async () => {
 
         const chatIdValue = chat.chatId || chat._id;
 
+        // Determine unreadCount but avoid showing unread when the last message was sent by current user and already read
+        const lastMsgObj = chat.lastMessage && typeof chat.lastMessage === 'object' ? chat.lastMessage : null;
+        let computedUnread = typeof chat.unreadCount === "number" ? chat.unreadCount : (chat.unreadCount?.[loggedInUserId] || 0);
+
         return {
           id: chatIdValue,
           chatId: chatIdValue,
@@ -3923,7 +4113,7 @@ const refreshRecentChats = useCallback(async () => {
           timestamp: chat.timestamp || chat.updatedAt,
           // Compute online status immediately using current onlineUsers set
           isOnline: otherId ? (onlineUsers && typeof onlineUsers.has === 'function' ? onlineUsers.has(String(otherId)) : Boolean(otherUser?.isOnline)) : false,
-          unreadCount: typeof chat.unreadCount === "number" ? chat.unreadCount : (chat.unreadCount?.[loggedInUserId] || 0),
+          unreadCount: computedUnread,
           hasAttachment,
           attachmentFileName,
           chatName: chat.chatName || chat.name || null,
@@ -3969,8 +4159,7 @@ const refreshRecentChats = useCallback(async () => {
       return merged;
     });
 
-    console.log("[RecentChats] Merged state set:", filtered);
-
+    
   } catch (err) {
     setError(err.message);
   }
@@ -4103,8 +4292,7 @@ useEffect(() => {
   const filteredContacts = useMemo(() => {
     // Start with recentChats as the base
     let filtered = [...recentChats];
-    console.log("[RecentChats] filteredContacts - initial recentChats:", recentChats);
-
+   
     // Apply search term filter
     if (searchTerm.trim()) {
       const lowerSearch = searchTerm.toLowerCase();
@@ -4112,7 +4300,7 @@ useEffect(() => {
         const name = (contact.name || '').toLowerCase();
         const lastMsg = (contact.lastMessage || '').toLowerCase();
         const match = name.includes(lowerSearch) || lastMsg.includes(lowerSearch);
-        console.log(`[RecentChats] Filtering contact:`, contact, "Match:", match);
+    
         return match;
       });
     }
@@ -4123,22 +4311,21 @@ useEffect(() => {
         filtered = filtered.filter(
           (contact) => {
             const result = !contact.isGroup && !contact.isDocument && !contact.isCommunity;
-            console.log(`[RecentChats] Nav filter (chats):`, contact, "Result:", result);
+          
             return result;
           }
         );
         break;
       case "groups":
         filtered = filtered.filter((contact) => {
-          const result = contact.isGroup;
-          console.log(`[RecentChats] Nav filter (groups):`, contact, "Result:", result);
+          const result = contact.isGroup || contact.isGroupChat;
           return result;
         });
         break;
       case "documents":
         filtered = filtered.filter((contact) => {
           const result = contact.isDocument;
-          console.log(`[RecentChats] Nav filter (documents):`, contact, "Result:", result);
+       
           return result;
         });
         break;
@@ -4147,7 +4334,6 @@ useEffect(() => {
         break;
     }
 
-    console.log("[RecentChats] filteredContacts - final:", filtered);
     return filtered;
   }, [recentChats, searchTerm, activeNavItem]);
 
@@ -4196,23 +4382,25 @@ useEffect(() => {
         : null;
       const useTs = providedTs || Date.now();
 
-      const exists = prev.find((c) => c.id === chatId || c.chatId === chatId);
+      const exists = prev.find((c) => c.id === chatId || c.chatId === chatId || c.userId === chatId);
       if (exists) {
-        return prev.map((c) =>
-          c.id === chatId || c.chatId === chatId
-            ? Object.assign({}, c, {
-                lastMessage: preview,
-                timestamp: useTs,
-                hasAttachment: !!hasAttachment,
-                ...(hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {}),
-                ...(hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {}),
-                ...(meta.name ? { name: meta.name } : {}),
-                ...(meta.avatar ? { avatar: meta.avatar } : {}),
-                ...(meta.userId ? { userId: meta.userId } : {}),
-              })
-            : c
-        );
+        // Move the updated chat to the top of the list
+        const updated = Object.assign({}, exists, {
+          lastMessage: preview,
+          timestamp: useTs,
+          hasAttachment: !!hasAttachment,
+          ...(hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {}),
+          ...(hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {}),
+          ...(meta.name ? { name: meta.name } : {}),
+          ...(meta.avatar ? { avatar: meta.avatar } : {}),
+          ...(meta.userId ? { userId: meta.userId } : {}),
+        });
+        return [
+          updated,
+          ...prev.filter((c) => !(c.id === chatId || c.chatId === chatId || c.userId === chatId)),
+        ];
       }
+
       return [
         Object.assign(
           {
@@ -4308,13 +4496,24 @@ const handleSendMessageFromInput = useCallback(
         appendMessage(chatId, formatted);
 
         if (socketRef.current?.emit) {
+          lastSentAtRef.current = Date.now();
           socketRef.current.emit('new message', payload);
+          // suppression removed
         }
 
         const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
+        // Prefer group metadata when payload contains chat/group info
+        const isGroupPayload = !!(payload.chat && (payload.chat.isGroupChat || payload.chat.isGroup));
+        const payloadGroupName = payload.chat && (payload.chat.chatName || payload.chat.name || payload.chat.groupName);
+        const payloadGroupAvatar = payload.chat && ((payload.chat.groupSettings && payload.chat.groupSettings.avatar) || payload.chat.avatar || payload.chat.pic);
+        const payloadSenderName = (payload.sender && typeof payload.sender === 'object') ? (payload.sender.name || payload.sender.username) : undefined;
+        const payloadSenderAvatar = (payload.sender && typeof payload.sender === 'object') ? (payload.sender.avatar || payload.sender.pic) : undefined;
+
         updateRecentChat(chatId, preview, Boolean(formatted.attachments && formatted.attachments.length), {
           attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
           attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
+          // For group payloads only set the group's avatar — do not fall back to the sender avatar
+          ...(isGroupPayload ? { name: payloadGroupName || payloadSenderName, ...(payloadGroupAvatar ? { avatar: payloadGroupAvatar } : {}) } : { name: payloadSenderName, avatar: payloadSenderAvatar }),
         });
         updateContactPreview(chatId, preview, Boolean(formatted.attachments && formatted.attachments.length), {
           attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
@@ -4474,7 +4673,9 @@ const handleSendMessageFromInput = useCallback(
           if (socketRef.current?.emit) {
             try {
               console.log('[SOCKET OUT] emit new message', { chatId, messageId: formatted.id });
+              lastSentAtRef.current = Date.now();
               socketRef.current.emit('new message', sent);
+              // suppression removed
             } catch (e) { console.error('Error emitting new message', e); }
           }
 
@@ -4639,7 +4840,11 @@ const handleSendMessageFromInput = useCallback(
           appendMessage(chatId, formatted);
           onClearReplySelection && onClearReplySelection();
 
-          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
+          if (socketRef.current?.emit) {
+            lastSentAtRef.current = Date.now();
+            socketRef.current.emit('new message', sent);
+            // suppression removed
+          }
 
           const preview = formatted.content || (formatted.attachments && formatted.attachments[0]?.fileName) || 'Attachment';
           updateRecentChat(chatId, preview, Boolean(formatted.attachments && formatted.attachments.length), {
@@ -4782,7 +4987,11 @@ const handleSendMessageFromInput = useCallback(
 
           appendMessage(chatId, formatted);
           onClearReplySelection && onClearReplySelection();
-          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
+          if (socketRef.current?.emit) {
+            lastSentAtRef.current = Date.now();
+            socketRef.current.emit('new message', sent);
+            // suppression removed
+          }
 
           updateRecentChat(chatId, messageText, false);
           updateContactPreview(chatId, messageText, false);
@@ -4869,7 +5078,11 @@ const handleSendMessageFromInput = useCallback(
 
           appendMessage(chatId, formatted);
 
-          if (socketRef.current?.emit) socketRef.current.emit('new message', sent);
+          if (socketRef.current?.emit) {
+            lastSentAtRef.current = Date.now();
+            socketRef.current.emit('new message', sent);
+            // suppression removed
+          }
 
           updateRecentChat(chatId, payload.content || '📊 Poll', false);
           updateContactPreview(chatId, payload.content || '📊 Poll', false);
@@ -4901,12 +5114,18 @@ const handleSendMessageFromInput = useCallback(
     socketRef.current = socket;
 
     socket.on('connect', () => {
+      try {
+        console.log('[SOCKET OUT] connect -> emitting setup', { userData, socketId: socket.id, token: savedToken ? '***REDACTED***' : null });
+      } catch (e) {}
       socket.emit('setup', userData);
       setSocketConnected(true);
       console.log('[SOCKET] Connected to server', { id: socket.id });
     });
 
-    socket.on('connected', () => setSocketConnected(true));
+    socket.on('connected', (payload) => {
+      try { console.log('[SOCKET IN] connected ack payload:', payload); } catch (e) {}
+      setSocketConnected(true);
+    });
 
     // initial online users list
     socket.on('online users', (arr) => {
@@ -4922,13 +5141,23 @@ const handleSendMessageFromInput = useCallback(
               const copy = { ...c };
               const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
               if (isGroup) {
-                const members = copy.users || copy.participants || [];
-                const count = (members || []).filter(m => {
-                  const uid = m && (m._id || m.id || m);
-                  if (!uid) return false;
-                  if (String(uid) === String(currentUserId)) return false;
-                  return s.has(String(uid));
-                }).length;
+                const chatIdKey = copy.chatId || copy._id || copy.id || '';
+                let count = 0;
+                if (groupOnlineCounts && typeof groupOnlineCounts[String(chatIdKey)] !== 'undefined') {
+                  const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+                  count = Math.max(0, raw - 1);
+                } else if (copy.group && (Array.isArray(copy.group.participants) && copy.group.participants.length > 0 || Array.isArray(copy.group.users) && copy.group.users.length > 0)) {
+                  const members = copy.group?.participants || copy.group?.users || [];
+                  count = (members || []).filter(m => {
+                    const uid = m && (m._id || m.id || m);
+                    if (!uid) return false;
+                    if (String(uid) === String(currentUserId)) return false;
+                    return s.has(String(uid));
+                  }).length;
+                } else {
+                  // No authoritative group members available and no server count — treat as offline until authoritative data arrives
+                  count = 0;
+                }
                 copy.__computedGroupOnlineCount = count;
                 copy.isOnline = count > 0;
               } else {
@@ -4962,7 +5191,7 @@ const handleSendMessageFromInput = useCallback(
               const copy = { ...c };
               const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat;
               if (isGroup) {
-                const members = copy.users || copy.participants || [];
+                const members = copy.group?.participants || copy.group?.users || copy.users || copy.participants || [];
                 const count = (members || []).filter(m => {
                   const uid = m && (m._id || m.id || m);
                   if (!uid) return false;
@@ -5040,27 +5269,75 @@ const handleSendMessageFromInput = useCallback(
     socket.on('message-delivered', (payload) => {
       try {
         console.log('[SOCKET IN] message-delivered', payload);
+        // Ignore delivery events that arrive immediately after we sent a message
+        try {
+          const now = Date.now();
+          const delta = lastSentAtRef.current ? (now - lastSentAtRef.current) : null;
+          // Only suppress very short-lived echoes from the server — reduce window
+          if (lastSentAtRef.current && delta !== null && delta < 300) {
+            console.log('[SOCKET IN] Ignoring message-delivered due to very recent local send (delta ms):', delta);
+            return;
+          }
+        } catch (e) {
+          // continue if guard check fails
+        }
         // Support two payload shapes:
         // 1) { messageId, chatId, deliveredBy, updatedDeliveredBy }
         // 2) { delivered: [ { messageId, deliveredBy, chatId? } ] }
         if (!payload) return;
         const handleMark = (msgEntry) => {
-          const mid = msgEntry && (msgEntry.messageId || msgEntry.message_id);
-          const chatId = msgEntry && (msgEntry.chatId || payload.chatId || '');
+          const mid = String(msgEntry && (msgEntry.messageId || msgEntry.message_id || ''));
+          const chatId = String(msgEntry && (msgEntry.chatId || payload.chatId || ''));
+          // (suppression removed) continue processing delivered update
           if (!mid) return;
           const key = String(chatId || '');
           setMessages(prev => {
             const copy = { ...(prev || {}) };
-            if (!copy[key]) return prev;
-            copy[key] = copy[key].map(m => (String(m.id) === String(mid) || String(m._id) === String(mid) ? { ...m, status: 'delivered' } : m));
+            // If expected chat bucket exists, try updating there first
+            if (copy[key]) {
+              let found = false;
+              copy[key] = copy[key].map(m => {
+                const midCandidates = [m.id, m._id].map(x => (x === undefined || x === null) ? '' : String(x));
+                const matches = midCandidates.includes(mid);
+                if (!matches) return m;
+                found = true;
+                try {
+                  // Use server-provided status if present, otherwise fallback to 'delivered'
+                  const serverStatus = (msgEntry && msgEntry.status) || (payload && payload.status) || 'delivered';
+                  return { ...m, status: serverStatus };
+                } catch (e) {
+                  return m;
+                }
+              });
+              if (found) return copy;
+            }
+
+            // Fallback: scan all chats and update any message matching this id
+            for (const k of Object.keys(copy)) {
+              copy[k] = copy[k].map(m => {
+                const midCandidates = [m.id, m._id].map(x => (x === undefined || x === null) ? '' : String(x));
+                const matches = midCandidates.includes(mid);
+                if (!matches) return m;
+                try {
+                  const serverStatus = (msgEntry && msgEntry.status) || (payload && payload.status) || 'delivered';
+                  return { ...m, status: serverStatus };
+                } catch (e) {
+                  return m;
+                }
+              });
+            }
             return copy;
           });
         };
 
         if (Array.isArray(payload.delivered) && payload.delivered.length) {
           payload.delivered.forEach(handleMark);
+          try { console.log('[SOCKET IN] message-delivered applied delivered array count:', payload.delivered.length); } catch (e) {}
         } else if (payload.messageId) {
           handleMark(payload);
+          try { console.log('[SOCKET IN] message-delivered applied single messageId:', payload.messageId || payload.message_id); } catch (e) {}
+        } else {
+          try { console.log('[SOCKET IN] message-delivered received unknown payload shape:', payload); } catch (e) {}
         }
       } catch (e) {
         console.error('Error handling message-delivered', e);
@@ -5070,27 +5347,78 @@ const handleSendMessageFromInput = useCallback(
     socket.on('message-read', (payload) => {
       try {
         console.log('[SOCKET IN] message-read', payload);
+        // Ignore message-read events that arrive immediately after we sent a message
+        // This avoids server echoes that incorrectly mark local messages as read.
+        try {
+          const now = Date.now();
+          const delta = lastSentAtRef.current ? (now - lastSentAtRef.current) : null;
+          console.log('[SOCKET IN] message-read received — lastSentDelta(ms):', delta, 'payload:', payload);
+          // Ignore message-read events that arrive very shortly after we sent a message
+          // Only suppress very short-lived echoes from the server — reduce window
+          if (lastSentAtRef.current && delta !== null && delta < 300) {
+            console.log('[SOCKET IN] Ignoring message-read due to very recent local send (delta ms):', delta);
+            return;
+          }
+        } catch (e) {
+          console.error('Error checking lastSentAtRef in message-read handler', e);
+        }
         const { chatId, updatedIds, reader } = payload || {};
         const key = String(chatId || (payload && payload.chatId) || '');
+        // If we recently sent a message to this chat, ignore immediate read updates (likely echoes)
+        // (suppression removed) continue processing read update
         setMessages(prev => {
           const copy = { ...(prev || {}) };
           if (!copy[key]) return prev;
+          const serverStatus = (payload && payload.status) || 'read';
+
           if (Array.isArray(updatedIds) && updatedIds.length) {
-            copy[key] = copy[key].map(m => (updatedIds.includes(m.id) || updatedIds.includes(m._id) ? { ...m, status: 'read' } : m));
+            const updatedSet = new Set((updatedIds || []).map(u => String(u)));
+            copy[key] = copy[key].map(m => {
+              const midCandidates = [m.id, m._id].map(x => (x === undefined || x === null) ? '' : String(x));
+              const matches = midCandidates.some(cid => updatedSet.has(cid));
+              if (!matches) return m;
+              return { ...m, status: serverStatus };
+            });
           } else if (reader) {
-            // No explicit IDs provided: in 1:1 flows we may receive reader info only.
-            // Only mark messages sent by the current user as 'read' (others' clients shouldn't auto-blue everything)
-            try {
-              copy[key] = copy[key].map(m => (String(m.sender) === String(currentUserId) ? { ...m, status: 'read' } : m));
-            } catch (e) {
-              copy[key] = copy[key].map(m => m);
-            }
+            // No explicit IDs provided: mark messages that are already delivered (or sent) as read,
+            // but only for messages sent by the current user (so group reads don't flip other people's messages).
+            copy[key] = copy[key].map(m => {
+              try {
+                // Only upgrade messages that are not already 'read' and were sent by current user
+                const msgSender = m?.sender?._id || m?.sender || m?.sender?.id || null;
+                if (!msgSender) return m;
+                if (String(msgSender) !== String(currentUserId)) return m;
+                if (m.status === 'read') return m;
+                if (m.status === 'delivered' || m.status === 'sent') {
+                  return { ...m, status: serverStatus };
+                }
+                return m;
+              } catch (e) {
+                return m;
+              }
+            });
+            try { console.log('[SOCKET IN] message-read applied reader update for chat', key); } catch (e) {}
           } else {
-            // Unknown payload shape: do not change all messages to 'read'
+            // Unknown payload shape: do not change messages
             return prev;
           }
           return copy;
         });
+        try { console.log('[SOCKET IN] message-read processed for chat', key, 'updatedIds:', Array.isArray(updatedIds) ? updatedIds.length : 'n/a', 'reader:', Boolean(reader)); } catch (e) {}
+
+        // If server indicates some messages reached full-read (updatedIds) or a reader is present,
+        // clear recentChats unreadCount for that chat so UI doesn't show stale unread badges.
+        try {
+          if ((Array.isArray(updatedIds) && updatedIds.length) || reader) {
+            setRecentChats(prev => (prev || []).map(c => {
+              const id = c.chatId || c.id || c._id;
+              if (String(id) === String(key)) {
+                return { ...c, unreadCount: 0 };
+              }
+              return c;
+            }));
+          }
+        } catch (e) { console.error('Error clearing recentChats unreadCount after message-read', e); }
       } catch (e) {
         console.error('Error handling message-read', e);
       }
@@ -5262,7 +5590,7 @@ const handleSendMessageFromInput = useCallback(
                 isGroup: !!( (newMessage && newMessage.chat && (newMessage.chat.isGroupChat || newMessage.chat.isGroup)) || (chatEntry && (chatEntry.isGroup || chatEntry.isGroupChat)) ),
                 groupName: (newMessage && newMessage.chat && (newMessage.chat.chatName || newMessage.chat.name)) || (chatEntry && (chatEntry.chatName || chatEntry.name)) || null,
                 message: messageText,
-                unreadCount: currentUnread + 1,
+                unreadCount: currentUnread + (isFromMe ? 0 : 1),
                 timestamp: Date.now()
               };
               console.log('✅ In-app notification created:', newNotif);
@@ -5350,7 +5678,12 @@ const handleSendMessageFromInput = useCallback(
           }
 
           setMessages((prev) => {
-            const updatedMessages = [...(prev[key] || []), formatted];
+            const existing = prev?.[key] || [];
+            const alreadyHas = existing.some(m => String(m.id || m._id) === String(formatted.id));
+            if (alreadyHas) {
+              return prev;
+            }
+            const updatedMessages = [...existing, formatted];
             const filtered = filterDuplicateSystemMessages(updatedMessages);
             return {
               ...prev,
@@ -5368,13 +5701,21 @@ const handleSendMessageFromInput = useCallback(
         // Determine a userId to attach when this is a 1:1 chat (so the UI can compute presence)
         const metaUserId = (!newMessage.chat || (newMessage.chat && !newMessage.chat.isGroupChat)) ? (senderId || undefined) : undefined;
 
+        // Prefer group chat metadata for group messages; otherwise prefer sender info
+        const isGroupMsg = !!(newMessage.chat && (newMessage.chat.isGroupChat || newMessage.chat.isGroup));
+        const groupName = newMessage.chat && (newMessage.chat.chatName || newMessage.chat.name || newMessage.chat.groupName);
+        const groupAvatar = newMessage.chat && ((newMessage.chat.groupSettings && newMessage.chat.groupSettings.avatar) || newMessage.chat.avatar || newMessage.chat.pic);
+        const senderNameMeta = (newMessage.sender && typeof newMessage.sender === 'object') ? (newMessage.sender.name || newMessage.sender.username) : undefined;
+        const senderAvatarMeta = (newMessage.sender && typeof newMessage.sender === 'object') ? (newMessage.sender.avatar || newMessage.sender.pic) : undefined;
+
         updateRecentChat(key, preview, hasAttachment, {
           attachmentFileName: formatted.attachments && formatted.attachments[0]?.fileName,
           attachmentMime: formatted.attachments && formatted.attachments[0]?.mimeType,
           timestamp: formatted.timestamp,
-          // pass sender info (when available) so new recent-chat entries show correct avatar/name
-          name: (newMessage.sender && typeof newMessage.sender === 'object') ? (newMessage.sender.name || newMessage.sender.username) : undefined,
-          avatar: (newMessage.sender && typeof newMessage.sender === 'object') ? (newMessage.sender.avatar || newMessage.sender.pic) : undefined,
+          // For group messages prefer the group's name and only the group's avatar (no sender avatar fallback)
+          ...(isGroupMsg
+            ? { name: groupName || senderNameMeta, ...(groupAvatar ? { avatar: groupAvatar } : {}) }
+            : { name: senderNameMeta, avatar: senderAvatarMeta }),
           userId: metaUserId,
         });
         
@@ -5386,15 +5727,17 @@ const handleSendMessageFromInput = useCallback(
           }
         } catch (e) { console.error('Error emitting message-delivered', e); }
 
-        // Only increment unread count if this chat is not currently open
+        // Only increment unread count if this chat is not currently open and the message is not from me
         if (!isCurrentChat) {
-          setRecentChats((prev) => prev.map((c) => {
-            if (!(c.chatId === key || c.id === key)) return c;
-            const existing = c || {};
-            const newUnread = (existing.unreadCount || 0) + 1;
-            const providedMentionCount = (newMessage && (newMessage.mentionCount || newMessage.mentionsCount)) || null;
-            return { ...existing, unreadCount: newUnread, ...(providedMentionCount !== null ? { mentionCount: providedMentionCount } : {}) };
-          }));
+          if (!isFromMe) {
+            setRecentChats((prev) => prev.map((c) => {
+              if (!(c.chatId === key || c.id === key)) return c;
+              const existing = c || {};
+              const newUnread = (existing.unreadCount || 0) + 1;
+              const providedMentionCount = (newMessage && (newMessage.mentionCount || newMessage.mentionsCount)) || null;
+              return { ...existing, unreadCount: newUnread, ...(providedMentionCount !== null ? { mentionCount: providedMentionCount } : {}) };
+            }));
+          }
         } else {
           // If chat is currently open and this message is NOT from me, mark the message as read
           if (!isFromMe) {
@@ -5520,7 +5863,7 @@ const handleSendMessageFromInput = useCallback(
     // Debug: log when client joins a chat room
     const origEmit = socket.emit.bind(socket);
     socket.emit = function(event, ...args) {
-      try { console.log('[SOCKET EMIT]', event, args && args.length ? args[0] : undefined); } catch(e){}
+      try { } catch(e){}
       return origEmit(event, ...args);
     };
 
@@ -5661,13 +6004,22 @@ const handleSendMessageFromInput = useCallback(
           const copy = { ...c };
           const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat || (Array.isArray(copy.users) && copy.users.length > 0) || (Array.isArray(copy.participants) && copy.participants.length > 0);
           if (isGroup) {
-            const members = copy.users || copy.participants || [];
-            const count = (members || []).filter(m => {
-              const uid = m && (m._id || m.id || m);
-              if (!uid) return false;
-              if (String(uid) === String(currentUserId)) return false;
-              return onlineUsers.has(String(uid));
-            }).length;
+            const chatIdKey = copy.chatId || copy._id || copy.id || '';
+            let count = 0;
+            if (groupOnlineCounts && typeof groupOnlineCounts[String(chatIdKey)] !== 'undefined') {
+              const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+              count = Math.max(0, raw - 1);
+            } else if (copy.group && (Array.isArray(copy.group.participants) && copy.group.participants.length > 0 || Array.isArray(copy.group.users) && copy.group.users.length > 0)) {
+              const members = copy.group?.participants || copy.group?.users || [];
+              count = (members || []).filter(m => {
+                const uid = m && (m._id || m.id || m);
+                if (!uid) return false;
+                if (String(uid) === String(currentUserId)) return false;
+                return onlineUsers.has(String(uid));
+              }).length;
+            } else {
+              count = 0;
+            }
             copy.__computedGroupOnlineCount = count;
             copy.isOnline = count > 0;
           } else {
@@ -5699,7 +6051,7 @@ const handleSendMessageFromInput = useCallback(
           const copy = { ...c };
           const isGroup = copy.isGroup || copy.isGroupChat || copy.isgroupchat || (Array.isArray(copy.users) && copy.users.length > 0) || (Array.isArray(copy.participants) && copy.participants.length > 0);
           if (isGroup) {
-            const members = copy.users || copy.participants || [];
+            const members = copy.group?.participants || copy.group?.users || copy.users || copy.participants || [];
             const count = (members || []).filter(m => {
               const uid = m && (m._id || m.id || m);
               if (!uid) return false;
@@ -5740,6 +6092,20 @@ const handleSendMessageFromInput = useCallback(
       if (!selectedContact) return;
       const chatId = selectedContact.chatId || selectedContact.id || selectedContact._id;
       if (!chatId) return;
+      const isGroupChatOpen = Boolean(selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat);
+      if (isGroupChatOpen) {
+        try { console.log('[CHAT OPEN] Group chat opened — do not auto-mark read, show DB state only for', chatId); } catch(e){}
+        return;
+      }
+      // If we just sent a message very recently, don't mark previous messages as read
+      try {
+        const now = Date.now();
+        const delta = lastSentAtRef.current ? (now - lastSentAtRef.current) : null;
+        if (lastSentAtRef.current && delta !== null && delta < 3000) {
+          console.log('[CHAT OPEN] Skipping auto-mark-as-read due to recent local send for', chatId);
+          return;
+        }
+      } catch (e) {}
       if (socketRef.current?.emit) {
         try {
           console.log('[SOCKET OUT] emit message-read on open', { chatId });
@@ -5995,7 +6361,9 @@ const handleSendMessageFromInput = useCallback(
 
         // Emit socket event
         if (socketRef.current?.emit) {
+          lastSentAtRef.current = Date.now();
           socketRef.current.emit('new message', data.systemMessage);
+          // suppression removed
         }
       }
 
@@ -6316,24 +6684,30 @@ const handleCreateGroup = useCallback(() => {
   }, []);
 
   const handleCreateGroupComplete = useCallback((newGroup) => {
-    // Normalize group object so UI detects it is a group/chat
-    const chatId = String(newGroup.chat?._id || newGroup._id || newGroup._id || newGroup.chat || newGroup.id || "");
-    const participants = newGroup.participants || newGroup.users || [];
-    const name = newGroup.chatName || newGroup.name || newGroup.groupName || "New Group";
-    const avatar = (newGroup.groupSettings && newGroup.groupSettings.avatar) || newGroup.avatar || newGroup.icon || "";
+    // Normalize response: backend may return { chat, group } or a chat object directly
+    const raw = newGroup && newGroup.chat ? newGroup.chat : newGroup;
+
+    const chatId = String(raw?._id || raw?.chatId || newGroup?.chat?._id || newGroup?._id || raw?.id || "");
+    const participants = raw?.participants || raw?.users || newGroup?.participants || newGroup?.users || [];
+
+    // Prefer chat-level fields, then group wrapper fields, then fallbacks
+    const name = raw?.chatName || raw?.name || (newGroup?.group && (newGroup.group.name || newGroup.group.groupName)) || (raw?.groupSettings && raw.groupSettings.name) || "New Group";
+    const avatar = (raw?.groupSettings && raw.groupSettings.avatar) || raw?.avatar || raw?.icon || (newGroup?.group && (newGroup.group.avatar || newGroup.group.icon)) || "";
 
     const formatted = {
-      ...newGroup,
+      ...raw,
+      // keep original wrappers for debugging
+      originalResponse: newGroup,
       isGroup: true,
       isGroupChat: true,
       chatId,
       id: chatId,
-      _id: chatId || newGroup._id,
+      _id: chatId || raw?._id,
       participants,
       users: participants,
       name,
       avatar,
-      chat: newGroup, // keep raw chat payload available
+      chat: raw,
     };
 
     // Add to contacts and recent chats so sidebar updates immediately
@@ -6515,152 +6889,6 @@ const handleCreateGroup = useCallback(() => {
     fetchDocumentHistory();
   }, []);
   
-//   // Fetch recent chats
-//   useEffect(() => {
-//   const fetchRecentChats = async () => {
-//     try {
-//       const token = localStorage.getItem("token");
-//       if (!token) throw new Error("No token found.");
-
-//       const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
-//         headers: { Authorization: `Bearer ${token}` },
-//       });
-
-//       if (!res.ok) throw new Error("Failed to fetch recent chats");
-
-//       const data = await res.json();
-
-//       const localUser = JSON.parse(
-//         localStorage.getItem("chasmos_user_data") || "{}"
-//       );
-//       const loggedInUserId = localUser._id || localUser.id || null;
-
-//       const formatted = (Array.isArray(data) ? data : [])
-//         .map((chat) => {
-//           const participants = chat.participants || [];
-
-//           const isGroup = chat.isGroupChat === true || chat.isGroupChat === "true";
-
-//           // 👤 find other user ONLY for 1–1 chat
-//           let otherUser = null;
-//           if (!isGroup) {
-//             otherUser =
-//               chat.otherUser ||
-//               participants.find(
-//                 (p) =>
-//                   String(p._id || p.id) !== String(loggedInUserId)
-//               );
-//           }
-
-//           // 🚫 skip true self-chat
-//           const allAreSelf =
-//             !isGroup &&
-//             participants.length > 0 &&
-//             participants.every(
-//               (p) =>
-//                 String(p._id || p.id) === String(loggedInUserId)
-//             );
-//           if (allAreSelf) return null;
-
-//           /* ---------- DISPLAY NAME ---------- */
-//           const displayName = isGroup
-//             ? chat.chatName || "Unnamed Group"
-//             : otherUser?.username ||
-//               otherUser?.name ||
-//               (otherUser?.email
-//                 ? otherUser.email.split("@")[0]
-//                 : "Unknown");
-
-//           /* ---------- AVATAR (FIXED) ---------- */
-//           const avatar = isGroup
-//             ? chat.groupSettings?.avatar || null
-//             : otherUser?.avatar || otherUser?.pic || null;
-
-//           /* ---------- LAST MESSAGE ---------- */
-//           let preview = "";
-//           let hasAttachment = false;
-//           let attachmentMime = null;
-
-//           if (chat.lastMessage) {
-//             if (typeof chat.lastMessage === "string") {
-//               hasAttachment = chat.lastMessage.includes("📎");
-//               preview = chat.lastMessage.replace(/📎/g, "").trim();
-//             } else if (typeof chat.lastMessage === "object") {
-//               const lm = chat.lastMessage;
-//               const text = (lm.content || lm.text || "").trim();
-//               const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
-//               hasAttachment = atts.length > 0;
-
-//               if (text) {
-//                 preview =
-//                   text.split(/\s+/).slice(0, 8).join(" ") +
-//                   (hasAttachment ? " 📎" : "");
-//               } else if (hasAttachment) {
-//                 const first = atts[0] || {};
-//                 preview =
-//                   first.fileName ||
-//                   first.name ||
-//                   (first.fileUrl
-//                     ? first.fileUrl.split("/").pop()
-//                     : "Attachment");
-//                 attachmentMime = first.mimeType || first.type || null;
-//               }
-//             }
-//           }
-
-//           const chatIdValue = chat.chatId || chat._id;
-
-//           return {
-//             id: chatIdValue,
-//             chatId: chatIdValue,
-
-//             // ✅ FIXED: correct userId
-//             userId: isGroup ? null : (otherUser?._id || otherUser?.id || null),
-
-//             name: displayName,
-//             avatar,
-
-//             lastMessage: preview || "",
-//             hasAttachment,
-//             attachmentMime,
-
-//             timestamp: chat.updatedAt || chat.timestamp,
-//             isOnline: !isGroup && otherUser?.isOnline === true,
-
-//             isGroupChat: isGroup,
-
-//             unreadCount:
-//               typeof chat.unreadCount === "number"
-//                 ? chat.unreadCount
-//                 : chat.unreadCount?.[loggedInUserId] || 0,
-//           };
-//         })
-//         .filter(Boolean);
-
-//       // 🧠 Deduplicate by chatId
-//       const seen = new Map();
-//       formatted.forEach((chat) => {
-//         const key = String(chat.chatId);
-//         if (
-//           !seen.has(key) ||
-//           new Date(chat.timestamp) >
-//             new Date(seen.get(key).timestamp)
-//         ) {
-//           seen.set(key, chat);
-//         }
-//       });
-
-//       setRecentChats(Array.from(seen.values()));
-//     } catch (err) {
-//       setError(err.message);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   fetchRecentChats();
-// }, []);
-
 useEffect(() => {
   const fetchRecentChats = async () => {
     try {
@@ -6823,138 +7051,6 @@ useEffect(() => {
   fetchRecentChats();
 }, []);
 
-
-// useEffect(() => {
-//   const fetchRecentChats = async () => {
-//     try {
-//       const token = localStorage.getItem("token");
-//       if (!token) throw new Error("No token found.");
-
-//       const res = await fetch(`${API_BASE_URL}/api/chat/recent`, {
-//         headers: { Authorization: `Bearer ${token}` },
-//       });
-
-//       if (!res.ok) throw new Error("Failed to fetch recent chats");
-
-//       const data = await res.json();
-
-//       const localUser = JSON.parse(
-//         localStorage.getItem("chasmos_user_data") || "{}"
-//       );
-//       const loggedInUserId = localUser._id || localUser.id || null;
-
-//       const formatted = (Array.isArray(data) ? data : [])
-//         .map((chat) => {
-//           const participants = chat.participants || [];
-
-//           let otherUser = chat.otherUser;
-//           if (!otherUser) {
-//             otherUser = participants.find(
-//               (p) => String(p._id || p.id) !== String(loggedInUserId)
-//             );
-//           }
-
-//           const allAreSelf =
-//             participants.length > 0 &&
-//             participants.every(
-//               (p) => String(p._id || p.id) === String(loggedInUserId)
-//             );
-//           if (allAreSelf) return null;
-
-//           const displayName =
-//             chat.isGroupChat && chat.chatName
-//               ? chat.chatName
-//               : otherUser?.username ||
-//                 otherUser?.name ||
-//                 (otherUser?.email ? otherUser.email.split("@")[0] : "Unknown");
-
-//           let preview = "";
-//           let hasAttachment = false;
-//           let attachmentMime = null;
-
-//           if (chat.lastMessage) {
-//             if (typeof chat.lastMessage === "string") {
-//               hasAttachment = chat.lastMessage.includes("📎");
-//               preview = chat.lastMessage.replace(/📎/g, "").trim();
-//             } else if (typeof chat.lastMessage === "object") {
-//               const lm = chat.lastMessage;
-//               const text = (lm.content || lm.text || "").toString().trim();
-//               const atts = Array.isArray(lm.attachments) ? lm.attachments : [];
-//               hasAttachment = atts.length > 0;
-
-//               if (text) {
-//                 preview =
-//                   text.split(/\s+/).slice(0, 8).join(" ") +
-//                   (hasAttachment ? " 📎" : "");
-//               } else if (hasAttachment) {
-//                 const first = atts[0] || {};
-//                 preview =
-//                   first.fileName ||
-//                   first.file_name ||
-//                   first.filename ||
-//                   (first.fileUrl ? first.fileUrl.split("/").pop() : "Attachment");
-//                 preview = preview.replace(/^[\d\-:.]+_/, "");
-//                 attachmentMime = first.mimeType || first.type || null;
-//               }
-//             }
-//           }
-
-//           const chatIdValue = chat.chatId || chat._id;
-
-//           return {
-//             id: chatIdValue,
-//             chatId: chatIdValue,
-//             userId: otherUser?._id || otherUser?.id || null, // fixed here
-//             name: displayName,
-//             avatar: otherUser?.avatar || otherUser?.pic || null,
-//             lastMessage: preview || "",
-//             hasAttachment,
-//             attachmentMime,
-//             timestamp: chat.timestamp || chat.updatedAt,
-//             isOnline: otherUser?.isOnline || false,
-//             isGroupChat: chat.isGroupChat === true || chat.isGroupChat === "true",
-//             unreadCount:
-//               typeof chat.unreadCount === "number"
-//                 ? chat.unreadCount
-//                 : (chat.unreadCount && chat.unreadCount[loggedInUserId]) || 0,
-//           };
-//         })
-//         .filter(Boolean);
-
-//       console.log("Fetched recent chats:", formatted);
-
-//       // Deduplicate by chatId
-//       const seen = new Map();
-//       formatted.forEach((chat) => {
-//         const chatIdKey = String(chat.chatId);
-//         if (
-//           !seen.has(chatIdKey) ||
-//           new Date(chat.timestamp) > new Date(seen.get(chatIdKey).timestamp)
-//         ) {
-//           seen.set(chatIdKey, chat);
-//         }
-//       });
-
-//       const deduplicated = Array.from(seen.values());
-
-//       if (archivedChatIds && archivedChatIds.size > 0) {
-//         const filtered = deduplicated.filter(
-//           (c) => !archivedChatIds.has(String(c.chatId || ""))
-//         );
-//         setRecentChats(filtered);
-//       } else {
-//         setRecentChats(deduplicated);
-//       }
-//     } catch (err) {
-//       setError(err.message);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   fetchRecentChats();
-// }, []);
-
   // Handle responsive design
   useEffect(() => {
     const handleResize = () => {
@@ -7097,26 +7193,57 @@ useEffect(() => {
               <Trash2 className="w-6 h-6 text-red-500" />
               Delete Chat
             </h2>
-              <p className={`mb-4 ${effectiveTheme.textSecondary}`}>
-                This will clear out all messages for you in this chat, but the chat and messages will still be available to the other user.
-              </p>
-              <div className="mb-4 flex items-center gap-3">
-                <input id="keepMedia" type="checkbox" checked={keepMediaOnDelete} onChange={(e) => setKeepMediaOnDelete(e.target.checked)} />
-                <label htmlFor="keepMedia" className={`${effectiveTheme.textSecondary}`}>Keep attachments & screenshots from this chat in the media gallery</label>
-              </div>
+              {
+                (() => {
+                  const c = chatToDelete;
+                  if (!c) return null;
+                  const isGroup = Boolean(c.isGroupChat || c.isgroupchat || c.isGroup || c.isGroupChat);
+                  const members = c.users || c.participants || [];
+                  const isMember = (members || []).some(m => {
+                    const uid = m && (m._id || m.id || m);
+                    return uid && String(uid) === String(currentUserId);
+                  });
+
+                  if (isGroup && isMember) {
+                    return (
+                      <p className={`mb-4 ${effectiveTheme.textSecondary}`}>
+                        You are still a member of this group. You must leave the group before you can delete it. Open Group Info and leave the group first.
+                      </p>
+                    );
+                  }
+
+                  // non-member (user left) or not a group
+                  return (
+                    <p className={`mb-4 ${effectiveTheme.textSecondary}`}>
+                      This will clear out all messages for you in this chat, but the chat and messages will still be available to other members.
+                    </p>
+                  );
+                })()
+              }
+
+              {!(chatToDelete && (chatToDelete.users || chatToDelete.participants || []).some(m => { const uid = m && (m._id || m.id || m); return uid && String(uid) === String(currentUserId); })) && (
+                <div className="mb-4 flex items-center gap-3">
+                  <input id="keepMedia" type="checkbox" checked={keepMediaOnDelete} onChange={(e) => setKeepMediaOnDelete(e.target.checked)} />
+                  <label htmlFor="keepMedia" className={`${effectiveTheme.textSecondary}`}>Keep attachments & screenshots from this chat in the media gallery</label>
+                </div>
+              )}
+
             <div className="flex gap-3 justify-end">
               <button
                 className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition"
                 onClick={() => { setShowDeleteChatModal(false); setChatToDelete(null); }}
               >
-                Cancel
+                Close
               </button>
-              <button
-                className="px-4 py-2 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition"
-                onClick={confirmDeleteChat}
-              >
-                Delete
-              </button>
+
+              {!(chatToDelete && (chatToDelete.users || chatToDelete.participants || []).some(m => { const uid = m && (m._id || m.id || m); return uid && String(uid) === String(currentUserId); })) && (
+                <button
+                  className="px-4 py-2 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition"
+                  onClick={confirmDeleteChat}
+                >
+                  Delete
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -8163,15 +8290,16 @@ useEffect(() => {
       {/* Show filtered results when searching, otherwise show recent chats and contacts */}
       {searchTerm.trim() ? (
         <>
-          {filteredContacts.length > 0 ? (
+              {filteredContacts.length > 0 ? (
             <div className="flex flex-col gap-2">
               {filteredContacts.map((contact) => (
-                <ContactItem
-                  key={contact.id}
-                  contact={contact}
-                  effectiveTheme={effectiveTheme}
-                  onSelect={(c) => handleOpenChat(c)}
-                />
+                    <ContactItem
+                      key={contact.id}
+                      contact={contact}
+                      computedIsOnline={typeof contact.__computedIsOnline !== 'undefined' ? contact.__computedIsOnline : contact.isOnline}
+                      effectiveTheme={effectiveTheme}
+                      onSelect={(c) => handleOpenChat(c)}
+                    />
               ))}
             </div>
           ) : (
@@ -8239,6 +8367,7 @@ useEffect(() => {
             <ContactItem
               key={chat.chatId || chat.id}
               contact={chat}
+              computedIsOnline={typeof chat.__computedIsOnline !== 'undefined' ? chat.__computedIsOnline : chat.isOnline}
               effectiveTheme={effectiveTheme}
               onSelect={(c) => handleOpenChat(c)}
             />
@@ -8575,7 +8704,7 @@ useEffect(() => {
                   let __isOnline = false;
                   let __groupOnlineCount = 0;
                   if (isGroup) {
-                    const members = selectedContact.users || selectedContact.participants || [];
+                    const members = selectedContact.group?.participants || selectedContact.group?.users || selectedContact.users || selectedContact.participants || [];
                     // Prefer server-provided group online count when available (fallback to local computation)
                     const chatIdKey = selectedContact.chatId || selectedContact._id || selectedContact.id || selectedContact.id;
                     if (groupOnlineCounts && (groupOnlineCounts[String(chatIdKey)] != null)) {
@@ -8616,7 +8745,7 @@ useEffect(() => {
                 onUnblockUser={handleUnblockUser}
                 onArchiveChat={handleArchiveChat}
                 onUnarchiveChat={handleUnarchiveChat}
-                onDeleteChat={handleDeleteChat}
+                onDeleteChat={checkAndOpenDeleteChat}
                 isBlocked={isBlockedState}
                 isArchived={isArchivedState}
                 setShowDeleteChatModal={setShowDeleteChatModal}
@@ -8648,6 +8777,7 @@ useEffect(() => {
                     setShowUserProfileModal(true);
                   }
                 }}
+                selectedHasLeftGroup={selectedHasLeftGroup}
               />
 
  {showGroupInfoModal && currentGroup && (
@@ -8812,42 +8942,56 @@ useEffect(() => {
                 </div>
               )}
 
-              <MessageInput
-                onSendMessage={(payload) => {
-                  // Helper to get correct chatId and userId for message sending
-                  let chatId = selectedContact?.chatId || selectedContact?._id;
-                  let userId = null;
-                  // For new 1-on-1 chats, pass userId (other participant)
-                  if (!chatId && selectedContact && !selectedContact.isGroup) {
-                    // Prefer userId, then id, then fallback to _id (but not self)
-                    if (selectedContact.userId && selectedContact.userId !== currentUserId) {
-                      userId = selectedContact.userId;
-                    } else if (selectedContact.id && selectedContact.id !== currentUserId) {
-                      userId = selectedContact.id;
-                    } else if (selectedContact._id && selectedContact._id !== currentUserId) {
-                      userId = selectedContact._id;
-                    } else if (selectedContact.participants && Array.isArray(selectedContact.participants)) {
-                      // Fallback: find the participant that is not the current user
-                      const other = selectedContact.participants.find(pid => pid !== currentUserId);
-                      if (other) userId = other;
-                    }
-                  }
-                  // Log for debugging
-                  console.log('[MessageInput->onSendMessage] chatId:', chatId, 'userId:', userId, 'selectedContact:', selectedContact, 'selectedReplies:', selectedReplies);
-                  handleSendMessageFromInput({
-                    ...payload,
-                    chatId,
-                    userId,
-                    repliedTo: selectedReplies || [],
-                  });
-                }}
-                selectedContact={selectedContact}
-                selectedReplies={selectedReplies}
-                effectiveTheme={effectiveTheme}
-                isGroupChat={selectedContact?.isGroup || selectedContact?.isGroupChat || false}
-                socket={socketRef.current}
-                currentUser={_localUser}
-              />
+              {(() => {
+                const isGroupChatFlag = selectedContact?.isGroup || selectedContact?.isGroupChat || false;
+                const participantsList = selectedContact?.participants || selectedContact?.group?.participants || selectedContact?.chat?.participants || [];
+                const isGroupMember = !isGroupChatFlag || (Array.isArray(participantsList) && participantsList.some(p => String((p && (p._id || p)) || p) === String(currentUserId)));
+                if (isGroupMember) {
+                  return (
+                    <MessageInput
+                      onSendMessage={(payload) => {
+                        // Helper to get correct chatId and userId for message sending
+                        let chatId = selectedContact?.chatId || selectedContact?._id;
+                        let userId = null;
+                        // For new 1-on-1 chats, pass userId (other participant)
+                        if (!chatId && selectedContact && !selectedContact.isGroup) {
+                          // Prefer userId, then id, then fallback to _id (but not self)
+                          if (selectedContact.userId && selectedContact.userId !== currentUserId) {
+                            userId = selectedContact.userId;
+                          } else if (selectedContact.id && selectedContact.id !== currentUserId) {
+                            userId = selectedContact.id;
+                          } else if (selectedContact._id && selectedContact._id !== currentUserId) {
+                            userId = selectedContact._id;
+                          } else if (selectedContact.participants && Array.isArray(selectedContact.participants)) {
+                            // Fallback: find the participant that is not the current user
+                            const other = selectedContact.participants.find(pid => pid !== currentUserId);
+                            if (other) userId = other;
+                          }
+                        }
+                        // Log for debugging
+                        console.log('[MessageInput->onSendMessage] chatId:', chatId, 'userId:', userId, 'selectedContact:', selectedContact, 'selectedReplies:', selectedReplies);
+                        handleSendMessageFromInput({
+                          ...payload,
+                          chatId,
+                          userId,
+                          repliedTo: selectedReplies || [],
+                        });
+                      }}
+                      selectedContact={selectedContact}
+                      selectedReplies={selectedReplies}
+                      effectiveTheme={effectiveTheme}
+                      isGroupChat={selectedContact?.isGroup || selectedContact?.isGroupChat || false}
+                      socket={socketRef.current}
+                      currentUser={_localUser}
+                    />
+                  );
+                }
+                return (
+                  <div className="p-4 border-t text-center text-sm text-yellow-700 bg-yellow-50">
+                    You're no longer part of this group.
+                  </div>
+                );
+              })()}
             </>
           ) : !isMobileView ? (
             // CASE 4: Empty welcome screen
@@ -8916,7 +9060,27 @@ useEffect(() => {
 
             if (res.ok) {
               const sentMsg = await res.json();
-              
+              const messageObj = sentMsg && sentMsg.message ? sentMsg.message : sentMsg;
+
+              // Compute preview text and attachment flag
+              const preview = messageObj?.content || (messageObj?.attachments && messageObj.attachments[0]?.fileName) || 'Attachment';
+              const hasAttachment = Boolean(messageObj?.attachments && messageObj.attachments.length);
+
+              // Update recent chats preview so UI lists show the quick-reply text immediately
+              try {
+                updateRecentChat && updateRecentChat(chatId, preview, hasAttachment, {
+                  timestamp: messageObj && (messageObj.timestamp || messageObj.createdAt) ? new Date(messageObj.timestamp || messageObj.createdAt).getTime() : Date.now(),
+                  ...(messageObj?.chat && (messageObj.chat.isGroupChat || messageObj.chat.isGroup) ? { name: messageObj.chat.chatName || messageObj.chat.name } : {}),
+                });
+              } catch (e) { console.warn('updateRecentChat failed', e); }
+
+              try {
+                updateContactPreview && updateContactPreview(chatId, preview, hasAttachment, {
+                  attachmentFileName: messageObj?.attachments && messageObj.attachments[0]?.fileName,
+                  attachmentMime: messageObj?.attachments && messageObj.attachments[0]?.mimeType,
+                });
+              } catch (e) { console.warn('updateContactPreview failed', e); }
+
               // Clear unread count for this chat
               setRecentChats((prev) => 
                 prev.map((c) => 
@@ -8925,14 +9089,53 @@ useEffect(() => {
                     : c
                 )
               );
-              
+
+              // If this chat is currently open, append the message into messages state
+              setMessages((prev) => {
+                try {
+                  const formatted = {
+                    id: messageObj._id || messageObj.id || Date.now(),
+                    type: messageObj.type || 'text',
+                    content: messageObj.content || messageObj.text || preview,
+                    sender: messageObj.sender?._id || messageObj.sender || (currentUserId || 'me'),
+                    timestamp: new Date(messageObj.timestamp || messageObj.createdAt || Date.now()).getTime(),
+                    status: messageObj.status || 'sent',
+                    attachments: messageObj.attachments || [],
+                  };
+                  const copy = { ...prev };
+                  if (!copy[chatId]) copy[chatId] = [];
+                  copy[chatId] = [...copy[chatId], formatted];
+
+                  // Record last sent time and emit socket event so other participants receive the new message in real-time
+                  try {
+                    lastSentAtRef.current = Date.now();
+                  } catch (e) {}
+                  try {
+                    if (socketRef.current?.emit) {
+                      socketRef.current.emit('new message', messageObj);
+                    }
+                  } catch (e) { console.warn('Socket emit failed', e); }
+
+                  return copy;
+                } catch (e) {
+                  return prev;
+                }
+              });
+
               // Mark messages from others in this chat as read
               setMessages((prev) => {
                 const chatMessages = prev[chatId] || [];
                 const updatedMessages = chatMessages.map(m => (String(m.sender) !== String(currentUserId) ? { ...m, status: 'read' } : m));
                 return { ...prev, [chatId]: updatedMessages };
               });
-              
+
+              // Notify server that this chat's messages are read (so other participants see read-for-all)
+              try {
+                if (socketRef.current?.emit) {
+                  socketRef.current.emit('message-read', { chatId });
+                }
+              } catch (e) { console.warn('Emit message-read failed', e); }
+
               toast.success("Reply sent!");
             }
           } catch (error) {
