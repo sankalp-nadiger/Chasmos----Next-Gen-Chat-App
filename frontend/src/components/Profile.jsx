@@ -15,18 +15,13 @@ import {
 import { toast } from "react-hot-toast";
 import Logo from "./Logo";
 import CosmosBackground from "./CosmosBg";
-import { supabase } from '../supabaseClient';
+import { supabase } from "../supabaseClient";
 
 const formatJoinedDate = (createdAt) => {
   try {
     if (!createdAt) return "Unknown";
-
-    // 🔥 Handle MongoDB $date format
     const iso =
-      typeof createdAt === "string"
-        ? createdAt
-        : createdAt?.$date;
-
+      typeof createdAt === "string" ? createdAt : createdAt?.$date;
     if (!iso) return "Unknown";
 
     const date = new Date(iso);
@@ -51,160 +46,158 @@ const Profile = ({ onClose, effectiveTheme }) => {
     bio: "",
     location: "",
     joinedDate: "",
-    avatar: null, // Can be File or URL
+    avatar: null,
+    isBusiness: false,
+    businessCategory: "",
+    businessName: "",
+    title: "",
   });
+
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [removedAvatar, setRemovedAvatar] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
 
+  /* ===================== FETCH PROFILE ===================== */
   useEffect(() => {
-    // Load user from localStorage
-    const userData = JSON.parse(
-      localStorage.getItem("userInfo") ||
-        localStorage.getItem("chasmos_user_data") ||
-        "{}"
-    );
+    const fetchProfile = async () => {
+      try {
+        const token = localStorage.getItem("token");
 
-    setProfileData({
-      userId: userData.id || userData._id || userData.userId || "N/A",
-      name: userData.name || "Guest User",
-      email: userData.email || "No email provided",
-      phone: userData.phone || userData.phoneNumber || "No phone provided",
-      bio:
-        userData.bio && userData.bio.trim() !== ""
-          ? userData.bio
-          : "Hey there! I am using Chasmos.",
-      location: userData.location || "Not specified",
-      joinedDate: formatJoinedDate(userData.createdAt),
-      // Priority: DB avatar (saved on our backend) -> Google picture -> other common keys -> null
-      avatar:
-        userData.avatar ||
-        userData.picture ||
-        userData.pic ||
-        userData.googleData?.picture ||
-        userData.googleProfile?.picture ||
-        null,
-    });
-  }, [refreshKey]);
+        const stored =
+          JSON.parse(localStorage.getItem("userInfo")) ||
+          JSON.parse(localStorage.getItem("chasmos_user_data"));
 
-  // Reset avatar error when avatar source changes
+        const userId = stored?._id || stored?.userId;
+        if (!userId) return;
+
+        const res = await fetch(
+          `${import.meta.env.VITE_API_BASE_URL}/api/users/profile/${userId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.message);
+        }
+
+        const user = await res.json();
+
+        setProfileData({
+          userId: user._id,
+          name: user.name || "Guest User",
+          email: user.email || "No email provided",
+          phone: user.phoneNumber || "No phone provided",
+          bio:
+            user.bio && user.bio.trim() !== ""
+              ? user.bio
+              : user.isBusiness
+              ? "Tell your customers about your business..."
+              : "Hey there! I am using Chasmos.",
+          location: user.location || "Not specified",
+          joinedDate: formatJoinedDate(user.createdAt),
+          avatar: user.avatar || null,
+          isBusiness: user.isBusiness || false,
+          businessCategory: user.businessCategory || "",
+          businessName: user.businessName || "",
+          title: user.title || "",
+        });
+
+        localStorage.setItem("userInfo", JSON.stringify(user));
+        localStorage.setItem("chasmos_user_data", JSON.stringify(user));
+      } catch (err) {
+        console.error("Failed to fetch profile:", err);
+      }
+    };
+
+    fetchProfile();
+  }, []);
+
+  /* ===================== AVATAR RESET ===================== */
   useEffect(() => {
     setAvatarLoadFailed(false);
-    // If avatar is set again, clear removed flag
     if (profileData.avatar) setRemovedAvatar(false);
   }, [profileData.avatar]);
 
   const getInitials = (name) => {
-    if (!name || typeof name !== 'string') return '';
+    if (!name || typeof name !== "string") return "";
     const parts = name.trim().split(/\s+/).filter(Boolean);
-    if (parts.length === 0) return '';
-    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-    const first = parts[0].charAt(0).toUpperCase();
-    const last = parts[parts.length - 1].charAt(0).toUpperCase();
-    return `${first}${last}`;
+    if (parts.length === 1) return parts[0][0].toUpperCase();
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
   };
 
-  // Handle input changes
   const handleInputChange = (field, value) => {
     setProfileData((prev) => ({ ...prev, [field]: value }));
   };
 
-const handleAvatarUpload = () => {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/*";
+  const handleAvatarUpload = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
 
-  input.onchange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
 
-    // ❗ size check (important to avoid 413 error)
-    if (file.size > 2 * 1024 * 1024) {
-      alert("Image must be less than 2MB");
-      return;
-    }
+      if (file.size > 2 * 1024 * 1024) {
+        alert("Image must be less than 2MB");
+        return;
+      }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setProfileData((prev) => ({
-        ...prev,
-        avatar: reader.result, // ✅ BASE64 STRING
-      }));
-      setRemovedAvatar(false);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfileData((prev) => ({
+          ...prev,
+          avatar: reader.result,
+        }));
+        setRemovedAvatar(false);
+      };
+
+      reader.readAsDataURL(file);
     };
 
-    reader.readAsDataURL(file);
+    input.click();
   };
 
-  input.click();
-};
+  const handleSave = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const API_BASE_URL =
+        import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
+      const payload = {
+        name: profileData.name,
+        bio: profileData.bio,
+      };
 
+      if (removedAvatar) payload.clearAvatar = true;
+      if (profileData.avatar?.startsWith("data:image")) {
+        payload.avatarBase64 = profileData.avatar;
+      }
 
-const handleSave = async () => {
-  try {
-    const token = localStorage.getItem("token");
-    const API_BASE_URL =
-      import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+      const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
 
-    const payload = {
-      name: profileData.name,
-      bio: profileData.bio,
-    };
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message);
 
-    // If user removed their avatar, tell backend to clear it
-    if (removedAvatar) {
-      payload.clearAvatar = true;
+      toast.success("Profile updated successfully");
+      setIsEditing(false);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.message || "Profile update failed");
     }
+  };
 
-    // ✅ send base64 ONLY if changed
-    if (profileData.avatar?.startsWith("data:image")) {
-      payload.avatarBase64 = profileData.avatar;
-    }
-
-    const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.message);
-
-    // ✅ persist server truth (Supabase URL)
-    const updatedUser = {
-      ...JSON.parse(localStorage.getItem("userInfo")),
-      name: data.name,
-      bio: data.bio,
-      avatar: data.avatar,
-    };
-
-    localStorage.setItem("userInfo", JSON.stringify(updatedUser));
-    localStorage.setItem("chasmos_user_data", JSON.stringify(updatedUser));
-
-    setIsEditing(false);
-
-    toast.success("Profile updated successfully", {
-      style: {
-        background: "linear-gradient(135deg, #8b5cf6 0%, #60a5fa 100%)",
-        color: "#fff",
-        border: "1.5px solid #a78bfa",
-        boxShadow: "0 8px 32px rgba(31,38,135,.15)",
-        backdropFilter: "blur(8px)",
-        fontWeight: 600,
-      },
-    });
-  } catch (err) {
-    console.error(err);
-    toast.error(err.message || "Profile update failed");
-  }
-};
-
-
-
+  /* ===================== UI (UNCHANGED) ===================== */
 
   return (
     <motion.div
@@ -214,44 +207,50 @@ const handleSave = async () => {
       transition={{ duration: 0.3, ease: "easeInOut" }}
       className={`fixed inset-0 ${effectiveTheme.primary} flex flex-col h-screen w-screen z-50`}
     >
-      {/* Background */}
       {(!effectiveTheme.mode || effectiveTheme.mode === "light") && (
         <div
           style={{ position: "absolute", inset: 0, background: "#ffffff", zIndex: 0 }}
         />
       )}
+
       <div className="absolute inset-0 overflow-hidden z-[2]">
         <CosmosBackground effectiveTheme={effectiveTheme} />
       </div>
 
-      {/* Header */}
       <div className="relative z-10 flex flex-col h-full w-full">
         <div className={`${effectiveTheme.secondary} border-b ${effectiveTheme.border} p-4`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <button onClick={onClose} className={`p-2 rounded-full hover:${effectiveTheme.hover} transition-colors`}>
+              <button onClick={onClose} className={`p-2 rounded-full hover:${effectiveTheme.hover}`}>
                 <X className={`w-5 h-5 ${effectiveTheme.text}`} />
               </button>
-              <Logo size="md" showText={true} textClassName={effectiveTheme.text} />
-              <div className={`hidden sm:block border-l ${effectiveTheme.border} h-8 mx-2`}></div>
+              <Logo size="md" showText textClassName={effectiveTheme.text} />
+              <div className={`hidden sm:block border-l ${effectiveTheme.border} h-8 mx-2`} />
               <div>
                 <h2 className={`text-lg font-semibold ${effectiveTheme.text}`}>Profile</h2>
-                <p className={`text-sm ${effectiveTheme.textSecondary}`}>Manage your account information</p>
+                <p className={`text-sm ${effectiveTheme.textSecondary}`}>
+                  Manage your account information
+                </p>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
+
+            <div>
               {isEditing ? (
-                <button onClick={handleSave} className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-2">
-                  <Save className="w-4 h-4" /> <span>Save</span>
+                <button onClick={handleSave} className="px-4 py-2 bg-blue-500 text-white rounded-lg">
+                  <Save className="w-4 h-4 inline mr-2" /> Save
                 </button>
               ) : (
-                <button onClick={() => setIsEditing(true)} className={`px-4 py-2 ${effectiveTheme.accent} text-white rounded-lg hover:opacity-90 transition-colors flex items-center space-x-2`}>
-                  <Edit3 className="w-4 h-4" /> <span>Edit</span>
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className={`px-4 py-2 ${effectiveTheme.accent} text-white rounded-lg`}
+                >
+                  <Edit3 className="w-4 h-4 inline mr-2" /> Edit
                 </button>
               )}
             </div>
           </div>
         </div>
+
 
         {/* Profile Content */}
         <div className="flex-1 overflow-y-auto scrollbar-hide">
@@ -317,12 +316,19 @@ const handleSave = async () => {
                   </div>
                 </motion.div>
               </div>
-              <motion.h3 initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }} className={`text-2xl font-bold ${effectiveTheme.text} mb-1`}>
+              <motion.h3 initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }} className={`text-2xl font-bold ${effectiveTheme.text} mb-1 flex items-center gap-2 justify-center`}>
                 {profileData.name}
+                {profileData.isBusiness && (
+                  <span className="px-3 py-1 text-xs font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-full">
+                    Business
+                  </span>
+                )}
               </motion.h3>
               <motion.p initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} className={`text-sm ${effectiveTheme.textSecondary}`}>
                 <Calendar className="w-4 h-4 inline mr-1" />
-                Member since {profileData.joinedDate}
+                {profileData.isBusiness 
+                  ? `${profileData.businessCategory} • Since ${profileData.joinedDate || 'Unknown'}`
+                  : `Member since ${profileData.joinedDate || 'Unknown'}`}
               </motion.p>
             </motion.div>
 
@@ -354,11 +360,13 @@ const handleSave = async () => {
                 )}
               </motion.div>
 
-              {/* Bio */}
+              {/* Bio / About Company */}
               <motion.div whileHover={{ scale: 1.01 }} className={`p-4 ${effectiveTheme.secondary} rounded-xl border ${effectiveTheme.border} shadow-sm`}>
-                <label className={`block text-sm font-medium ${effectiveTheme.textSecondary} mb-2`}>Bio</label>
+                <label className={`block text-sm font-medium ${effectiveTheme.textSecondary} mb-2`}>
+                  {profileData.isBusiness ? 'About Company' : 'Bio'}
+                </label>
                 {isEditing ? (
-                  <textarea value={profileData.bio} onChange={(e) => handleInputChange("bio", e.target.value)} rows={3} className={`w-full px-4 py-3 ${effectiveTheme.inputBg} ${effectiveTheme.text} rounded-lg border ${effectiveTheme.border} focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none`} placeholder="Tell us about yourself..." />
+                  <textarea value={profileData.bio} onChange={(e) => handleInputChange("bio", e.target.value)} rows={3} className={`w-full px-4 py-3 ${effectiveTheme.inputBg} ${effectiveTheme.text} rounded-lg border ${effectiveTheme.border} focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none`} placeholder={profileData.isBusiness ? "Tell customers about your business..." : "Tell us about yourself..."} />
                 ) : (
                   <div className={`px-4 py-3 ${effectiveTheme.text} rounded-lg min-h-[80px]`}>{profileData.bio}</div>
                 )}

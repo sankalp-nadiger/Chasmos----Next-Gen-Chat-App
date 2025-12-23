@@ -13,4 +13,6 @@ router.get('/profile/:userId', protect, getUserProfile);
 // Get user's shared media, documents, and links
 router.get('/media/:userId', protect, getUserMediaAndDocs);
 
+
+
 export default router;
