@@ -8509,17 +8509,21 @@ useEffect(() => {
             />
           ))
         ) : activeNavItem === 'groups' ? (
-          <div className="mt-2 text-sm">
-            <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
-              You're not in any group!
-            </p>
-          </div>
+          !minLoadingComplete ? null : (
+            <div className="mt-2 text-sm">
+              <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+                You're not in any group!
+              </p>
+            </div>
+          )
         ) : (
-          <div className="mt-2 text-sm">
-            <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
-              You don't have any active chat going on!
-            </p>
-          </div>
+          !minLoadingComplete ? null : (
+            <div className="mt-2 text-sm">
+              <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+                You don't have any active chat going on!
+              </p>
+            </div>
+          )
         )}
       </div>
     );
@@ -8529,16 +8533,16 @@ useEffect(() => {
       )}
 
       {/* Empty State: Only show if loading is false and there are no chats or contacts */}
-      {(!loading && !searchTerm.trim() && recentChats.length === 0 && contacts.length === 0) ? (
+      {(!loading && minLoadingComplete && !searchTerm.trim() && recentChats.length === 0 && contacts.length === 0) ? (
         <div className="text-center space-y-4 mt-10">
           <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
             Start chatting with Chasmos!
           </p>
           <button
-            onClick={() => setShowNewChat(true)}
+            onClick={() => activeNavItem === 'groups' ? setShowGroupCreation(true) : setShowNewChat(true)}
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
           >
-            Start a New Chat
+            {activeNavItem === 'groups' ? 'Start creating group' : 'Start new chat'}
           </button>
         </div>
       ) : null}
@@ -8721,7 +8725,30 @@ useEffect(() => {
               onClose={() => navigate('/chats')}
               onProfileClick={() => navigate('/profile')}
             />
-          ) : activeSection === "documents" && !selectedDocument && !isNewDocumentChat ? (
+          ) : showGroupCreation ? (
+            <GroupCreation
+              contacts={contacts}
+              effectiveTheme={effectiveTheme}
+              onClose={handleCloseGroupCreation}
+              onCreateGroup={handleCreateGroupComplete}
+            />
+          ) : showNewChat ? (
+            <NewChat
+              existingContacts={[...googleContacts, ...contacts]}
+              effectiveTheme={effectiveTheme}
+              onClose={handleCloseNewChat}
+              onStartChat={handleStartNewChat}
+            />
+          ) : isNewDocumentChat ? (
+            <NewDocumentUploader
+              onUploadComplete={(doc) => {
+                setSelectedDocument(doc);
+                setIsNewDocumentChat(false);
+              }}
+              onCancel={() => setIsNewDocumentChat(false)}
+              effectiveTheme={effectiveTheme}
+            />
+          ) : activeSection === "documents" && !selectedDocument ? (
             // Documents section welcome screen
             <div className="flex-1 flex items-center justify-center p-4">
               <div className="text-center max-w-md w-full">
@@ -8800,29 +8827,6 @@ useEffect(() => {
                 </motion.p>
               </div>
             </div>
-          ) : showGroupCreation ? (
-            <GroupCreation
-              contacts={contacts}
-              effectiveTheme={effectiveTheme}
-              onClose={handleCloseGroupCreation}
-              onCreateGroup={handleCreateGroupComplete}
-            />
-          ) : showNewChat ? (
-            <NewChat
-              existingContacts={[...googleContacts, ...contacts]}
-              effectiveTheme={effectiveTheme}
-              onClose={handleCloseNewChat}
-              onStartChat={handleStartNewChat}
-            />
-          ) : isNewDocumentChat ? (
-            <NewDocumentUploader
-              onUploadComplete={(doc) => {
-                setSelectedDocument(doc);
-                setIsNewDocumentChat(false);
-              }}
-              onCancel={() => setIsNewDocumentChat(false)}
-              effectiveTheme={effectiveTheme}
-            />
           ) : selectedDocument ? (
             <DocumentChatWrapper
               key={selectedDocument._id}

@@ -53,8 +53,13 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
     setError("");
     
     // Validation
+    if (!formData.phoneNumber || !formData.phoneNumber.trim()) {
+      setError("Phone number is required");
+      return;
+    }
+    
     const phoneRegex = /^\+?[\d\s-]{10,}$/;
-    if (formData.phoneNumber && formData.phoneNumber.trim() && !phoneRegex.test(formData.phoneNumber.trim())) {
+    if (!phoneRegex.test(formData.phoneNumber.trim())) {
       setError("Please enter a valid phone number");
       return;
     }
@@ -460,7 +465,7 @@ const GoogleSignupComplete = ({ googleData, onSuccess, onBack, currentTheme }) =
 
                 <div className="space-y-6">
                     <div className="space-y-2">
-                        <label className={`block text-sm font-medium ${currentTheme.text}`}>Phone Number</label>
+                        <label className={`block text-sm font-medium ${currentTheme.text}`}>Phone Number <span className="text-red-500">*</span></label>
                         <div className="relative">
                             <div className={`absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none ${currentTheme.textSecondary}`}>
                                 <Phone className="h-5 w-5" />

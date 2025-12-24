@@ -353,7 +353,12 @@ const GroupCreation = ({
             <button
               onClick={onClose}
               title="Close"
-              className={`p-2 rounded-full hover:bg-red-500 transition-colors`}
+              className={`p-2 rounded-full transition-colors`}
+              style={{ 
+                backgroundColor: 'transparent'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#E5E7EB'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             >
               <X className={`w-5 h-5 ${effectiveTheme.text}`} />
             </button>
