@@ -599,7 +599,7 @@ const SignupForm = ({ currentTheme, onSignup }) => {
       {/* PHONE */}
       <div className="space-y-2">
         <label className={`block text-sm font-medium ${currentTheme.text}`}>
-          Phone Number
+          Phone Number <span className="text-red-500">*</span>
         </label>
         <input
           type="tel"

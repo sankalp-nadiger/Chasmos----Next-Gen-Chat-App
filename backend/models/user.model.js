@@ -16,9 +16,8 @@ const userSchema = new mongoose.Schema(
     },
     phoneNumber: { 
       type: String, 
-      required: false, 
-      unique: true,
-      sparse: true // allow multiple documents without phoneNumber
+      required: true, 
+      unique: true
     },
     avatar: { 
       type: String,
