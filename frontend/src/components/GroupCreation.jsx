@@ -34,7 +34,10 @@ const GroupCreation = ({
   const [inviteCopied, setInviteCopied] = useState(false);
 
   // Permissions
-  const [allowCreatorAdmin, setAllowCreatorAdmin] = useState(true);
+  // Permissions
+  // `allowCreatorAdmin` is intentionally always true (creator is admin by default).
+  // Keep a variable for compatibility but do not expose it in the UI.
+  const allowCreatorAdmin = true;
   const [allowOthersAdmin, setAllowOthersAdmin] = useState(false);
   const [allowMembersAdd, setAllowMembersAdd] = useState(true);
 
@@ -73,6 +76,13 @@ const GroupCreation = ({
   const normalizeId = (id) =>
     !id ? "" : id.startsWith("google-") ? id.replace("google-", "") : id;
 
+  const normalizePhone = (p) => {
+    if (!p) return "";
+    const digits = String(p).replace(/\D/g, "");
+    if (!digits) return "";
+    return digits.length > 10 ? digits.slice(-10) : digits;
+  };
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -100,15 +110,26 @@ const GroupCreation = ({
         }
 
         if (!cancelled) {
-          setContacts([
-            ...(Array.isArray(appContacts) ? appContacts : []),
-            ...googleContacts.map((c) => ({
-              id: `google-${c.email || c.phone}`,
-              name: c.name,
-              avatar: c.avatar,
-              isGoogleContact: true,
-            })),
-          ]);
+          // Build quick lookup sets from google contacts (email and phone)
+          const googleEmails = new Set();
+          const googlePhones = new Set();
+          (googleContacts || []).forEach((g) => {
+            if (g.email) googleEmails.add(String(g.email).toLowerCase().trim());
+            const gp = normalizePhone(g.phone || g.mobile || g.mobileNumber || "");
+            if (gp) googlePhones.add(gp);
+          });
+
+          // Annotate registered app contacts if they match a google contact
+          const annotated = (Array.isArray(appContacts) ? appContacts : []).map((u) => {
+            const emailMatch = u.email && googleEmails.has(String(u.email).toLowerCase().trim());
+            const phoneMatch = googlePhones.has(normalizePhone(u.phoneNumber || u.phone || u.mobile || ""));
+            return {
+              ...u,
+              isGoogleContact: !!(emailMatch || phoneMatch),
+            };
+          });
+
+          setContacts(annotated);
         }
       } catch (err) {
         if (!cancelled) {
@@ -403,11 +424,7 @@ const GroupCreation = ({
                     className={`w-full pl-10 pr-4 py-3 bg-transparent ${effectiveTheme.text} rounded-lg ${effectiveTheme.mode === "dark" ? "placeholder-gray-500" : "placeholder-gray-400"}`}
                   />
                 </div>
-                {loadingContacts && (
-                  <p className={`mt-2 text-sm ${effectiveTheme.textSecondary}`}>
-                    Loading contacts...
-                  </p>
-                )}
+                {/* Loading state is shown centered in the contacts list below */}
                 {contactsError && (
                   <p
                     className={`mt-2 text-sm ${effectiveTheme.mode === "dark" ? "text-red-400" : "text-red-600"}`}
@@ -458,7 +475,11 @@ const GroupCreation = ({
               )}
 
               <div className="flex-1 overflow-y-auto px-4 space-y-2">
-                {filteredContacts.length === 0 ? (
+                {loadingContacts ? (
+                  <div className="flex items-center justify-center min-h-[40vh]">
+                    <p className={`text-center ${effectiveTheme.textSecondary} text-sm`}>Loading contacts...</p>
+                  </div>
+                ) : filteredContacts.length === 0 ? (
                   <p
                     className={`text-center mt-10 ${effectiveTheme.text} opacity-70`}
                   >
@@ -645,13 +666,6 @@ const GroupCreation = ({
                 </h4>
 
                 <div className="space-y-4">
-                  <PermissionItem
-                    title="You are the Admin"
-                    desc="Creator becomes default admin"
-                    value={allowCreatorAdmin}
-                    onChange={setAllowCreatorAdmin}
-                  />
-
                   <PermissionItem
                     title="Allow others to be admins"
                     desc="Members can be promoted"

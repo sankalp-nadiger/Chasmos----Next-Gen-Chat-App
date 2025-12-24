@@ -49,13 +49,41 @@ const MessageInput = React.memo(({
   const [selectedMentionMap, setSelectedMentionMap] = useState({}); // id -> display name
   const [groupMembers, setGroupMembers] = useState([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const [selectedContactFetched, setSelectedContactFetched] = useState(null);
 
   const fetchGroupMembers = useCallback(async (chatId) => {
     if (!chatId) return;
     setLoadingMembers(true);
-    const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+    // Try multiple storage keys and sessionStorage as fallback
+    const storageCandidates = [
+      { store: 'localStorage', key: 'token' },
+      { store: 'localStorage', key: 'chasmos_auth_token' },
+      { store: 'localStorage', key: 'chasmos_token' },
+      { store: 'sessionStorage', key: 'token' },
+      { store: 'sessionStorage', key: 'chasmos_auth_token' },
+    ];
+
+    let token = null;
+    let tokenKeyUsed = null;
+    for (const s of storageCandidates) {
+      try {
+        const val = (s.store === 'localStorage' ? localStorage.getItem(s.key) : sessionStorage.getItem(s.key));
+        if (val) {
+          token = val;
+          tokenKeyUsed = `${s.store}.${s.key}`;
+          break;
+        }
+      } catch (e) {
+        // ignore storage access errors
+      }
+    }
+
+    const masked = token ? (String(token).slice(0, 8) + '...' + String(token).slice(-4)) : null;
+    try { console.log('[fetchGroupMembers] using auth token', { tokenKeyUsed, masked }); } catch (e) {}
 
     const endpoints = [
+      // Mirror GroupInfoModal's preferred endpoint
+      `${API_BASE}/api/group/group/${chatId}`,
       // prefer new chat participants endpoint
       `${API_BASE}/api/chat/${chatId}/participants`,
       `${API_BASE}/api/group/${chatId}/members`, // legacy endpoints
@@ -94,13 +122,26 @@ const MessageInput = React.memo(({
     try {
       for (const url of endpoints) {
         try {
-          const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+          const headersObj = {};
+          if (token) headersObj.Authorization = `Bearer ${token}`;
+          const res = await fetch(url, { headers: headersObj });
           if (!res.ok) {
             try { console.warn('[fetchGroupMembers] non-ok response', { url, status: res.status }); } catch(e){}
             continue;
           }
           const data = await res.json();
           try { console.log('[fetchGroupMembers] response', { url, data }); } catch(e){}
+          // If the response contains group info (not just members), log derived features
+          const groupShape = data || {};
+          const rawFeatures = groupShape.features || (groupShape.group && groupShape.group.features) || (groupShape.groupSettings && groupShape.groupSettings.features) || {};
+          const derived = {
+            media: rawFeatures.media !== false,
+            gallery: rawFeatures.gallery !== false,
+            docs: rawFeatures.docs !== false,
+            polls: rawFeatures.polls !== false,
+          };
+          try { console.log('[fetchGroupMembers] derived features from response', { url, derived, groupShapeSummary: { id: groupShape._id || groupShape.id || groupShape.chatId, name: groupShape.name || groupShape.chatName } }); } catch(e) {}
+
           const members = tryParseMembers(data || {});
           if (members && members.length) {
             setGroupMembers(members);
@@ -161,6 +202,62 @@ const MessageInput = React.memo(({
       setCreatingPoll(false);
     }
   }, [selectedContact, onSendMessage]);
+
+  // Derive whether this is a group and the effective features (robust to multiple payload shapes)
+  const resolvedIsGroup = Boolean(
+    isGroupChat ||
+    (selectedContact && (selectedContact.isGroup || selectedContact.isGroupChat)) ||
+    (selectedContact && (selectedContact.participants || selectedContact.admins || selectedContact.inviteEnabled)) ||
+    (selectedContact && (selectedContact.group || selectedContact.groupSettings))
+  );
+
+  const derivedFeaturesRaw = (
+    // Prefer freshly fetched group info (if available) so UI reflects saved settings
+    (selectedContactFetched && selectedContactFetched.features) ||
+    (selectedContactFetched && selectedContactFetched.group && selectedContactFetched.group.features) ||
+    (selectedContactFetched && selectedContactFetched.groupSettings && selectedContactFetched.groupSettings.features) ||
+    selectedContact?.features ||
+    (selectedContact?.group && selectedContact.group.features) ||
+    (selectedContact?.groupSettings && selectedContact.groupSettings.features) ||
+    (selectedContact?.group?.groupSettings && selectedContact.group.groupSettings.features) ||
+    {}
+  );
+
+  const featureMediaAllowed = derivedFeaturesRaw.media !== false;
+  const featureGalleryAllowed = derivedFeaturesRaw.gallery !== false;
+  const featureDocsAllowed = derivedFeaturesRaw.docs !== false;
+  const featurePollsAllowed = derivedFeaturesRaw.polls !== false;
+
+  // Log derived values for debugging
+  useEffect(() => {
+    try {
+      console.log('[MessageInput] derived features', {
+        resolvedIsGroup,
+        derivedFeaturesRaw,
+        featureMediaAllowed,
+        featureGalleryAllowed,
+        featureDocsAllowed,
+        featurePollsAllowed,
+        selectedContactSummary: {
+          id: selectedContact?.id || selectedContact?._id || selectedContact?.chatId,
+          isGroupFlag: selectedContact?.isGroup || selectedContact?.isGroupChat,
+        }
+        , fetchedSummary: selectedContactFetched ? { id: selectedContactFetched._id || selectedContactFetched.id || selectedContactFetched.chatId, features: selectedContactFetched.features || selectedContactFetched.groupSettings || selectedContactFetched.group } : null
+      });
+    } catch (e) {}
+  }, [resolvedIsGroup, derivedFeaturesRaw, featureMediaAllowed, featureGalleryAllowed, featureDocsAllowed, featurePollsAllowed, selectedContact, selectedContactFetched]);
+
+  // Precompute show flags to keep JSX readable
+  const showDocument = (!resolvedIsGroup || featureDocsAllowed);
+  const showPhoto = (!resolvedIsGroup || featureMediaAllowed);
+  const showVideo = (!resolvedIsGroup || featureMediaAllowed);
+  const showCamera = (!resolvedIsGroup || featureMediaAllowed);
+  const showPoll = (resolvedIsGroup && featurePollsAllowed);
+
+  // Compute visible items so we can adapt menu size
+  const visibleItems = [showDocument, showPhoto, showVideo, showCamera, true /* location always */, showPoll];
+  const visibleCount = visibleItems.filter(Boolean).length;
+  const menuMinWidth = Math.max(260, Math.min(680, visibleCount * 78));
 
   const handleInputChange = useCallback((e) => {
     const val = e.target.value;
@@ -397,20 +494,37 @@ const MessageInput = React.memo(({
     }
   }, [handleSendClick]);
   
-  const toggleAttachmentMenu = useCallback(() => {
+  const toggleAttachmentMenu = useCallback(async () => {
+    // If group and we don't yet have fetched settings, fetch before deciding
+    const chatId = selectedContact?.groupId || selectedContact?.chatId || selectedContact?.chat || selectedContact?.id || selectedContact?._id;
+    if (resolvedIsGroup && !selectedContactFetched && chatId) {
+      try {
+        const json = await fetchGroupInfoAsync(chatId);
+        setSelectedContactFetched(json);
+      } catch (e) {}
+    }
+
+    // decide availability using freshest data (derivedFeaturesRaw will prefer fetched data)
+    const anyAvailable = featureMediaAllowed || featureDocsAllowed || (resolvedIsGroup && featurePollsAllowed);
+    try { console.log('[MessageInput] toggleAttachmentMenu called', { anyAvailable, resolvedIsGroup, featureMediaAllowed, featureDocsAllowed, featurePollsAllowed }); } catch (e) {}
+    if (!anyAvailable) return;
     setShowAttachmentMenu(!showAttachmentMenu);
-  }, [showAttachmentMenu]);
+  }, [showAttachmentMenu, resolvedIsGroup, featureMediaAllowed, featureDocsAllowed, featurePollsAllowed, selectedContact, selectedContactFetched]);
 
   const handleFileUpload = useCallback((type) => {
+    // guard based on feature flags
     if (type === 'document') {
+      if (!featureDocsAllowed) return alert('Document sharing is disabled for this group');
       fileInputRef.current?.click();
     } else if (type === 'image') {
+      if (!featureMediaAllowed) return alert('Media sharing is disabled for this group');
       imageInputRef.current?.click();
     } else if (type === 'video') {
+      if (!featureMediaAllowed) return alert('Media sharing is disabled for this group');
       videoInputRef.current?.click();
     }
     setShowAttachmentMenu(false);
-  }, []);
+  }, [featureDocsAllowed, featureMediaAllowed]);
 
   const handleFileChange = useCallback((e, type) => {
     const file = e.target.files[0];
@@ -429,10 +543,12 @@ const MessageInput = React.memo(({
     };
 
     if (showAttachmentMenu) {
+      // log which icons will be shown when menu opens (include visibleCount)
+      try { console.log('[MessageInput] attachment menu opened - showing', { showDocument, showPhoto, showVideo, showCamera, showPoll, visibleCount, menuMinWidth }); } catch (e) {}
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showAttachmentMenu]);
+  }, [showAttachmentMenu, showDocument, showPhoto, showVideo, showCamera, showPoll]);
 
   useEffect(() => {
     return () => {
@@ -474,6 +590,59 @@ const MessageInput = React.memo(({
       try { console.warn('[MessageInput] failed to ensure group members', e && e.message); } catch(e){}
     }
   }, [selectedContact, isGroupChat, fetchGroupMembers]);
+
+  // Fetch full group info (participants + features) similarly to GroupInfoModal
+  const fetchGroupInfoAsync = async (chatId) => {
+    if (!chatId) return null;
+    try {
+      const storageCandidates = [
+        { store: 'localStorage', key: 'token' },
+        { store: 'localStorage', key: 'chasmos_auth_token' },
+        { store: 'localStorage', key: 'chasmos_token' },
+        { store: 'sessionStorage', key: 'token' },
+        { store: 'sessionStorage', key: 'chasmos_auth_token' },
+      ];
+      let token = null;
+      let tokenKeyUsed = null;
+      for (const s of storageCandidates) {
+        try {
+          const val = (s.store === 'localStorage' ? localStorage.getItem(s.key) : sessionStorage.getItem(s.key));
+          if (val) { token = val; tokenKeyUsed = `${s.store}.${s.key}`; break; }
+        } catch (e) {}
+      }
+      try { console.log('[MessageInput] fetchGroupInfo will call server', { chatId, tokenKeyUsed }); } catch (e) {}
+
+      const url = `${API_BASE}/api/group/group/${encodeURIComponent(chatId)}`;
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(url, { headers });
+      const json = await res.json();
+      if (!res.ok) {
+        try { console.warn('[MessageInput] fetchGroupInfo failed', { url, status: res.status, body: json }); } catch (e) {}
+        return null;
+      }
+      try { console.log('[MessageInput] fetchGroupInfo response', { url, json }); } catch (e) {}
+      return json || null;
+    } catch (e) {
+      try { console.error('[MessageInput] fetchGroupInfo error', e && e.message); } catch (err) {}
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const chatId = selectedContact?.groupId || selectedContact?.chatId || selectedContact?.chat || selectedContact?.id || selectedContact?._id;
+    if (!resolvedIsGroup || !chatId) {
+      setSelectedContactFetched(null);
+      return;
+    }
+
+    // When opening the attachment menu, refresh group info so we reflect saved settings
+    if (showAttachmentMenu) {
+      fetchGroupInfoAsync(chatId).then((json) => setSelectedContactFetched(json));
+    }
+
+    // Also fetch once when selectedContact changes so features are available early
+    fetchGroupInfoAsync(chatId).then((json) => setSelectedContactFetched(json));
+  }, [resolvedIsGroup, selectedContact, showAttachmentMenu]);
 
   return (
     <div className={`${effectiveTheme.secondary} p-4 relative`}>
@@ -525,7 +694,7 @@ const MessageInput = React.memo(({
                   background: effectiveTheme.mode === 'dark'
                     ? 'rgba(31, 41, 55, 0.95)'
                     : 'rgba(255, 255, 255, 0.98)',
-                  minWidth: '370px',
+                  minWidth: `${menuMinWidth}px`,
                   boxShadow: effectiveTheme.mode === 'dark'
                     ? '0 10px 40px rgba(0, 0, 0, 0.5)'
                     : '0 10px 40px rgba(0, 0, 0, 0.1)',
@@ -535,6 +704,7 @@ const MessageInput = React.memo(({
                   <CosmosBg />
                 </div>
                 <div className="flex items-center space-x-4 relative z-10">
+                  {showDocument && (
                   <motion.div
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
@@ -546,7 +716,9 @@ const MessageInput = React.memo(({
                     </div>
                     <p className={`${effectiveTheme.text} text-xs font-medium`}>Document</p>
                   </motion.div>
+                  )}
 
+                  {showPhoto && (
                   <motion.div
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
@@ -558,7 +730,9 @@ const MessageInput = React.memo(({
                     </div>
                     <p className={`${effectiveTheme.text} text-xs font-medium`}>Photo</p>
                   </motion.div>
+                  )}
 
+                  {showVideo && (
                   <motion.div
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
@@ -570,12 +744,15 @@ const MessageInput = React.memo(({
                     </div>
                     <p className={`${effectiveTheme.text} text-xs font-medium`}>Video</p>
                   </motion.div>
+                  )}
 
+                  {showCamera && (
                   <motion.div
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
                     className={`cursor-pointer flex flex-col items-center space-y-2 p-2 rounded-lg transition-colors ${effectiveTheme.mode === 'dark' ? 'hover:bg-purple-500 hover:bg-opacity-10' : 'hover:bg-purple-100'}`}
                     onClick={() => {
+                      if (!featureMediaAllowed) return alert('Media sharing is disabled for this group');
                       imageInputRef.current?.click();
                       setShowAttachmentMenu(false);
                     }}
@@ -585,6 +762,7 @@ const MessageInput = React.memo(({
                     </div>
                     <p className={`${effectiveTheme.text} text-xs font-medium`}>Camera</p>
                   </motion.div>
+                  )}
 
                   <motion.div
                     whileHover={{ scale: 1.1 }}
@@ -600,7 +778,7 @@ const MessageInput = React.memo(({
                     <p className={`${effectiveTheme.text} text-xs font-medium`}>Location</p>
                   </motion.div>
 
-                  {isGroupChat && (
+                  {showPoll && (
                     <motion.div
                       whileHover={{ scale: 1.1 }}
                       whileTap={{ scale: 0.95 }}

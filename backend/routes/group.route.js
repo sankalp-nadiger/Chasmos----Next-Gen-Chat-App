@@ -7,6 +7,7 @@ import {
   addMember,
   removeMember,
   addAdmin,
+  updateGroupSettings,
   exitGroup,
   deleteGroup,
   getGroupByInviteLink
@@ -23,6 +24,7 @@ router.get("/by-invite", protect, getGroupByInviteLink);
 router.post("/add-member", protect, addMember);
 router.post("/remove-member", protect, removeMember);
 router.post("/make-admin", protect, addAdmin);
+router.post("/update-settings", protect, updateGroupSettings);
 router.post("/exit-group", protect, exitGroup);
 router.get("/group/:groupId", protect, getGroupInfo);
 

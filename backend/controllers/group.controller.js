@@ -346,6 +346,9 @@ export const regenerateLink = async (req, res) => {
     const group = await Group.findById(groupId);
     if (!group) return err(res, "Group not found");
 
+    // snapshot of participants before applying changes (used for notifications)
+    const priorParticipants = Array.isArray(group.participants) ? group.participants.map(p => String(p)) : [];
+
     if (!group.admin || String(group.admin) !== String(userId))
       return err(res, "Only admin can regenerate link", 403);
 
@@ -489,6 +492,15 @@ export const addAdmin = async (req, res) => {
     if (!group.admins.includes(newAdminId)) {
       group.admins.push(newAdminId);
       await group.save();
+    }
+
+    // Also update chat document admins
+    try {
+      if (group.chat) {
+        await Chat.findByIdAndUpdate(group.chat, { $addToSet: { admins: newAdminId } });
+      }
+    } catch (e) {
+      console.error('Failed to sync admin to Chat:', e);
     }
 
     return ok(res, { message: "Admin added", group });
@@ -706,6 +718,173 @@ export const getGroupInfo = async (req, res) => {
     return ok(res, responseGroup);
   } catch (error) {
     console.error("Get group info error:", error);
+    err(res, error.message, 500);
+  }
+};
+
+
+// ----------------------------
+// UPDATE GROUP SETTINGS
+// ----------------------------
+export const updateGroupSettings = async (req, res) => {
+  try {
+    const { groupId, inviteEnabled, inviteLink, permissions, features, promoteIds, removeIds } = req.body;
+    const userId = req.user._id;
+
+    const group = await Group.findById(groupId);
+    if (!group) return err(res, "Group not found");
+
+    // Only admins can update settings
+    const isAdmin = (group.admin && group.admin.toString() === userId.toString()) || (Array.isArray(group.admins) && group.admins.map(a=>String(a)).includes(String(userId)));
+    if (!isAdmin) return err(res, "Only admins can update group settings", 403);
+
+    if (inviteEnabled !== undefined) group.inviteEnabled = !!inviteEnabled;
+    if (inviteLink !== undefined) group.inviteLink = inviteLink;
+
+    if (permissions && typeof permissions === 'object') {
+      group.permissions = group.permissions || {};
+      if (permissions.allowCreatorAdmin !== undefined) group.permissions.allowCreatorAdmin = !!permissions.allowCreatorAdmin;
+      if (permissions.allowOthersAdmin !== undefined) group.permissions.allowOthersAdmin = !!permissions.allowOthersAdmin;
+      if (permissions.allowMembersAdd !== undefined) group.permissions.allowMembersAdd = !!permissions.allowMembersAdd;
+    }
+
+    if (features && typeof features === 'object') {
+      group.features = group.features || {};
+      if (features.media !== undefined) group.features.media = !!features.media;
+      if (features.gallery !== undefined) group.features.gallery = !!features.gallery;
+      if (features.docs !== undefined) group.features.docs = !!features.docs;
+      if (features.polls !== undefined) group.features.polls = !!features.polls;
+    }
+
+    // If promoteIds provided, add them to admins (only new ones)
+    if (promoteIds && Array.isArray(promoteIds) && promoteIds.length) {
+      group.admins = group.admins || [];
+      for (const pid of promoteIds) {
+        const idStr = String(pid);
+        if (!group.admins.map(a => String(a)).includes(idStr)) {
+          group.admins.push(pid);
+        }
+      }
+    }
+
+    // If removeIds provided, remove them from participants and admins
+    if (removeIds && Array.isArray(removeIds) && removeIds.length) {
+      const removeSet = new Set(removeIds.map(r => String(r)));
+      group.participants = Array.isArray(group.participants) ? group.participants.filter(p => !removeSet.has(String(p))) : [];
+      if (Array.isArray(group.admins)) {
+        group.admins = group.admins.filter(a => !removeSet.has(String(a)));
+      }
+      // Optionally record leftBy/leftAt for audit
+      try {
+        group.leftBy = Array.isArray(group.leftBy) ? group.leftBy : [];
+        group.leftAt = Array.isArray(group.leftAt) ? group.leftAt : [];
+        for (const rid of removeIds) {
+          group.leftBy.push(rid);
+          group.leftAt.push(new Date());
+        }
+      } catch (e) {
+        console.warn('updateGroupSettings: failed to record leftBy/leftAt', e && e.message);
+      }
+    }
+
+    await group.save();
+
+    // Also sync certain settings into the Chat document so UI components
+    // that read chat.groupSettings will see the updates immediately.
+    try {
+      if (group.chat) {
+        const chatUpdate = {};
+        if (group.inviteLink !== undefined) chatUpdate['groupSettings.inviteLink'] = group.inviteLink || '';
+        if (inviteEnabled !== undefined) chatUpdate['groupSettings.allowInvites'] = !!inviteEnabled;
+        // Mirror features into chat.groupSettings.features (schema allows extra fields)
+        if (group.features) chatUpdate['groupSettings.features'] = group.features;
+        if (Object.keys(chatUpdate).length) {
+          await Chat.findByIdAndUpdate(group.chat, { $set: chatUpdate });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to sync group settings to Chat:', e);
+    }
+
+    // If promoteIds were provided, also ensure Chat.admins contains them
+    try {
+      if (promoteIds && Array.isArray(promoteIds) && promoteIds.length && group.chat) {
+        await Chat.findByIdAndUpdate(group.chat, { $addToSet: { admins: { $each: promoteIds } } });
+      }
+      // If removeIds were provided, remove them from Chat participants and admins
+      if (removeIds && Array.isArray(removeIds) && removeIds.length && group.chat) {
+        await Chat.findByIdAndUpdate(group.chat, { $pull: { participants: { $in: removeIds }, admins: { $in: removeIds } } });
+      }
+    } catch (e) {
+      console.error('Failed to sync promoted admins to Chat:', e);
+    }
+
+    // Emit socket event to notify participants that group settings changed
+    try {
+      const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+      const io = getSocketIOInstance();
+      const payload = { groupId: group._id, settings: { inviteEnabled: group.inviteEnabled, inviteLink: group.inviteLink, permissions: group.permissions, features: group.features } };
+
+      // Create and emit system messages for promotions and removals
+      try {
+        const actor = await User.findById(userId).select('name avatar');
+        const actorName = actor?.name || 'Someone';
+
+        // Promotions
+        if (promoteIds && Array.isArray(promoteIds) && promoteIds.length) {
+          for (const pid of promoteIds) {
+            try {
+              const target = await User.findById(pid).select('name avatar');
+              const targetName = target?.name || 'a member';
+              const content = `${actorName} promoted ${targetName} to admin`;
+              const created = await Message.create({ sender: userId, content, type: 'system', chat: group.chat });
+              const populated = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
+              if (io) {
+                priorParticipants.forEach(p => { try { io.to(String(p)).emit('message recieved', populated); } catch (e) {} });
+                try { io.to(String(group.chat)).emit('message recieved', populated); } catch (e) {}
+              }
+            } catch (e) {
+              console.warn('Failed to create promotion message for', pid, e && e.message);
+            }
+          }
+        }
+
+        // Removals
+        if (removeIds && Array.isArray(removeIds) && removeIds.length) {
+          for (const rid of removeIds) {
+            try {
+              const target = await User.findById(rid).select('name avatar');
+              const targetName = target?.name || 'a member';
+              const content = `${actorName} removed ${targetName} from the group`;
+              const created = await Message.create({ sender: userId, content, type: 'system', chat: group.chat });
+              const populated = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
+              if (io) {
+                priorParticipants.forEach(p => { try { io.to(String(p)).emit('message recieved', populated); } catch (e) {} });
+                try { io.to(String(group.chat)).emit('message recieved', populated); } catch (e) {}
+              }
+            } catch (e) {
+              console.warn('Failed to create removal message for', rid, e && e.message);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to create system messages for promotions/removals', e && e.message);
+      }
+
+      // Finally emit the settings update payload
+      if (io && group.participants && Array.isArray(group.participants)) {
+        group.participants.forEach(p => {
+          try { io.to(String(p)).emit('group settings updated', payload); } catch (e) {}
+        });
+        try { io.to(String(group.chat)).emit('group settings updated', payload); } catch (e) {}
+      }
+    } catch (e) {
+      console.error('Failed to emit group settings update socket event:', e);
+    }
+
+    return ok(res, { message: 'Group settings updated', group });
+  } catch (error) {
+    console.error('Update group settings error:', error);
     err(res, error.message, 500);
   }
 };

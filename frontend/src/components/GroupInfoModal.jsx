@@ -1,6 +1,5 @@
 // GroupInfoModalWhatsApp.jsx
 import React, { useState, useEffect } from "react";
-import { toast } from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -35,11 +34,19 @@ const GroupInfoModalWhatsApp = ({
   onDeleteGroup,
 }) => {
   const [activeTab, setActiveTab] = useState("media");
-
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+  // Helper to show toast messages (type: 'success' | 'error')
+  const showToast = (message, type = 'success', timeout = 2000) => {
+    setToast({ show: true, message: message || '', type });
+    try { window.clearTimeout(window._chasmos_toast_timeout); } catch (e) {}
+    window._chasmos_toast_timeout = setTimeout(() => {
+      setToast({ show: false, message: '', type: 'success' });
+    }, timeout);
+  };
   const [fetchedGroup, setFetchedGroup] = useState(null);
   const effectiveGroup = fetchedGroup || group;
 
-  if (!group && !fetchedGroup) return null;
+
 
   console.log("📊 GroupInfoModal received group data:", {
     inviteEnabled: effectiveGroup.inviteEnabled,
@@ -48,7 +55,7 @@ const GroupInfoModalWhatsApp = ({
     features: effectiveGroup.features
   });
 
-  const members = effectiveGroup.members || effectiveGroup.participants || [];
+  const members = (effectiveGroup.members || effectiveGroup.participants || []).filter(m => m != null);
   const settings = effectiveGroup.settings || {};
 
   // Derive invite/settings/permissions/features from various possible payload shapes
@@ -87,11 +94,25 @@ const GroupInfoModalWhatsApp = ({
     return adminId === currentUserId?.toString();
   });
 
-  const handleRemoveMember = (memberId) => {
-    onUpdateGroup?.({
-      ...effectiveGroup,
-      members: members.filter((m) => m.id !== memberId && m._id !== memberId),
-    });
+  const handleRemoveMember = async (memberId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/api/group/remove-member`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ groupId: effectiveGroup._id, memberId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || 'Failed to remove member');
+      onUpdateGroup?.(json.group || json);
+      showToast(json.message || 'Member removed', 'success', 2000);
+    } catch (e) {
+      console.error('Failed to remove member', e);
+      showToast(e.message || 'Failed to remove member', 'error', 3000);
+    }
   };
 
   const handlePromoteToggle = (memberId) => {
@@ -109,11 +130,288 @@ const GroupInfoModalWhatsApp = ({
     const text = `Follow this link to join my chasmos group: ${link}`;
     try {
       await navigator.clipboard.writeText(text);
-      toast.success("Invite text copied to clipboard");
+      showToast("Invite text copied to clipboard", 'success', 2000);
     } catch (e) {
       console.error("Failed to copy invite text", e);
-      toast.error("Failed to copy invite link");
+      showToast("Failed to copy invite link", 'error', 3000);
     }
+  };
+
+  const updateSettingsOnServer = async (payload) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/api/group/update-settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || 'Failed to update settings');
+      onUpdateGroup?.(json.group || json);
+      // show toast success
+      showToast(json.message || 'Settings saved', 'success', 2000);
+      return json;
+    } catch (e) {
+      console.error('Failed to update group settings', e);
+      showToast(e.message || 'Failed to save', 'error', 3000);
+      return null;
+    }
+  };
+
+  const handleToggleInvite = async (val) => {
+    // Only update local state; save will persist when Save is clicked
+    setInviteEnabledState(!!val);
+  };
+
+  const handleTogglePermission = async (key, val) => {
+    // Only update local state; Save will persist
+    const next = { ...permissionsState, [key]: !!val };
+    setPermissionsState(next);
+  };
+
+  const handleToggleFeature = async (key, val) => {
+    // Only update local state; Save will persist
+    const next = { ...featuresState, [key]: !!val };
+    setFeaturesState(next);
+  };
+
+  const makeAdminOnServer = async (newAdminId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/api/group/make-admin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ groupId: effectiveGroup._id, newAdminId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || 'Failed to promote');
+      // Prefer backend-updated group when available
+      if (json.group) {
+        setFetchedGroup(json.group);
+        try { onUpdateGroup?.(json.group); } catch (e) { /* ignore */ }
+      } else {
+        // Backend didn't return full group — optimistically update local group state
+        setFetchedGroup(prev => {
+          const base = prev || group || {};
+          const existing = Array.isArray(base.members) ? base.members : (Array.isArray(base.participants) ? base.participants : []);
+          const updated = existing.map(m => {
+            const id = String(m._id || m.id || m);
+            if (id === String(newAdminId)) {
+              return { ...(typeof m === 'object' ? m : {}), isAdmin: true };
+            }
+            return m;
+          });
+          // ensure admins list contains the new admin id
+          const admins = Array.isArray(base.admins) ? Array.from(new Set([...base.admins, newAdminId])) : [newAdminId];
+          return { ...base, members: updated, participants: updated, admins };
+        });
+        try { onUpdateGroup?.({ ...(fetchedGroup || group || {}), admins: [ ...((fetchedGroup || group || {}).admins || []), newAdminId ] }); } catch (e) { /* ignore */ }
+      }
+      showToast(json.message || 'Member promoted', 'success', 2000);
+      return json;
+    } catch (e) {
+      console.error('Failed to promote member', e);
+      showToast(e.message || 'Failed to promote', 'error', 3000);
+      return null;
+    }
+  };
+
+  const [savingSettings, setSavingSettings] = useState(false);
+  
+  const [editingEnabled, setEditingEnabled] = useState(false);
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [availableUsers, setAvailableUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [addingUserId, setAddingUserId] = useState(null);
+  const [selectedAddIds, setSelectedAddIds] = useState([]);
+  const [addingMultiple, setAddingMultiple] = useState(false);
+  // Selected members to be promoted when Save is clicked
+  const [selectedPromoteIds, setSelectedPromoteIds] = useState([]);
+  // Selected members to be removed when Save is clicked
+  const [selectedRemoveIds, setSelectedRemoveIds] = useState([]);
+
+  const toggleSelectPromote = (memberId) => {
+    setSelectedPromoteIds((prev) => {
+      const s = new Set(prev || []);
+      if (s.has(memberId)) s.delete(memberId); else s.add(memberId);
+      return Array.from(s);
+    });
+  };
+  const toggleSelectRemove = (memberId) => {
+    setSelectedRemoveIds((prev) => {
+      const s = new Set(prev || []);
+      if (s.has(memberId)) s.delete(memberId); else s.add(memberId);
+      return Array.from(s);
+    });
+  };
+  const handleSaveAll = async () => {
+    try {
+      setSavingSettings(true);
+      const res = await updateSettingsOnServer({
+        groupId: effectiveGroup._id,
+        inviteEnabled: !!inviteEnabledState,
+        permissions: permissionsState,
+        features: featuresState,
+        promoteIds: Array.isArray(selectedPromoteIds) ? selectedPromoteIds : [],
+        removeIds: Array.isArray(selectedRemoveIds) ? selectedRemoveIds : [],
+      });
+      if (res) {
+        // clear selections after successful save
+        setSelectedPromoteIds([]);
+        setSelectedRemoveIds([]);
+        setEditingEnabled(false);
+      }
+      // toast handled by updateSettingsOnServer; ensure visible if not
+      showToast('Settings saved', 'success', 2000);
+    } catch (e) {
+      console.error('Save failed', e);
+      showToast('Failed to save settings', 'error', 3000);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleToggleEdit = () => {
+    // If we're turning off editing (Cancel), reset local state to group's current values
+    if (editingEnabled) {
+      setInviteEnabledState(Boolean(group.inviteEnabled));
+      setPermissionsState({
+        allowCreatorAdmin: group.permissions?.allowCreatorAdmin !== false,
+        allowOthersAdmin: group.permissions?.allowOthersAdmin === true,
+        allowMembersAdd: group.permissions?.allowMembersAdd !== false,
+      });
+      setFeaturesState({
+        media: group.features?.media !== false,
+        gallery: group.features?.gallery !== false,
+        docs: group.features?.docs !== false,
+        polls: group.features?.polls !== false,
+      });
+      setSelectedPromoteIds([]);
+      setSelectedRemoveIds([]);
+    }
+    setEditingEnabled(!editingEnabled);
+  };
+
+  // Load available users from backend and filter out current participants
+  const loadAvailableUsers = async () => {
+    try {
+      setLoadingUsers(true);
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/api/user`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const json = await res.json();
+      const all = Array.isArray(json) ? json : (json.users || []);
+      const participantIds = new Set((members || []).map(m => String(m._id || m.id || m)));
+      const filtered = all.filter(u => !participantIds.has(String(u._id || u.id || u)));
+      setAvailableUsers(filtered);
+        setSelectedAddIds([]);
+        setShowAddMemberModal(true);
+    } catch (e) {
+      console.error('Failed to load users', e);
+      showToast('Failed to load users', 'error', 3000);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  const handleAddMember = async (userId) => {
+    // single-user add kept for compatibility; delegates to batch handler
+    return handleAddSelected([userId]);
+  };
+
+  const toggleSelectAvailable = (userId) => {
+    setSelectedAddIds(prev => {
+      const s = new Set(prev || []);
+      if (s.has(String(userId))) s.delete(String(userId)); else s.add(String(userId));
+      return Array.from(s);
+    });
+  };
+
+  const handleAddSelected = async (ids) => {
+    const toAdd = Array.isArray(ids) ? ids : Array.from(selectedAddIds || []);
+    if (!toAdd || toAdd.length === 0) return showToast('Select at least one user', 'error', 2500);
+    setAddingMultiple(true);
+    const token = localStorage.getItem('token');
+    const successes = [];
+    const failures = [];
+    let lastGroup = null;
+    for (const uid of toAdd) {
+      try {
+        setAddingUserId(uid);
+        const res = await fetch(`${API_BASE_URL}/api/group/add-member`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ groupId: effectiveGroup._id, userId: uid }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          failures.push({ uid, message: json?.message || 'Failed to add' });
+        } else {
+          successes.push(String(uid));
+          lastGroup = json.group || json || lastGroup;
+        }
+      } catch (e) {
+        failures.push({ uid, message: e.message || String(e) });
+      } finally {
+        setAddingUserId(null);
+      }
+    }
+
+    setAddingMultiple(false);
+
+    if (successes.length) {
+      // If backend returned an updated group for any add, prefer that and update local state + parent
+      if (lastGroup) {
+        setFetchedGroup(lastGroup);
+        try { onUpdateGroup?.(lastGroup); } catch (e) { /* ignore */ }
+      } else {
+        // Backend didn't return the full group: merge added users from availableUsers into local fetched/group state
+        const addedUsersRaw = (availableUsers || []).filter(u => successes.includes(String(u._id || u.id || u)));
+        // Normalize fields to match members rendering expectations
+        const addedUsers = addedUsersRaw.map(u => ({
+          _id: u._id || u.id || u.userId || u.userID || u.idStr || null,
+          id: u._id || u.id || u.userId || u.userID || u.idStr || null,
+          name: u.name || u.username || u.displayName || u.fullName || u.firstName || 'Member',
+          username: u.username || u.email || u.phone || '',
+          email: u.email || '',
+          avatar: u.avatar || u.photo || u.picture || u.profilePic || '',
+        }));
+
+        setFetchedGroup(prev => {
+          const base = prev || group || {};
+          const existing = Array.isArray(base.members) ? base.members : (Array.isArray(base.participants) ? base.participants : []);
+          const merged = [...existing, ...addedUsers];
+          return { ...base, members: merged, participants: merged };
+        });
+
+        try {
+          onUpdateGroup?.({ ...(fetchedGroup || group || {}), members: [ ...((fetchedGroup || group || {}).members || []), ...addedUsers ] });
+        } catch (e) { /* ignore */ }
+      }
+
+      // remove added users from available list
+      setAvailableUsers(prev => prev ? prev.filter(u => !successes.includes(String(u._id || u.id || u))) : []);
+      setSelectedAddIds([]);
+      showToast(`${successes.length} member(s) added`, 'success', 2000);
+    }
+
+    if (failures.length) {
+      console.error('Some adds failed', failures);
+      showToast(`${failures.length} add(s) failed`, 'error', 4000);
+    }
+
+    // close modal if all succeeded
+    if (successes.length && failures.length === 0) setShowAddMemberModal(false);
   };
 
   // Determine theme mode based on document class (falls back to 'light')
@@ -175,6 +473,41 @@ const GroupInfoModalWhatsApp = ({
   const [forwardOpen, setForwardOpen] = useState(false);
   const [forwardMessage, setForwardMessage] = useState(null);
   const [recentChats, setRecentChats] = useState([]);
+
+  const [inviteEnabledState, setInviteEnabledState] = useState(Boolean(group?.inviteEnabled));
+  const [permissionsState, setPermissionsState] = useState({
+    allowCreatorAdmin: group?.permissions?.allowCreatorAdmin !== false,
+    allowOthersAdmin: group?.permissions?.allowOthersAdmin === true,
+    allowMembersAdd: group?.permissions?.allowMembersAdd !== false,
+  });
+  const [featuresState, setFeaturesState] = useState({
+    media: group.features?.media !== false,
+    gallery: group.features?.gallery !== false,
+    docs: group.features?.docs !== false,
+    polls: group.features?.polls !== false,
+  });
+
+  // Sync local toggle state when modal is opened or group changes
+  useEffect(() => {
+    setInviteEnabledState(Boolean(group.inviteEnabled));
+    setPermissionsState({
+      allowCreatorAdmin: group.permissions?.allowCreatorAdmin !== false,
+      allowOthersAdmin: group.permissions?.allowOthersAdmin === true,
+      allowMembersAdd: group.permissions?.allowMembersAdd !== false,
+    });
+    setFeaturesState({
+      media: group.features?.media !== false,
+      gallery: group.features?.gallery !== false,
+      docs: group.features?.docs !== false,
+      polls: group.features?.polls !== false,
+    });
+    // clear any previous promote selections when opening
+    setSelectedPromoteIds([]);
+    // clear any previous removal selections when opening
+    setSelectedRemoveIds([]);
+    // disable editing mode when reopening
+    setEditingEnabled(false);
+  }, [open, group]);
 
   useEffect(() => {
     if (!open) return;
@@ -293,6 +626,8 @@ const GroupInfoModalWhatsApp = ({
     return () => { cancelled = true; };
   }, [open, group.chat, group.chatId, group._id, group.id]);
 
+    if (!group && !fetchedGroup) return null;
+
   const downloadFile = async (url, filename) => {
     try {
       // Always fetch as blob first to ensure browser prompts a save
@@ -345,7 +680,7 @@ const GroupInfoModalWhatsApp = ({
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Failed to leave group');
 
-      toast.success(data.message || 'Left group');
+      showToast(data.message || 'Left group', 'success', 2000);
       // Inform parent to update UI if provided, else close modal
       if (onUpdateGroup) {
         try {
@@ -358,7 +693,7 @@ const GroupInfoModalWhatsApp = ({
       onClose && onClose();
     } catch (error) {
       console.error('Failed to leave group:', error);
-      toast.error(error.message || 'Failed to leave group. Please try again.');
+      showToast(error.message || 'Failed to leave group. Please try again.', 'error', 3000);
     }
     setShowLeaveConfirm(false);
   };
@@ -417,16 +752,46 @@ const GroupInfoModalWhatsApp = ({
               <h2 className={`${styles.titleText} font-semibold text-lg`}>{effectiveGroup.name}</h2>
             </div>
 
-            {/* Right: close button */}
-            <div className="relative z-30">
-              <button onClick={onClose} className={`p-2 rounded transition group ${themeMode === 'dark' ? 'hover:bg-gray-800' : 'hover:bg-red-600'}`}>
-                <X className={`${styles.titleText} w-6 h-6 group-hover:text-white`} />
-              </button>
+            {/* Right: save + close buttons (edit controls only visible to admins) */}
+            <div className="relative z-30 flex items-center space-x-2">
+              {isAdmin && (
+                <>
+                  <button
+                    onClick={handleToggleEdit}
+                    className={`px-3 py-1 rounded text-sm font-medium ${editingEnabled ? 'bg-yellow-500 text-white' : (themeMode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800')}`}
+                  >
+                    {editingEnabled ? 'Cancel' : 'Edit'}
+                  </button>
+
+                  <button
+                    onClick={handleSaveAll}
+                    disabled={!editingEnabled || savingSettings}
+                    className={`px-3 py-1 rounded text-sm font-medium ${(!editingEnabled || savingSettings) ? 'opacity-60 cursor-not-allowed' : ''} ${themeMode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800'}`}
+                  >
+                    {savingSettings ? 'Saving...' : 'Save'}
+                  </button>
+                </>
+              )}
+
+              <div>
+                <button onClick={onClose} className={`p-2 rounded transition group ${themeMode === 'dark' ? 'hover:bg-gray-800' : 'hover:bg-red-600'}`}>
+                  <X className={`${styles.titleText} w-6 h-6 group-hover:text-white`} />
+                </button>
+              </div>
             </div>
           </div>
 
           {/* ================= BODY ================= */}
           <div className="relative z-10 flex-1 overflow-y-auto p-5 space-y-6">
+
+            {/* Toast */}
+            {toast?.show && (
+              <div className="fixed right-6 bottom-6 z-[30000]">
+                <div className={`px-4 py-2 rounded shadow-md ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'} text-white text-sm`}>
+                  {toast.message}
+                </div>
+              </div>
+            )}
 
             {/* ================= DESCRIPTION ================= */}
             {effectiveGroup.description && (
@@ -438,7 +803,26 @@ const GroupInfoModalWhatsApp = ({
             )}
 
             {/* ================= MEMBERS ================= */}
-            <Section title={`Members (${members.length})`}>
+            <Section>
+              <div className="flex items-center justify-between">
+                <h4 className={`${styles.titleText} font-semibold text-base mb-3`}>{`Members (${members.length})`}</h4>
+                {(isAdmin || permissionsState?.allowMembersAdd) && (
+                  <div>
+                    <button
+                      onClick={async () => { await loadAvailableUsers?.(); }}
+                      className={`px-3 py-1 rounded text-sm font-medium ${themeMode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800'}`}
+                    >
+                      Add Member
+                    </button>
+                  </div>
+                )}
+              </div>
+              {permissionsState.allowOthersAdmin && (
+                <div className={`rounded-xl p-3 ${styles.sectionBg} ${styles.cardHover}`}>
+                  <div className={`${styles.titleText} text-sm font-medium`}>Creator is admin by default</div>
+                  <div className={`text-xs ${styles.subText} mt-1`}>Promote members to admin in the members list below.</div>
+                </div>
+              )}
               {members.map((member) => {
                 const memberId = member.id || member._id;
                 const me = memberId?.toString() === currentUserId?.toString();
@@ -468,31 +852,51 @@ const GroupInfoModalWhatsApp = ({
 
                       <div>
                         <div className="flex gap-2 items-center flex-wrap">
-                            <span className={`${styles.titleText} text-sm font-medium`}>{member.name}</span>
+                          <span className={`${styles.titleText} text-sm font-medium`}>
+                            {member.name}
+                            {me && (
+                              <span className={`${styles.subText} text-xs ml-1`}>
+                                (You)
+                              </span>
+                            )}
+                          </span>
 
                           {isMemberCreator && Badge("Creator", "purple")}
                           {isMemberAdmin && !isMemberCreator && Badge("Admin", "blue")}
-                          {me && Badge("You", "gray")}
                         </div>
 
                         <p className={`text-xs ${styles.subText} mt-0.5`}>{member.username || member.email || "Member"}</p>
                       </div>
                     </div>
 
-                    {(isAdmin || isCreator) && !isMemberCreator && !me && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handlePromoteToggle(memberId)}
-                          className="text-xs px-3 py-1.5 bg-gray-800 text-blue-400 rounded hover:bg-gray-700 transition"
-                        >
-                          {isMemberAdmin ? "Demote" : "Make Admin"}
-                        </button>
+                    {/* Actions: promote checkbox when allowed, remove if admin */}
+                    {!isMemberCreator && !me && isAdmin && (
+                      <div className="flex gap-2 items-center">
+                        {permissionsState.allowOthersAdmin ? (
+                          isMemberAdmin ? null : (
+                            <button
+                              type="button"
+                              onClick={() => { if (editingEnabled) toggleSelectPromote(String(memberId)); }}
+                              disabled={!editingEnabled}
+                              aria-pressed={selectedPromoteIds.includes(String(memberId))}
+                              title={selectedPromoteIds.includes(String(memberId)) ? 'Selected for promotion' : (editingEnabled ? 'Promote as admin' : 'Enable Edit to promote')}
+                              aria-label={selectedPromoteIds.includes(String(memberId)) ? 'Selected for promotion' : 'Promote as admin'}
+                              className={`w-8 h-8 rounded-full flex items-center justify-center border transition ${!editingEnabled ? 'opacity-50 cursor-not-allowed' : ''} ${selectedPromoteIds.includes(String(memberId)) ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-gray-300 text-gray-600'}`}
+                            >
+                              {selectedPromoteIds.includes(String(memberId)) ? '✓' : '+'}
+                            </button>
+                          )
+                        ) : null}
 
                         <button
-                          onClick={() => handleRemoveMember(memberId)}
-                          className="text-xs px-3 py-1.5 bg-gray-800 text-red-500 rounded hover:bg-gray-700 transition"
+                          type="button"
+                          onClick={() => toggleSelectRemove(String(memberId))}
+                          disabled={!editingEnabled}
+                          aria-pressed={selectedRemoveIds.includes(String(memberId))}
+                          title={selectedRemoveIds.includes(String(memberId)) ? 'Marked for removal' : (editingEnabled ? (isAdmin ? 'Mark for removal' : 'You are not an admin') : 'Enable Edit to remove')}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition ${!editingEnabled ? 'opacity-50 cursor-not-allowed bg-gray-200 text-gray-400' : ''} ${selectedRemoveIds.includes(String(memberId)) ? 'bg-red-600 text-white' : (isAdmin ? 'bg-yellow-400 text-yellow-800' : 'bg-yellow-400 text-white')}`}
                         >
-                          Remove
+                          <Trash className={`${selectedRemoveIds.includes(String(memberId)) ? 'w-4 h-4 text-white' : 'w-4 h-4 text-yellow-800'}`} />
                         </button>
                       </div>
                     )}
@@ -508,13 +912,23 @@ const GroupInfoModalWhatsApp = ({
                   <div>
                     <span className={`${styles.titleText} text-sm font-medium block`}>Invite via link</span>
                         <span className={`text-xs ${styles.subText} mt-1 block`}>
-                      {effectiveGroup.inviteEnabled ? "Members can join using the invite link" : "Invite link is currently disabled"}
+                      {(editingEnabled ? inviteEnabledState : effectiveGroup.inviteEnabled) ? "Members can join using the invite link" : "Invite link is currently disabled"}
                     </span>
                   </div>
-                  <StatusBadge enabled={effectiveGroup.inviteEnabled} />
+                  {isAdmin ? (
+                    <label className={`relative inline-flex items-center ${editingEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                      <input disabled={!editingEnabled} type="checkbox" className="sr-only peer" checked={inviteEnabledState} onChange={(e) => handleToggleInvite(e.target.checked)} />
+                      <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-blue-600 transition" />
+                      <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full peer-checked:translate-x-5 transition" />
+                    </label>
+                  ) : (
+                    <div className="flex items-center">
+                      <StatusBadge enabled={(effectiveGroup.inviteEnabled === undefined) ? Boolean(inviteEnabledState) : Boolean(effectiveGroup.inviteEnabled)} />
+                    </div>
+                  )}
                 </div>
 
-                {effectiveGroup.inviteEnabled && (
+                {(editingEnabled ? inviteEnabledState : effectiveGroup.inviteEnabled) && (
                   <div className="w-full mt-2 text-sm grid grid-cols-2 gap-2">
                     <button
                       onClick={handleCopyInvite}
@@ -526,7 +940,7 @@ const GroupInfoModalWhatsApp = ({
                     <button
                       onClick={() => {
                         const link = effectiveGroup.inviteLink || settings.inviteLink || "";
-                        if (!link) return toast.error('No invite link available');
+                        if (!link) return showToast('No invite link available', 'error', 2500);
                         const msg = `Follow this link to join my chasmos group: ${link}`;
                         setForwardMessage({ content: msg });
                         setForwardOpen(true);
@@ -542,53 +956,114 @@ const GroupInfoModalWhatsApp = ({
 
             {/* ================= PERMISSIONS ================= */}
             <Section title="Permissions">
-              <PermissionRow
-                label="Creator is Admin"
-                description="Group creator has admin privileges"
-                enabled={permissions.allowCreatorAdmin}
-              />
-              <PermissionRow
-                label="Allow Others as Admins"
-                description="Members can be promoted to admin"
-                enabled={permissions.allowOthersAdmin}
-              />
-              <PermissionRow
-                label="Members Can Add Users"
-                description="Any member can invite new people"
-                enabled={permissions.allowMembersAdd}
-              />
+              <div className={`${styles.sectionBg} rounded-xl p-4 space-y-3`}>
+                {(() => {
+                  const isPrimaryAdmin = String(effectiveGroup.admin?._id || effectiveGroup.admin || '') === String(currentUserId || '');
+                  if (!isPrimaryAdmin) return null;
+                  return (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className={`${styles.titleText} text-sm font-medium`}>Allow Others as Admins</div>
+                        <div className={`text-xs ${styles.subText}`}>Members can be promoted to admin</div>
+                      </div>
+                      {isAdmin ? (
+                        <label className={`relative inline-flex items-center ${editingEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                          <input disabled={!editingEnabled} type="checkbox" className="sr-only peer" checked={permissionsState.allowOthersAdmin} onChange={(e) => handleTogglePermission('allowOthersAdmin', e.target.checked)} />
+                          <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-blue-600 transition" />
+                          <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full peer-checked:translate-x-5 transition" />
+                        </label>
+                      ) : (
+                        <StatusBadge enabled={effectiveGroup.permissions?.allowOthersAdmin !== false} />
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className={`${styles.titleText} text-sm font-medium`}>Members Can Add Users</div>
+                    <div className={`text-xs ${styles.subText}`}>Any member can invite new people</div>
+                  </div>
+                  {isAdmin ? (
+                    <label className={`relative inline-flex items-center ${editingEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                      <input disabled={!editingEnabled} type="checkbox" className="sr-only peer" checked={permissionsState.allowMembersAdd} onChange={(e) => handleTogglePermission('allowMembersAdd', e.target.checked)} />
+                      <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-blue-600 transition" />
+                      <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full peer-checked:translate-x-5 transition" />
+                    </label>
+                  ) : (
+                    <StatusBadge enabled={effectiveGroup.permissions?.allowMembersAdd !== false} />
+                  )}
+                </div>
+              </div>
             </Section>
 
             {/* ================= FEATURES ================= */}
             <Section title="Group Features">
-              <FeatureRow
-                icon={Image}
-                label="Media Sharing"
-                description="Send photos and videos"
-                enabled={features.media}
-                color="blue"
-              />
-              <FeatureRow
-                icon={Image}
-                label="Gallery View"
-                description="View all shared media"
-                enabled={features.gallery}
-                color="purple"
-              />
-              <FeatureRow
-                icon={FileText}
-                label="Document Sharing"
-                description="Share files and documents"
-                enabled={features.docs}
-                color="green"
-              />
-              <FeatureRow
-                icon={FileText}
-                label="Polls"
-                description="Create and vote on polls"
-                enabled={features.polls}
-                color="orange"
-              />
+              <div className="space-y-3">
+                <div className={`${styles.sectionBg} rounded-xl p-4 flex items-center justify-between`}>
+                  <div>
+                    <div className={`${styles.titleText} text-sm font-medium`}>Media Sharing</div>
+                    <div className={`text-xs ${styles.subText}`}>Send photos and videos</div>
+                  </div>
+                  {isAdmin ? (
+                    <label className={`relative inline-flex items-center ${editingEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                      <input disabled={!editingEnabled} type="checkbox" className="sr-only peer" checked={featuresState.media} onChange={(e) => handleToggleFeature('media', e.target.checked)} />
+                      <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-blue-600 transition" />
+                      <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full peer-checked:translate-x-5 transition" />
+                    </label>
+                  ) : (
+                    <StatusBadge enabled={effectiveGroup.features?.media !== false} />
+                  )}
+                </div>
+
+                <div className={`${styles.sectionBg} rounded-xl p-4 flex items-center justify-between`}>
+                  <div>
+                    <div className={`${styles.titleText} text-sm font-medium`}>Gallery View</div>
+                    <div className={`text-xs ${styles.subText}`}>View all shared media</div>
+                  </div>
+                  {isAdmin ? (
+                    <label className={`relative inline-flex items-center ${editingEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                      <input disabled={!editingEnabled} type="checkbox" className="sr-only peer" checked={featuresState.gallery} onChange={(e) => handleToggleFeature('gallery', e.target.checked)} />
+                      <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-blue-600 transition" />
+                      <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full peer-checked:translate-x-5 transition" />
+                    </label>
+                  ) : (
+                    <StatusBadge enabled={effectiveGroup.features?.gallery !== false} />
+                  )}
+                </div>
+
+                <div className={`${styles.sectionBg} rounded-xl p-4 flex items-center justify-between`}>
+                  <div>
+                    <div className={`${styles.titleText} text-sm font-medium`}>Document Sharing</div>
+                    <div className={`text-xs ${styles.subText}`}>Share files and documents</div>
+                  </div>
+                  {isAdmin ? (
+                    <label className={`relative inline-flex items-center ${editingEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                      <input disabled={!editingEnabled} type="checkbox" className="sr-only peer" checked={featuresState.docs} onChange={(e) => handleToggleFeature('docs', e.target.checked)} />
+                      <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-blue-600 transition" />
+                      <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full peer-checked:translate-x-5 transition" />
+                    </label>
+                  ) : (
+                    <StatusBadge enabled={effectiveGroup.features?.docs !== false} />
+                  )}
+                </div>
+
+                <div className={`${styles.sectionBg} rounded-xl p-4 flex items-center justify-between`}>
+                  <div>
+                    <div className={`${styles.titleText} text-sm font-medium`}>Polls</div>
+                    <div className={`text-xs ${styles.subText}`}>Create and vote on polls</div>
+                  </div>
+                  {isAdmin ? (
+                    <label className={`relative inline-flex items-center ${editingEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                      <input disabled={!editingEnabled} type="checkbox" className="sr-only peer" checked={featuresState.polls} onChange={(e) => handleToggleFeature('polls', e.target.checked)} />
+                      <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-blue-600 transition" />
+                      <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full peer-checked:translate-x-5 transition" />
+                    </label>
+                  ) : (
+                    <StatusBadge enabled={effectiveGroup.features?.polls !== false} />
+                  )}
+                </div>
+              </div>
             </Section>
 
             {/* ================= MEDIA TABS ================= */}
@@ -714,7 +1189,7 @@ const GroupInfoModalWhatsApp = ({
 
             {/* ================= ACTIONS ================= */}
             <Section title="Actions">
-  {!isCreator && (
+
     <>
       <ActionButton 
         icon={LogOut} 
@@ -750,7 +1225,7 @@ const GroupInfoModalWhatsApp = ({
         )}
       </AnimatePresence>
     </>
-  )}
+ 
 </Section>
           </div>
 
@@ -759,7 +1234,7 @@ const GroupInfoModalWhatsApp = ({
             isOpen={forwardOpen}
             onClose={() => setForwardOpen(false)}
             onForward={async (selectedChats, payload) => {
-              if (!selectedChats || selectedChats.length === 0) return toast.error('Select at least one chat');
+              if (!selectedChats || selectedChats.length === 0) return showToast('Select at least one chat', 'error', 2500);
               try {
                 const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
                 for (const chat of selectedChats) {
@@ -780,7 +1255,7 @@ const GroupInfoModalWhatsApp = ({
                     body: JSON.stringify(forwardData),
                   });
                 }
-                toast.success('Forward sent');
+                showToast('Forward sent', 'success', 2000);
                 setForwardOpen(false);
                 try {
                   const forwardedIds = (selectedChats || []).map(c => c.chatId || c._id || c.id).filter(Boolean);
@@ -792,7 +1267,7 @@ const GroupInfoModalWhatsApp = ({
                 }
               } catch (e) {
                 console.error('Forward failed', e);
-                toast.error('Failed to forward message');
+                showToast('Failed to forward message', 'error', 3000);
               }
             }}
             contacts={recentChats}
@@ -810,6 +1285,83 @@ const GroupInfoModalWhatsApp = ({
             message={forwardMessage}
             setMessage={setForwardMessage}
           />
+
+          {/* Add Member Modal */}
+          <AnimatePresence>
+            {showAddMemberModal && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[21500] flex items-center justify-center"
+              >
+                <div className={`absolute inset-0 ${modalOverlayClass}`} onClick={() => setShowAddMemberModal(false)} />
+                <motion.div
+                  initial={{ scale: 0.98, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.98, opacity: 0 }}
+                  className={`relative z-10 w-full max-w-xl rounded-xl p-4 ${modalContainerBgClass} shadow-lg`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className={`${modalTitleClass} text-lg font-semibold`}>Add members</h3>
+                    <div className="flex items-center gap-2">
+                      <div className={`text-sm ${styles.subText} mr-2 hidden sm:block`}>{selectedAddIds.length} selected</div>
+                      <button
+                        onClick={() => handleAddSelected()}
+                        disabled={addingMultiple || selectedAddIds.length === 0}
+                        className={`px-3 py-1 rounded text-sm font-medium ${addingMultiple || selectedAddIds.length === 0 ? 'opacity-60 cursor-not-allowed' : (themeMode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800')}`}
+                      >
+                        {addingMultiple ? 'Adding...' : 'Add Selected'}
+                      </button>
+                      <button onClick={() => setShowAddMemberModal(false)} className="p-2 rounded hover:bg-gray-100">
+                        <X className={`${modalTitleClass} w-5 h-5`} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+                    {loadingUsers && (
+                      <div className="text-sm text-gray-500">Loading users...</div>
+                    )}
+
+                    {!loadingUsers && availableUsers.length === 0 && (
+                      <div className="text-sm text-gray-500">No available users to add</div>
+                    )}
+
+                    {!loadingUsers && availableUsers.map((u) => {
+                      const uid = u._id || u.id || u.userId || '';
+                      return (
+                        <div key={uid} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-full ${styles.avatarBg} flex items-center justify-center overflow-hidden`}>
+                              {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover rounded-full" /> : <span className={`${styles.titleText}`}>{String(u.name || u.username || 'U').charAt(0)}</span>}
+                            </div>
+                            <div>
+                              <div className={`${styles.titleText} text-sm font-medium`}>{u.name || u.username || uid}</div>
+                              <div className={`text-xs ${styles.subText}`}>{u.email || u.phone || ''}</div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="inline-flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={selectedAddIds.includes(String(uid))}
+                                onChange={() => toggleSelectAvailable(uid)}
+                                className="form-checkbox h-4 w-4 mr-2"
+                              />
+                              
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
         </motion.div>
       )}

@@ -116,6 +116,20 @@ export const fetchChats = asyncHandler(async (req, res) => {
       select: "name avatar email",
     });
 
+    // Preload Group documents linked to these chats so frontend can access group.features
+    const chatIds = (Array.isArray(populatedResults) ? populatedResults : []).map(c => c._id).filter(Boolean);
+    let groupsByChat = {};
+    if (chatIds.length) {
+      try {
+        const groups = await Group.find({ chat: { $in: chatIds } }).lean();
+        for (const g of groups) {
+          if (g && g.chat) groupsByChat[String(g.chat)] = g;
+        }
+      } catch (e) {
+        console.warn('[fetchChats] failed to preload groups:', e && e.message);
+      }
+    }
+
     // For each chat compute unreadCount for the current user (exclude system messages)
     const resultsWithUnread = [];
     for (const chat of (Array.isArray(populatedResults) ? populatedResults : [])) {
@@ -147,6 +161,14 @@ export const fetchChats = asyncHandler(async (req, res) => {
 
         // attach unreadCount to the chat object (lean/POJO safe)
         const chatObj = (chat && chat.toObject && typeof chat.toObject === 'function') ? chat.toObject() : { ...chat };
+        // If a Group doc exists for this chat, attach it and mirror feature flags into groupSettings
+        const maybeGroup = groupsByChat && groupsByChat[String(chatObj._id)];
+        if (maybeGroup) {
+          chatObj.group = maybeGroup;
+          chatObj.features = maybeGroup.features || chatObj.features || {};
+          chatObj.groupSettings = chatObj.groupSettings || {};
+          chatObj.groupSettings.features = maybeGroup.features || chatObj.groupSettings.features || {};
+        }
         chatObj.unreadCount = unreadCount || 0;
         // ensure frontend has a stable `name` field
         chatObj.name = chatObj.chatName || chatObj.name || (chatObj.groupSettings && chatObj.groupSettings.name) || (chatObj.users && chatObj.users[0] && (chatObj.users[0].name || chatObj.users[0].email)) || "";

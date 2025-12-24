@@ -1797,6 +1797,20 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Normalize contact objects before selecting so downstream components
+  // (like MessageInput) always receive `groupSettings` and `features`.
+  const normalizeContact = (c) => {
+    if (!c || typeof c !== 'object') return c;
+    const out = { ...c };
+    // Prefer explicit groupSettings from chat, then linked group.features, then top-level features
+    out.groupSettings = out.groupSettings || out.group || out.chat || {};
+    // If group contains features, surface them consistently
+    out.features = out.features || (out.group && out.group.features) || (out.groupSettings && out.groupSettings.features) || {};
+    // Ensure groupSettings.features exists
+    out.groupSettings = { ...(out.groupSettings || {}), features: out.features };
+    return out;
+  };
+
   // Listen for Google sync messages from the OAuth popup and react accordingly.
   React.useEffect(() => {
     const handler = (e) => {
@@ -3475,7 +3489,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
         };
 
         console.log('📝 Created contactForUI from archive:', contactForUI, 'from chat:', chat);
-        setSelectedContact(contactForUI);
+          setSelectedContact(normalizeContact(contactForUI));
 
         // Join socket room for real-time updates
         if (socketRef.current && socketRef.current.emit) {
@@ -3535,7 +3549,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
       } catch (err) {
         console.error('Failed to open archived chat', err);
         // fallback: just close modal and set selected contact minimally
-        setSelectedContact({ id: chat._id || chat.id, name: chat.name || 'Chat' });
+        setSelectedContact(normalizeContact({ id: chat._id || chat.id, name: chat.name || 'Chat' }));
         setShowArchiveModal(false);
       }
     })();
@@ -3667,7 +3681,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
         const token = localStorage.getItem("token") || localStorage.getItem("chasmos_auth_token");
         if (!token) {
           console.error("No token found — cannot access chat");
-          setSelectedContact(chat);
+          setSelectedContact(normalizeContact(chat));
           return;
         }
 
@@ -3698,7 +3712,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
           };
 
           console.log('📝 Created contactForUI from existing chat:', contactForUI, 'from chat:', chat);
-          setSelectedContact(contactForUI);
+          setSelectedContact(normalizeContact(contactForUI));
 
           // Clear unread count for this chat
           setRecentChats((prev) => 
@@ -3779,7 +3793,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
             isAcceptedRequest: true, // Flag to indicate this needs chat creation
           };
 
-          setSelectedContact(contactForUI);
+          setSelectedContact(normalizeContact(contactForUI));
           setMessages((prev) => ({ ...prev, [userId]: [] })); // Empty messages
           return;
         }
@@ -3798,7 +3812,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
 
         if (!res.ok) {
           console.error("Failed to access chat");
-          setSelectedContact(chat);
+          setSelectedContact(normalizeContact(chat));
           return;
         }
 
@@ -3820,7 +3834,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
           isGroup: chatObj.isGroupChat || false,
         };
 
-        setSelectedContact(contactForUI);
+        setSelectedContact(normalizeContact(contactForUI));
 
         // Clear unread count for this chat
         setRecentChats((prev) => 
@@ -3892,7 +3906,7 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
         }
       } catch (err) {
         console.error("Error opening chat:", err);
-        setSelectedContact(chat);
+        setSelectedContact(normalizeContact(chat));
       }
     })();
   };
@@ -4055,7 +4069,7 @@ const handleRejectChat = async (email) => {
   const handleContactSelect = useCallback(
     (contact) => {
       // Set selected contact
-      setSelectedContact(contact);
+      setSelectedContact(normalizeContact(contact));
 
       // Mark messages as read
       setContacts((prev) =>
@@ -5725,11 +5739,25 @@ const handleSendMessageFromInput = useCallback(
             `📎 ${formatted.attachments[0]?.fileName || 'Attachment'}` : 
             'New message');
 
-        // Check if message is for current open chat
-        const isCurrentChat = selectedContact && (
-          String(selectedContact.id) === String(key) || 
-          String(selectedContact.chatId) === String(key)
-        );
+        // Check if message is for current open chat (robust match across possible id fields)
+        const selectedIds = [];
+        if (selectedContact) {
+          if (selectedContact.id) selectedIds.push(String(selectedContact.id));
+          if (selectedContact.chatId) selectedIds.push(String(selectedContact.chatId));
+          if (selectedContact._id) selectedIds.push(String(selectedContact._id));
+          if (selectedContact.groupId) selectedIds.push(String(selectedContact.groupId));
+          if (selectedContact.group && selectedContact.group._id) selectedIds.push(String(selectedContact.group._id));
+        }
+        const messageChatIds = [];
+        if (newMessage.chat) {
+          if (typeof newMessage.chat === 'string') messageChatIds.push(String(newMessage.chat));
+          else if (newMessage.chat._id) messageChatIds.push(String(newMessage.chat._id));
+          else if (newMessage.chat.id) messageChatIds.push(String(newMessage.chat.id));
+        }
+        // also include computed key for comparison
+        if (key) messageChatIds.push(String(key));
+
+        const isCurrentChat = selectedContact && messageChatIds.some(id => selectedIds.includes(id));
 
         console.log('🔍 Notification check:', {
           isCurrentChat,
@@ -5855,6 +5883,9 @@ const handleSendMessageFromInput = useCallback(
           }
         };
 
+        // Choose a consistent key to append messages to the active chat when open
+        const appendKey = (isCurrentChat && selectedContact) ? String(selectedContact.chatId || selectedContact.id || key) : key;
+
         // If any repliedTo item lacks populated sender object, try to backfill from server
         (async () => {
           let finalReplied = formatted.repliedTo || [];
@@ -5868,7 +5899,7 @@ const handleSendMessageFromInput = useCallback(
           }
 
           setMessages((prev) => {
-            const existing = prev?.[key] || [];
+            const existing = prev?.[appendKey] || [];
             const alreadyHas = existing.some(m => String(m.id || m._id) === String(formatted.id));
             if (alreadyHas) {
               return prev;
@@ -5877,7 +5908,7 @@ const handleSendMessageFromInput = useCallback(
             const filtered = filterDuplicateSystemMessages(updatedMessages);
             return {
               ...prev,
-              [key]: filtered,
+              [appendKey]: filtered,
             };
           });
         })();
@@ -5940,11 +5971,11 @@ const handleSendMessageFromInput = useCallback(
             } catch (e) { console.error('Error emitting message-read', e); }
 
             setMessages((prev) => {
-              const chatMessages = prev[key] || [];
+              const chatMessages = prev[appendKey] || [];
               const updatedMessages = chatMessages.map(m => 
                 String(m.id) === String(formatted.id) ? { ...m, status: 'read' } : m
               );
-              return { ...prev, [key]: updatedMessages };
+              return { ...prev, [appendKey]: updatedMessages };
             });
           }
         }
@@ -6921,7 +6952,7 @@ const handleCreateGroup = useCallback(() => {
     setShowGroupCreation(false);
 
     // Select the new group and ensure messages map exists
-    setSelectedContact(formatted);
+    setSelectedContact(normalizeContact(formatted));
     setMessages((prev) => ({ ...(prev || {}), [chatId]: prev?.[chatId] || [] }));
 
     // Join socket room for real-time updates
@@ -6936,7 +6967,7 @@ const handleCreateGroup = useCallback(() => {
 
   const handleStartNewChat = useCallback(
     async (contact) => {
-      setSelectedContact(contact);
+      setSelectedContact(normalizeContact(contact));
       setShowNewChat(false);
 
       // If contact has a chatId or id (existing chat), fetch messages
@@ -8985,7 +9016,7 @@ useEffect(() => {
       open={showGroupInfoModal}
       onClose={handleCloseGroupInfo}
       group={currentGroup}
-      currentUserId={localStorage.getItem("userId")}
+      currentUserId={(() => { try { return JSON.parse(localStorage.getItem('chasmos_user_data')||'{}')._id || JSON.parse(localStorage.getItem('chasmos_user_data')||'{}').id || null; } catch(e){ return null; } })()}
       onUpdateGroup={(updated) => setCurrentGroup(updated)}
       onDeleteGroup={(groupId) => {
         console.log("Group deleted:", groupId);
