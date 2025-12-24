@@ -132,20 +132,24 @@ export const createGroup = async (req, res) => {
     // Ensure the related Chat document has matching groupSettings (invite link, allowInvites, avatar, description)
     try {
       const maxMembers = 100;
-      await Chat.findByIdAndUpdate(
-        chat._id,
-        {
-          $set: {
-            'groupSettings.inviteLink': finalInviteLink || null,
-            'groupSettings.allowInvites': inviteEnabledBool === true,
-            'groupSettings.avatar': avatarUrl || null,
-            'groupSettings.description': description || '',
-            'groupSettings.isPublic': Boolean(isPublic),
-            'groupSettings.maxMembers': maxMembers,
-          },
-        },
-        { new: true }
-      );
+      const setObj = {
+        'groupSettings.allowInvites': inviteEnabledBool === true,
+        'groupSettings.avatar': avatarUrl || null,
+        'groupSettings.description': description || '',
+        'groupSettings.isPublic': Boolean(isPublic),
+        'groupSettings.maxMembers': maxMembers,
+      };
+      const unsetObj = {};
+      if (finalInviteLink) setObj['groupSettings.inviteLink'] = finalInviteLink;
+      else unsetObj['groupSettings.inviteLink'] = "";
+
+      const updateObj = {};
+      if (Object.keys(setObj).length) updateObj.$set = setObj;
+      if (Object.keys(unsetObj).length) updateObj.$unset = unsetObj;
+
+      if (Object.keys(updateObj).length) {
+        await Chat.findByIdAndUpdate(chat._id, updateObj, { new: true });
+      }
     } catch (e) {
       console.warn('Failed to update Chat.groupSettings after group creation:', e && e.message);
     }
@@ -259,9 +263,15 @@ export const joinGroupByInviteLink = async (req, res) => {
     group.participants.push(userId);
     await group.save();
 
-    await Chat.findByIdAndUpdate(group.chat, {
-      $push: { participants: userId },
-    });
+    // Ensure both participants and users arrays on Chat are updated (keep in sync)
+    try {
+      await Chat.findByIdAndUpdate(group.chat, {
+        $addToSet: { participants: userId, users: userId },
+      });
+    } catch (e) {
+      // fallback to push if addToSet fails for any reason
+      try { await Chat.findByIdAndUpdate(group.chat, { $push: { participants: userId } }); } catch (ee) {}
+    }
 
     // Create a system message announcing the join and emit to chat participants
     try {
@@ -279,7 +289,8 @@ export const joinGroupByInviteLink = async (req, res) => {
         .populate('sender', 'name avatar email')
         .populate('attachments')
         .populate('chat');
-
+      // mark system message so clients skip using it as recent-chat preview
+      populated.skipPreview = true;
       try {
         const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
         const io = getSocketIOInstance();
@@ -352,11 +363,16 @@ export const regenerateLink = async (req, res) => {
     if (!group.admin || String(group.admin) !== String(userId))
       return err(res, "Only admin can regenerate link", 403);
 
-    const newLink = crypto.randomBytes(16).toString("hex");
+    // Build a full invite URL similar to group creation flow
+    const token = crypto.randomBytes(16).toString("hex");
+    const newLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/invite/group-${token}`;
     group.inviteLink = newLink;
+    // Ensure invite is enabled when regenerating a link
+    group.inviteEnabled = true;
     await group.save();
 
-    return ok(res, { inviteLink: newLink });
+    // Return both inviteLink and updated group for frontend convenience
+    return ok(res, { inviteLink: newLink, group });
   } catch (error) {
     err(res, error.message, 500);
   }
@@ -383,38 +399,21 @@ export const addMember = async (req, res) => {
       $push: { participants: userId },
     });
 
-    // Create a personal system message notifying the added user that
-    // they were added to the group. Ensure a 1:1 Chat exists between
-    // the actor (req.user) and the added user, then create a 'system'
-    // message in that personal room and emit socket events so the
-    // frontend displays it in the added user's personal chat.
+    // Create a system message in the GROUP chat announcing the addition
+    // and emit it to the group room and each participant so the messages
+    // area updates immediately for all users.
     try {
       const actorId = req.user._id;
       const actor = await User.findById(actorId).select('name avatar');
       const addedUser = await User.findById(userId).select('name avatar');
 
-      // Find or create a personal (non-group) chat between actor and added user
-      let personalChat = await Chat.findOne({
-        isGroupChat: false,
-        participants: { $all: [actorId, userId] }
-      });
-
-      if (!personalChat) {
-        personalChat = await Chat.create({
-          chatName: 'private',
-          isGroupChat: false,
-          users: [actorId, userId],
-          participants: [actorId, userId]
-        });
-      }
-
-      const msgContent = `${actor?.name || 'A user'} added ${addedUser?.name || 'a user'} to the group ${group.name}`;
+      const msgContent = `${actor?.name || 'A user'} added ${addedUser?.name || 'a user'}`;
 
       const created = await Message.create({
         sender: actorId,
         content: msgContent,
         type: 'system',
-        chat: personalChat._id,
+        chat: group.chat,
       });
 
       const populated = await Message.findById(created._id)
@@ -425,16 +424,49 @@ export const addMember = async (req, res) => {
       try {
         const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
         const io = getSocketIOInstance();
-        if (io) {
-          // emit to the personal chat room and directly to the user socket
-          io.to(String(personalChat._id)).emit('message recieved', populated);
-          try { io.to(String(userId)).emit('message recieved', populated); } catch (e) {}
+          if (io && group && group.chat) {
+          // mark this system message so clients can skip updating previews
+          populated.skipPreview = true;
+          // Emit to the chat room so everyone in the group receives it
+          io.to(String(group.chat)).emit('message recieved', populated);
+
+          // Also emit directly to each participant socket to ensure presence in personal views
+          const users = (group.participants && group.participants.length) ? group.participants : [];
+          users.forEach(u => {
+            try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
+          });
         }
       } catch (e) {
-        console.warn('addMember: failed to emit personal system message', e && e.message);
+        console.warn('addMember: failed to emit group system message', e && e.message);
       }
     } catch (e) {
-      console.warn('addMember: failed to create personal system message', e && e.message);
+      console.warn('addMember: failed to create group system message', e && e.message);
+    }
+
+    // Emit an "added to group" event specifically to the newly added user
+    try {
+      const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+      const io = getSocketIOInstance();
+      if (io) {
+        const chat = await Chat.findById(group.chat).lean();
+        const payload = {
+          _id: group._id,
+          id: group._id,
+          chat: group.chat,
+          chatId: group.chat,
+          chatName: group.name,
+          name: group.name,
+          isGroupChat: true,
+          users: chat ? (chat.users || chat.participants || []) : (group.participants || []),
+          participants: group.participants || [],
+          admins: group.admins || [],
+          groupAdmin: group.admin || null,
+          groupSettings: (chat && chat.groupSettings) || {},
+        };
+        try { io.to(String(userId)).emit('added to group', payload); } catch (e) { /* ignore emit errors */ }
+      }
+    } catch (e) {
+      console.warn('addMember: failed to emit added to group event', e && e.message);
     }
 
     return ok(res, { message: "Member added", group });
@@ -457,17 +489,67 @@ export const removeMember = async (req, res) => {
 
     if (!group.admin || String(group.admin) !== String(userId))
       return err(res, "Only admin can remove members", 403);
+    // Build a list of admin ids (primary admin + admins array)
+    const adminSet = new Set();
+    if (group.admin) adminSet.add(String(group.admin));
+    if (Array.isArray(group.admins)) group.admins.forEach(a => { if (a) adminSet.add(String(a)); });
+    const adminIds = Array.from(adminSet);
 
-    group.participants = group.participants.filter(
-      (id) => id.toString() !== memberId.toString()
-    );
+    // Create a system message in the GROUP chat announcing the removal
+    // and EMIT IT BEFORE actually removing the member from the group.
+    try {
+      const actor = await User.findById(userId).select('name avatar');
+      const target = await User.findById(memberId).select('name avatar');
+      const content = `${actor?.name || 'Someone'} removed ${target?.name || 'a member'} from the group`;
+      const created = await Message.create({ sender: userId, content, type: 'system', chat: group.chat });
+      const populatedMsg = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
+      // instruct clients not to use this system message as recent chat preview
+      populatedMsg.skipPreview = true;
+      try {
+        const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+        const io = getSocketIOInstance();
+        if (io && group && group.chat) {
+          // Emit to the chat room so the group's message area updates
+          io.to(String(group.chat)).emit('message recieved', populatedMsg);
+
+          // Emit only to admins and the removed user so their personal views update
+          const emitTargets = new Set([...adminIds, String(memberId)]);
+          emitTargets.forEach(id => {
+            try { io.to(String(id)).emit('message recieved', populatedMsg); } catch (e) {}
+          });
+        }
+      } catch (e) {
+        console.warn('removeMember: failed to emit system message', e && e.message);
+      }
+    } catch (e) {
+      console.warn('removeMember: failed to create system message', e && e.message);
+    }
+
+    // Now remove the member from participants and admins, then persist
+    group.participants = Array.isArray(group.participants)
+      ? group.participants.filter((id) => id.toString() !== memberId.toString())
+      : [];
+    if (Array.isArray(group.admins)) {
+      group.admins = group.admins.filter(a => String(a) !== String(memberId));
+    }
+    if (group.admin && String(group.admin) === String(memberId)) {
+      group.admin = (Array.isArray(group.admins) && group.admins.length) ? group.admins[0] : null;
+    }
+
     await group.save();
 
-    await Chat.findByIdAndUpdate(group.chat, {
-      $pull: { participants: memberId },
-    });
-
-    return ok(res, { message: "Member removed", group });
+    // Return a populated group so frontend receives participant objects (name/avatar)
+    try {
+      const populatedGroup = await Group.findById(group._id)
+        .populate("participants", "_id name avatar email username")
+        .populate("admin", "_id name avatar email username")
+        .populate("admins", "_id name avatar email username");
+      return ok(res, { message: "Member removed", group: populatedGroup });
+    } catch (e) {
+      // fallback: return the raw group if populate fails
+      console.warn('removeMember: failed to populate group before return', e && e.message);
+      return ok(res, { message: "Member removed", group });
+    }
   } catch (error) {
     err(res, error.message, 500);
   }
@@ -571,7 +653,8 @@ export const exitGroup = async (req, res) => {
         .populate('sender', 'name avatar email')
         .populate('attachments')
         .populate('chat');
-
+      // mark system message so clients skip using it as recent-chat preview
+      populated.skipPreview = true;
       try {
         const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
         const io = getSocketIOInstance();
@@ -793,13 +876,20 @@ export const updateGroupSettings = async (req, res) => {
     // that read chat.groupSettings will see the updates immediately.
     try {
       if (group.chat) {
-        const chatUpdate = {};
-        if (group.inviteLink !== undefined) chatUpdate['groupSettings.inviteLink'] = group.inviteLink || '';
-        if (inviteEnabled !== undefined) chatUpdate['groupSettings.allowInvites'] = !!inviteEnabled;
-        // Mirror features into chat.groupSettings.features (schema allows extra fields)
-        if (group.features) chatUpdate['groupSettings.features'] = group.features;
-        if (Object.keys(chatUpdate).length) {
-          await Chat.findByIdAndUpdate(group.chat, { $set: chatUpdate });
+        const setObj = {};
+        const unsetObj = {};
+        if (group.inviteLink !== undefined) {
+          if (group.inviteLink) setObj['groupSettings.inviteLink'] = group.inviteLink;
+          else unsetObj['groupSettings.inviteLink'] = "";
+        }
+        if (inviteEnabled !== undefined) setObj['groupSettings.allowInvites'] = !!inviteEnabled;
+        if (group.features) setObj['groupSettings.features'] = group.features;
+
+        const updateObj = {};
+        if (Object.keys(setObj).length) updateObj.$set = setObj;
+        if (Object.keys(unsetObj).length) updateObj.$unset = unsetObj;
+        if (Object.keys(updateObj).length) {
+          await Chat.findByIdAndUpdate(group.chat, updateObj);
         }
       }
     } catch (e) {
@@ -830,7 +920,13 @@ export const updateGroupSettings = async (req, res) => {
         const actor = await User.findById(userId).select('name avatar');
         const actorName = actor?.name || 'Someone';
 
-        // Promotions
+        // Build admin id set (primary admin + admins array)
+        const adminSetLocal = new Set();
+        if (group.admin) adminSetLocal.add(String(group.admin));
+        if (Array.isArray(group.admins)) group.admins.forEach(a => { if (a) adminSetLocal.add(String(a)); });
+        const adminIdsLocal = Array.from(adminSetLocal);
+
+        // Promotions: notify admins and the promoted users personally + group room
         if (promoteIds && Array.isArray(promoteIds) && promoteIds.length) {
           for (const pid of promoteIds) {
             try {
@@ -839,9 +935,13 @@ export const updateGroupSettings = async (req, res) => {
               const content = `${actorName} promoted ${targetName} to admin`;
               const created = await Message.create({ sender: userId, content, type: 'system', chat: group.chat });
               const populated = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
+              populated.skipPreview = true;
               if (io) {
-                priorParticipants.forEach(p => { try { io.to(String(p)).emit('message recieved', populated); } catch (e) {} });
+                // emit to group room
                 try { io.to(String(group.chat)).emit('message recieved', populated); } catch (e) {}
+                // emit to admins and the promoted user
+                const emitTargets = new Set([...adminIdsLocal, String(pid)]);
+                emitTargets.forEach(id => { try { io.to(String(id)).emit('message recieved', populated); } catch (e) {} });
               }
             } catch (e) {
               console.warn('Failed to create promotion message for', pid, e && e.message);
@@ -849,7 +949,7 @@ export const updateGroupSettings = async (req, res) => {
           }
         }
 
-        // Removals
+        // Removals: notify admins and the removed users personally + group room
         if (removeIds && Array.isArray(removeIds) && removeIds.length) {
           for (const rid of removeIds) {
             try {
@@ -858,9 +958,13 @@ export const updateGroupSettings = async (req, res) => {
               const content = `${actorName} removed ${targetName} from the group`;
               const created = await Message.create({ sender: userId, content, type: 'system', chat: group.chat });
               const populated = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
+              populated.skipPreview = true;
               if (io) {
-                priorParticipants.forEach(p => { try { io.to(String(p)).emit('message recieved', populated); } catch (e) {} });
+                // emit to group room
                 try { io.to(String(group.chat)).emit('message recieved', populated); } catch (e) {}
+                // emit to admins and the removed user
+                const emitTargets = new Set([...adminIdsLocal, String(rid)]);
+                emitTargets.forEach(id => { try { io.to(String(id)).emit('message recieved', populated); } catch (e) {} });
               }
             } catch (e) {
               console.warn('Failed to create removal message for', rid, e && e.message);

@@ -1502,6 +1502,7 @@ const MessagesArea = ({
       }
       out.push(m);
     });
+
     return out;
   }, [filteredMessages]);
 
@@ -5686,6 +5687,61 @@ const handleSendMessageFromInput = useCallback(
       }
     });
 
+        // When the current user was specifically added to an existing group
+    socket.on('added to group', (group) => {
+      try {
+        if (!group) return;
+        console.log('[SOCKET] added to group event received', group && (group.chatId || group._id || group.id || group.chat));
+        const chatId = String(group.chatId || group._id || group.id || group.chat);
+        if (!chatId) return;
+
+        const name = group.chatName || group.name || group.groupName || 'Group';
+        const avatar = (group.groupSettings && group.groupSettings.avatar) || group.avatar || '';
+        const participants = group.participants || group.users || [];
+
+        const contactEntry = {
+          id: chatId,
+          chatId,
+          name,
+          avatar,
+          participants,
+          isGroup: true,
+          isGroupChat: true,
+        };
+
+        setContacts((prev) => {
+          if ((prev || []).some(c => String(c.chatId) === chatId || String(c.id) === chatId)) return prev;
+          return [contactEntry, ...(prev || [])];
+        });
+
+        setRecentChats((prev) => {
+          if ((prev || []).some(c => String(c.chatId) === chatId || String(c.id) === chatId)) return prev;
+          const entry = {
+            id: chatId,
+            chatId,
+            name,
+            avatar,
+            lastMessage: '',
+            timestamp: Date.now(),
+            isGroupChat: true,
+            users: participants,
+            participants,
+          };
+          return [entry, ...(prev || [])];
+        });
+
+        // Ensure messages map exists
+        setMessages(prev => ({ ...(prev || {}), [chatId]: prev?.[chatId] || [] }));
+
+        // Join socket room for the new chat so real-time updates arrive
+        try {
+          if (socketRef.current && socketRef.current.emit) socketRef.current.emit('join chat', chatId);
+        } catch (e) {}
+      } catch (e) {
+        console.error('Error handling added to group socket event', e);
+      }
+    });
+    
     socket.on('message recieved', (newMessage) => {
       try {
         const chatId = newMessage.chat?._id || newMessage.chat;

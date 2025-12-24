@@ -44,9 +44,8 @@ const GroupInfoModalWhatsApp = ({
     }, timeout);
   };
   const [fetchedGroup, setFetchedGroup] = useState(null);
+  const [inviteLinkLocal, setInviteLinkLocal] = useState("");
   const effectiveGroup = fetchedGroup || group;
-
-
 
   console.log("📊 GroupInfoModal received group data:", {
     inviteEnabled: effectiveGroup.inviteEnabled,
@@ -55,7 +54,8 @@ const GroupInfoModalWhatsApp = ({
     features: effectiveGroup.features
   });
 
-  const members = (effectiveGroup.members || effectiveGroup.participants || []).filter(m => m != null);
+  const rawMembers = (effectiveGroup.members || effectiveGroup.participants || []).filter(m => m != null);
+  const [displayMembers, setDisplayMembers] = useState(rawMembers);
   const settings = effectiveGroup.settings || {};
 
   // Derive invite/settings/permissions/features from various possible payload shapes
@@ -107,8 +107,41 @@ const GroupInfoModalWhatsApp = ({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || 'Failed to remove member');
-      onUpdateGroup?.(json.group || json);
+      // Prefer backend-updated group when available
+      if (json.group) {
+        setFetchedGroup(json.group);
+        try { onUpdateGroup?.(json.group); } catch (e) { /* ignore */ }
+      } else {
+        // Backend didn't return full group: compute updated group and update local state + parent immediately
+        const base = fetchedGroup || group || {};
+        const existing = Array.isArray(base.members) ? base.members : (Array.isArray(base.participants) ? base.participants : []);
+        const filtered = existing.filter(m => String(m._id || m.id || m) !== String(memberId));
+        const updatedGroup = { ...base, members: filtered, participants: filtered };
+        setFetchedGroup(updatedGroup);
+        try { onUpdateGroup?.(updatedGroup); } catch (e) { /* ignore */ }
+      }
+
       showToast(json.message || 'Member removed', 'success', 2000);
+
+      // Refetch fresh group info from server to ensure UI stays in sync
+      try {
+        const token2 = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        const headers2 = token2 ? { Authorization: `Bearer ${token2}` } : {};
+        const gid = (json.group && (json.group._id || json.group.id)) || effectiveGroup._id || effectiveGroup.chat || effectiveGroup.chatId;
+        if (gid) {
+          const resp = await fetch(`${API_BASE_URL}/api/group/group/${encodeURIComponent(gid)}`, { headers: headers2 });
+          if (resp.ok) {
+            const fresh = await resp.json();
+            if (fresh) {
+              setFetchedGroup(fresh);
+              try { onUpdateGroup?.(fresh); } catch (e) { /* ignore */ }
+            }
+          }
+        }
+      } catch (e) {
+        // non-fatal: keep optimistic update if refetch fails
+        console.warn('Refetch group after remove failed', e);
+      }
     } catch (e) {
       console.error('Failed to remove member', e);
       showToast(e.message || 'Failed to remove member', 'error', 3000);
@@ -118,14 +151,14 @@ const GroupInfoModalWhatsApp = ({
   const handlePromoteToggle = (memberId) => {
     onUpdateGroup?.({
       ...effectiveGroup,
-      members: members.map((m) =>
-        (m.id === memberId || m._id === memberId) ? { ...m, isAdmin: !m.isAdmin } : m
+      members: displayMembers.map((m) =>
+        (String(m.id) === String(memberId) || String(m._id) === String(memberId)) ? { ...m, isAdmin: !m.isAdmin } : m
       ),
     });
   };
 
   const handleCopyInvite = async () => {
-    const link = effectiveGroup.inviteLink || settings.inviteLink || "";
+    const link = inviteLinkLocal || effectiveGroup.inviteLink || settings.inviteLink || "";
     if (!link) return;
     const text = `Follow this link to join my chasmos group: ${link}`;
     try {
@@ -134,6 +167,50 @@ const GroupInfoModalWhatsApp = ({
     } catch (e) {
       console.error("Failed to copy invite text", e);
       showToast("Failed to copy invite link", 'error', 3000);
+    }
+  };
+
+  const [generatingInvite, setGeneratingInvite] = useState(false);
+
+  const handleGenerateInvite = async () => {
+    try {
+      if (generatingInvite) return;
+      setGeneratingInvite(true);
+      const token = localStorage.getItem('token');
+      const gid = effectiveGroup._id || effectiveGroup.id || effectiveGroup.chat || effectiveGroup.chatId;
+      if (!gid) throw new Error('Group id not found');
+      const res = await fetch(`${API_BASE_URL}/api/group/regenerate-invite-link`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ groupId: gid }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || 'Failed to generate invite link');
+      // update local group state with returned group or inviteLink
+      if (json.group) {
+        // ensure the invite toggle shows as enabled locally
+        const g = { ...json.group, inviteEnabled: true };
+        setFetchedGroup(g);
+        if (json.inviteLink) setInviteLinkLocal(json.inviteLink);
+        else if (g.inviteLink) setInviteLinkLocal(g.inviteLink);
+        setInviteEnabledState(true);
+        try { onUpdateGroup?.(g); } catch (e) {}
+      } else if (json.inviteLink) {
+        // merge into fetchedGroup and mark invite enabled locally
+        setFetchedGroup(prev => ({ ...(prev || effectiveGroup), inviteLink: json.inviteLink, inviteEnabled: true }));
+        setInviteLinkLocal(json.inviteLink);
+        setInviteEnabledState(true);
+        try { onUpdateGroup?.({ ...(fetchedGroup || effectiveGroup), inviteLink: json.inviteLink, inviteEnabled: true }); } catch (e) {}
+      }
+      showToast(json.message || 'Invite link generated', 'success', 2000);
+    } catch (e) {
+      console.error('Failed to generate invite link', e);
+      showToast(e.message || 'Failed to generate invite link', 'error', 3000);
+    } finally {
+      setGeneratingInvite(false);
     }
   };
 
@@ -150,7 +227,13 @@ const GroupInfoModalWhatsApp = ({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || 'Failed to update settings');
-      onUpdateGroup?.(json.group || json);
+      // Keep local modal state in sync with backend when full group returned
+      if (json.group) {
+        setFetchedGroup(json.group);
+        try { onUpdateGroup?.(json.group); } catch (e) { /* ignore */ }
+      } else {
+        try { onUpdateGroup?.(json.group || json); } catch (e) { /* ignore */ }
+      }
       // show toast success
       showToast(json.message || 'Settings saved', 'success', 2000);
       return json;
@@ -308,7 +391,7 @@ const GroupInfoModalWhatsApp = ({
       });
       const json = await res.json();
       const all = Array.isArray(json) ? json : (json.users || []);
-      const participantIds = new Set((members || []).map(m => String(m._id || m.id || m)));
+      const participantIds = new Set((displayMembers || []).map(m => String(m._id || m.id || m)));
       const filtered = all.filter(u => !participantIds.has(String(u._id || u.id || u)));
       setAvailableUsers(filtered);
         setSelectedAddIds([]);
@@ -438,6 +521,41 @@ const GroupInfoModalWhatsApp = ({
     : 'px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 bg-transparent hover:bg-gray-50';
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+
+  // Normalize members into full user objects so UI always has names/avatars
+  useEffect(() => {
+    let cancelled = false;
+    const current = (effectiveGroup.members || effectiveGroup.participants || []).filter(m => m != null);
+    const needFetch = current.some(m => !(m && (m.name || m.username || m.email)));
+    if (!needFetch) {
+      setDisplayMembers(current.map(m => ({ _id: m._id || m.id || m, ...(typeof m === 'object' ? m : {}) })));
+      return () => { cancelled = true; };
+    }
+
+    (async () => {
+      try {
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const res = await fetch(`${API_BASE_URL}/api/user`, { headers });
+        const json = await res.json();
+        const all = Array.isArray(json) ? json : (json.users || []);
+        const usersById = new Map(all.map(u => [String(u._id || u.id), u]));
+        const normalized = current.map(m => {
+          if (m && (m.name || m.username || m.email)) return { _id: m._id || m.id || null, ...(typeof m === 'object' ? m : {}) };
+          const id = String(m._id || m.id || m || '');
+          const found = usersById.get(id);
+          if (found) return { _id: found._id || found.id, ...found };
+          return { _id: id, name: undefined, username: '', email: '', avatar: '' };
+        });
+        if (!cancelled) setDisplayMembers(normalized);
+      } catch (e) {
+        console.warn('Failed to normalize group members', e);
+        if (!cancelled) setDisplayMembers(current.map(m => (typeof m === 'object' ? m : { _id: m })));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [effectiveGroup._id, effectiveGroup.chat, effectiveGroup.participants, effectiveGroup.members]);
 
   const formatCreatedAt = (g) => {
     const raw = g?.createdAtIso || g?.createdAt || g?.createdAtFormatted || null;
@@ -740,7 +858,7 @@ const GroupInfoModalWhatsApp = ({
               </div>
 
               <div className="flex flex-col">
-                <p className={`${styles.subText} text-sm`}>{members.length} members</p>
+                <p className={`${styles.subText} text-sm`}>{displayMembers.length} members</p>
                 {formatCreatedAt(effectiveGroup) && (
                   <p className={`${styles.subText} text-xs mt-1`}>{`Created ${formatCreatedAt(effectiveGroup)}`}</p>
                 )}
@@ -805,7 +923,7 @@ const GroupInfoModalWhatsApp = ({
             {/* ================= MEMBERS ================= */}
             <Section>
               <div className="flex items-center justify-between">
-                <h4 className={`${styles.titleText} font-semibold text-base mb-3`}>{`Members (${members.length})`}</h4>
+                <h4 className={`${styles.titleText} font-semibold text-base mb-3`}>{`Members (${displayMembers.length})`}</h4>
                 {(isAdmin || permissionsState?.allowMembersAdd) && (
                   <div>
                     <button
@@ -823,37 +941,55 @@ const GroupInfoModalWhatsApp = ({
                   <div className={`text-xs ${styles.subText} mt-1`}>Promote members to admin in the members list below.</div>
                 </div>
               )}
-              {members.map((member) => {
-                const memberId = member.id || member._id;
-                const me = memberId?.toString() === currentUserId?.toString();
-                
-                // ✅ Check if this member is the creator
-                const isMemberCreator = memberId?.toString() === creatorId;
-                
-                // ✅ Check if this member is an admin
+              {displayMembers.map((member) => {
+                const memberId = member.id || member._id || (member && member._id) || member;
+                const me = String(memberId) === String(currentUserId);
+
+                // safe display name and avatar
+                let displayName = 'Member';
+                if (member && (member.name || member.username || member.email)) {
+                  displayName = member.name || member.username || member.email;
+                } else if (me) {
+                  try {
+                    const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+                    displayName = _local?.name || _local?.fullName || _local?.username || _local?.email || 'You';
+                  } catch (e) {
+                    displayName = 'You';
+                  }
+                }
+                let avatarSrc = member && (member.avatar || member.image || member.photo || member.picture) ? (member.avatar || member.image || member.photo || member.picture) : null;
+                // fallback to current user's stored avatar when viewing self
+                if (!avatarSrc && me) {
+                  try {
+                    const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+                    avatarSrc = _local?.avatar || _local?.image || _local?.photo || _local?.picture || avatarSrc;
+                  } catch (e) { /* ignore */ }
+                }
+
+                const isMemberCreator = String(memberId) === String(creatorId);
                 const isMemberAdmin = effectiveGroup.admins?.some(admin => {
                   const adminId = admin._id?.toString() || admin.toString();
-                  return adminId === memberId?.toString();
+                  return adminId === String(memberId);
                 }) || false;
 
                 return (
                   <div
-                    key={memberId}
+                    key={String(memberId)}
                     className={`flex justify-between items-center ${styles.cardBg} rounded-xl p-3 ${styles.cardHover} transition`}
                   >
                     <div className="flex items-center gap-3">
                       <div className={`w-10 h-10 rounded-full ${styles.avatarBg} flex items-center justify-center ${themeMode === 'dark' ? 'text-white' : 'text-gray-900'} overflow-hidden`}>
-                        {member.avatar ? (
-                          <img src={member.avatar} alt={member.name} className="w-full h-full rounded-full object-cover" />
+                        {avatarSrc ? (
+                          <img src={avatarSrc} alt={displayName} className="w-full h-full rounded-full object-cover" />
                         ) : (
-                          <span className="font-semibold">{member.name?.charAt(0) || "?"}</span>
+                          <span className="font-semibold">{String(displayName || '?').charAt(0)}</span>
                         )}
                       </div>
 
                       <div>
                         <div className="flex gap-2 items-center flex-wrap">
                           <span className={`${styles.titleText} text-sm font-medium`}>
-                            {member.name}
+                            {displayName}
                             {me && (
                               <span className={`${styles.subText} text-xs ml-1`}>
                                 (You)
@@ -865,11 +1001,10 @@ const GroupInfoModalWhatsApp = ({
                           {isMemberAdmin && !isMemberCreator && Badge("Admin", "blue")}
                         </div>
 
-                        <p className={`text-xs ${styles.subText} mt-0.5`}>{member.username || member.email || "Member"}</p>
+                        <p className={`text-xs ${styles.subText} mt-0.5`}>{member.username || member.email || (me ? (JSON.parse(localStorage.getItem('chasmos_user_data')||'{}').email || 'Member') : 'Member')}</p>
                       </div>
                     </div>
 
-                    {/* Actions: promote checkbox when allowed, remove if admin */}
                     {!isMemberCreator && !me && isAdmin && (
                       <div className="flex gap-2 items-center">
                         {permissionsState.allowOthersAdmin ? (
@@ -928,29 +1063,61 @@ const GroupInfoModalWhatsApp = ({
                   )}
                 </div>
 
-                {(editingEnabled ? inviteEnabledState : effectiveGroup.inviteEnabled) && (
-                  <div className="w-full mt-2 text-sm grid grid-cols-2 gap-2">
-                    <button
-                      onClick={handleCopyInvite}
-                      className="w-full text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
-                    >
-                      Copy Invite Link
-                    </button>
+                <div className="w-full mt-2 text-sm">
+                  {
+                    // determine if invite is enabled from any source (persisted or local edit)
+                    (() => {
+                      const isInviteEnabled = Boolean(inviteLinkLocal || fetchedGroup?.inviteEnabled || effectiveGroup.inviteEnabled || inviteEnabledState || derivedInviteEnabled);
+                      const hasLink = Boolean(inviteLinkLocal || fetchedGroup?.inviteLink || effectiveGroup.inviteLink || settings.inviteLink || derivedInviteLink);
 
-                    <button
-                      onClick={() => {
-                        const link = effectiveGroup.inviteLink || settings.inviteLink || "";
-                        if (!link) return showToast('No invite link available', 'error', 2500);
-                        const msg = `Follow this link to join my chasmos group: ${link}`;
-                        setForwardMessage({ content: msg });
-                        setForwardOpen(true);
-                      }}
-                      className="w-full text-sm px-4 py-2 rounded-lg bg-white border border-gray-200 text-gray-800 hover:bg-gray-50 transition"
-                    >
-                      Forward Link
-                    </button>
-                  </div>
-                )}
+                      if (!isInviteEnabled) return null;
+
+                      // If a link exists show copy/forward to everyone
+                      if (hasLink) {
+                        return (
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={handleCopyInvite}
+                              className="w-full text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+                            >
+                              Copy Invite Link
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                const link = inviteLinkLocal || fetchedGroup?.inviteLink || effectiveGroup.inviteLink || settings.inviteLink || derivedInviteLink || "";
+                                if (!link) return showToast('No invite link available', 'error', 2500);
+                                const msg = `Follow this link to join my chasmos group: ${link}`;
+                                setForwardMessage({ content: msg });
+                                setForwardOpen(true);
+                              }}
+                              className="w-full text-sm px-4 py-2 rounded-lg bg-white border border-gray-200 text-gray-800 hover:bg-gray-50 transition"
+                            >
+                              Forward Link
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      // No link yet but invite is enabled: only admins in edit mode can generate
+                      if (isAdmin && editingEnabled) {
+                        return (
+                          <div className="flex justify-center">
+                            <button
+                              onClick={handleGenerateInvite}
+                              disabled={generatingInvite}
+                              className={`px-6 py-2 rounded-lg ${generatingInvite ? 'bg-gray-300 text-gray-700' : 'bg-green-600 text-white hover:bg-green-700'} transition`}
+                            >
+                              {generatingInvite ? 'Generating...' : 'Generate Invite Link'}
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return null;
+                    })()
+                  }
+                </div>
               </div>
             </Section>
 
