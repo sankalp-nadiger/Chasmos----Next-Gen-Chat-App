@@ -3,6 +3,11 @@ import User from "../models/user.model.js";
 import generateToken from "../config/generatetoken.js";
 import { isOnline, getOnlineList } from "../services/onlineUsers.js";
 import { uploadBase64ImageToSupabase } from "../utils/uploadToSupabase.js";
+import { Resend } from "resend";
+import twilio from "twilio";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+const DEBUG_EMAILS = process.env.DEBUG_EMAILS === 'true';
 
 // export const allUsers = asyncHandler(async (req, res) => {
 //   const keyword = req.query.search
@@ -511,6 +516,152 @@ export const getAcceptedChatRequests = asyncHandler(async (req, res) => {
   }).select("_id name email avatar");
 
   res.json(users);
+});
+
+// POST /api/user/forgot-password
+export const sendPasswordResetOtp = asyncHandler(async (req, res) => {
+  const { emailOrPhone } = req.body;
+  if (!emailOrPhone) {
+    res.status(400);
+    throw new Error("Please provide email or phone");
+  }
+
+  let user = null;
+  if (String(emailOrPhone).includes("@")) {
+    user = await User.findOne({ email: String(emailOrPhone).toLowerCase().trim() });
+  } else {
+    user = await User.findOne({ phoneNumber: String(emailOrPhone).trim() });
+  }
+
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  user.passwordResetOTP = otp;
+  user.passwordResetOTPExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+  user.passwordResetVerified = false;
+  await user.save();
+  console.log(`Saved password reset OTP for user ${user._id} (${user.email || user.phoneNumber})`);
+  if (DEBUG_EMAILS) console.log(`OTP for ${user._id}: ${otp}`);
+
+  // Send via email or SMS
+  try {
+    if (String(emailOrPhone).includes("@")) {
+      // Email via Resend
+      const fromAddr = process.env.RESEND_FROM || 'Chasmos <onboarding@resend.dev>';
+      const sendRes = await resend.emails.send({
+        from: fromAddr,
+        to: user.email,
+        subject: 'Chasmos password reset OTP',
+        html: `<p>Your Chasmos OTP is: <strong>${otp}</strong>.</p><p>It expires in 10 minutes.</p>`,
+      });
+      console.log(`Password reset OTP email sent to ${user.email}`);
+      if (DEBUG_EMAILS) console.log('Resend response:', sendRes);
+    } else {
+      // SMS via Twilio
+      const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
+      const toNumber = user.phoneNumber;
+      const smsRes = await client.messages.create({
+        body: `Your Chasmos OTP is ${otp}. It expires in 10 minutes.`,
+        from: process.env.TWILIO_FROM,
+        to: toNumber,
+      });
+      console.log(`Password reset OTP SMS sent to ${toNumber}`);
+      if (DEBUG_EMAILS) console.log('Twilio response:', smsRes);
+    }
+  } catch (err) {
+    console.error('Failed to send OTP:', err);
+    if (err?.response) console.error('Send error response:', err.response);
+    if (err?.message) console.error('Send error message:', err.message);
+    // still keep OTP stored but inform client
+    return res.status(500).json({ message: 'Failed to send OTP' });
+  }
+
+  res.status(200).json({ message: 'OTP sent' });
+});
+
+// POST /api/user/verify-reset-otp
+export const verifyPasswordResetOtp = asyncHandler(async (req, res) => {
+  const { emailOrPhone, otp } = req.body;
+  if (!emailOrPhone || !otp) {
+    res.status(400);
+    throw new Error('Please provide email/phone and otp');
+  }
+
+  let user = null;
+  if (String(emailOrPhone).includes("@")) {
+    user = await User.findOne({ email: String(emailOrPhone).toLowerCase().trim() });
+  } else {
+    user = await User.findOne({ phoneNumber: String(emailOrPhone).trim() });
+  }
+
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  if (!user.passwordResetOTP || !user.passwordResetOTPExpires) {
+    res.status(400);
+    throw new Error('No OTP request found');
+  }
+
+  if (Date.now() > Number(user.passwordResetOTPExpires)) {
+    res.status(400);
+    throw new Error('OTP expired');
+  }
+
+  if (String(otp).trim() !== String(user.passwordResetOTP).trim()) {
+    res.status(400);
+    throw new Error('Invalid OTP');
+  }
+
+  user.passwordResetVerified = true;
+  await user.save();
+
+  res.status(200).json({ message: 'OTP verified' });
+});
+
+// POST /api/user/reset-password
+export const resetPasswordFromOtp = asyncHandler(async (req, res) => {
+  const { emailOrPhone, newPassword } = req.body;
+  if (!emailOrPhone || !newPassword) {
+    res.status(400);
+    throw new Error('Please provide email/phone and newPassword');
+  }
+
+  let user = null;
+  if (String(emailOrPhone).includes("@")) {
+    user = await User.findOne({ email: String(emailOrPhone).toLowerCase().trim() });
+  } else {
+    user = await User.findOne({ phoneNumber: String(emailOrPhone).trim() });
+  }
+
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  if (!user.passwordResetVerified || Date.now() > Number(user.passwordResetOTPExpires || 0)) {
+    res.status(400);
+    throw new Error('OTP not verified or expired');
+  }
+
+  if (newPassword.length < 6) {
+    res.status(400);
+    throw new Error('Password must be at least 6 characters long');
+  }
+
+  user.password = newPassword;
+  // clear reset fields
+  user.passwordResetOTP = undefined;
+  user.passwordResetOTPExpires = undefined;
+  user.passwordResetVerified = false;
+
+  await user.save();
+
+  res.status(200).json({ message: 'Password reset successful' });
 });
 
 

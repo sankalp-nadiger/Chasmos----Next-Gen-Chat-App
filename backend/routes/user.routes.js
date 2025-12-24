@@ -16,6 +16,9 @@ import {
   getChatRequestStatus,
   getBusinessUsers,
   getUserChanges,
+  sendPasswordResetOtp,
+  verifyPasswordResetOtp,
+  resetPasswordFromOtp,
 } from "../controllers/user.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { checkBlockStatus } from "../middleware/block.middleware.js"; // NEW
@@ -25,6 +28,10 @@ const router = express.Router();
 // Public routes
 router.post("/", registerUser);
 router.post("/login", authUser);
+// Forgot password (public)
+router.post('/forgot-password', sendPasswordResetOtp);
+router.post('/verify-reset-otp', verifyPasswordResetOtp);
+router.post('/reset-password', resetPasswordFromOtp);
 
 // Protected routes
 router.get("/", protect, allUsers);

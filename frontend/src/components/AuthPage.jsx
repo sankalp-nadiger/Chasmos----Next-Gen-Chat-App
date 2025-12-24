@@ -202,7 +202,7 @@ const ErrorAlert = ({ message, onClose }) => {
 };
 
 // Login Form Component
-const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
+const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser, onForgot }) => {
   const [formData, setFormData] = useState({
     emailOrPhone: "",
     password: "",
@@ -391,6 +391,7 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
       <div className="flex items-center justify-end">
         <button
           type="button"
+          onClick={() => onForgot && onForgot()}
           className="text-sm text-blue-600 hover:text-blue-500 font-medium transition-colors"
         >
           Forgot password?
@@ -414,6 +415,155 @@ const LoginForm = ({ currentTheme, onLogin, onGoogleNewUser }) => {
         )}
       </motion.button>
     </motion.form>
+  );
+};
+
+// Forgot Password Form Component
+const ForgotPasswordForm = ({ currentTheme, onCancel, onDone }) => {
+  const [emailOrPhone, setEmailOrPhone] = useState("");
+  const [step, setStep] = useState("enter"); // enter | verify | reset | done
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [otp, setOtp] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const sendOtp = async () => {
+    setError("");
+    if (!emailOrPhone) return setError("Please enter email or phone number");
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/user/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emailOrPhone }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to send OTP");
+      setStep("verify");
+    } catch (err) {
+      setError(err.message || "Failed to send OTP");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    setError("");
+    if (!otp) return setError("Please enter the OTP");
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/user/verify-reset-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emailOrPhone, otp }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "OTP verification failed");
+      setStep("reset");
+    } catch (err) {
+      setError(err.message || "OTP verification failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetPassword = async () => {
+    setError("");
+    if (!newPassword || !confirmPassword) return setError("Please fill in the new password");
+    if (newPassword !== confirmPassword) return setError("Passwords do not match");
+    if (newPassword.length < 6) return setError("Password must be at least 6 characters");
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/user/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emailOrPhone, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to reset password");
+      setStep("done");
+    } catch (err) {
+      setError(err.message || "Failed to reset password");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+      <AnimatePresence>
+        {error && <ErrorAlert message={error} onClose={() => setError("")} />}
+      </AnimatePresence>
+
+      {step === "enter" && (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className={`block text-sm font-medium ${currentTheme.text}`}>Email or Phone</label>
+            <div className="relative">
+              <div className={`absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none ${currentTheme.textSecondary}`}>
+                <Mail className="h-5 w-5" />
+              </div>
+              <input
+                value={emailOrPhone}
+                onChange={(e) => setEmailOrPhone(e.target.value)}
+                placeholder="Enter email or phone"
+                className={`w-full pl-10 pr-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg ${currentTheme.text}`}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center">
+            <button type="button" onClick={onCancel} className="text-sm text-gray-500">Cancel</button>
+            <button onClick={sendOtp} disabled={isLoading} className="py-2 px-4 bg-blue-600 text-white rounded-lg">
+              {isLoading ? 'Sending…' : 'Send OTP'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === "verify" && (
+        <div className="space-y-4">
+          <p className={`${currentTheme.textSecondary} text-sm`}>We've sent an OTP to the provided contact. Enter it below.</p>
+          <div className="space-y-2">
+            <label className={`block text-sm font-medium ${currentTheme.text}`}>OTP</label>
+            <input value={otp} onChange={(e) => setOtp(e.target.value)} className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg ${currentTheme.text}`} placeholder="Enter OTP" />
+          </div>
+
+          <div className="flex justify-between items-center">
+            <button type="button" onClick={() => setStep('enter')} className="text-sm text-gray-500">Back</button>
+            <button onClick={verifyOtp} disabled={isLoading} className="py-2 px-4 bg-blue-600 text-white rounded-lg">{isLoading ? 'Verifying…' : 'Verify OTP'}</button>
+          </div>
+        </div>
+      )}
+
+      {step === "reset" && (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className={`block text-sm font-medium ${currentTheme.text}`}>New Password</label>
+            <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg ${currentTheme.text}`} placeholder="New password" />
+          </div>
+          <div className="space-y-2">
+            <label className={`block text-sm font-medium ${currentTheme.text}`}>Confirm Password</label>
+            <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={`w-full px-4 py-3 ${currentTheme.inputBg} border ${currentTheme.border} rounded-lg ${currentTheme.text}`} placeholder="Confirm password" />
+          </div>
+
+          <div className="flex justify-between items-center">
+            <button type="button" onClick={() => setStep('verify')} className="text-sm text-gray-500">Back</button>
+            <button onClick={resetPassword} disabled={isLoading} className="py-2 px-4 bg-blue-600 text-white rounded-lg">{isLoading ? 'Resetting…' : 'Reset Password'}</button>
+          </div>
+        </div>
+      )}
+
+      {step === "done" && (
+        <div className="space-y-4 text-center">
+          <p className={`${currentTheme.text} font-medium`}>Password reset successful.</p>
+          <div className="flex justify-center">
+            <button onClick={() => { onDone && onDone(); }} className="py-2 px-4 bg-green-600 text-white rounded-lg">Back to Sign In</button>
+          </div>
+        </div>
+      )}
+    </motion.div>
   );
 };
 
@@ -805,6 +955,7 @@ const SignupForm = ({ currentTheme, onSignup }) => {
 const AuthPage = ({ onAuthenticated }) => {
   const { currentTheme } = useTheme();
   const [isLogin, setIsLogin] = useState(true);
+  const [isForgot, setIsForgot] = useState(false);
   const [googleData, setGoogleData] = useState(null);
   
   const handleGoogleResponse = useCallback(async (response) => {
@@ -990,7 +1141,24 @@ const AuthPage = ({ onAuthenticated }) => {
                 </div>
 
                 <AnimatePresence mode="wait">
-                  {isLogin ? (
+                  {isForgot ? (
+                    <motion.div
+                      key="forgot"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                      transition={{ duration: 0.35 }}
+                      className="perspective-1000"
+                    >
+                      <motion.div initial={{ y: 10 }} animate={{ y: 0 }} transition={{ duration: 0.3 }}>
+                        <ForgotPasswordForm
+                          currentTheme={currentTheme}
+                          onCancel={() => setIsForgot(false)}
+                          onDone={() => { setIsForgot(false); setIsLogin(true); }}
+                        />
+                      </motion.div>
+                    </motion.div>
+                  ) : isLogin ? (
                     <motion.div
                       key="login"
                       initial={{
@@ -1034,6 +1202,7 @@ const AuthPage = ({ onAuthenticated }) => {
                               avatar: data.avatar
                             });
                           }}
+                          onForgot={() => setIsForgot(true)}
                         />
                       </motion.div>
                     </motion.div>

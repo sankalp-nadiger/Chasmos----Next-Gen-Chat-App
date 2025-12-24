@@ -91,6 +91,17 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    // Password reset OTP fields
+    passwordResetOTP: {
+      type: String,
+    },
+    passwordResetOTPExpires: {
+      type: Date,
+    },
+    passwordResetVerified: {
+      type: Boolean,
+      default: false,
+    },
     // Stored synced Google contacts (basic info needed for NewChat / GroupCreation)
     googleContacts: [
       {
