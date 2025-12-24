@@ -411,7 +411,7 @@ const avatarFallbackText =
 
 // MessageBubble component definition
 const MessageBubble = React.memo(
-  ({ message, isPinned, onPinToggle, onDeleteMessage, onStartForwardSelection, onToggleSelectForward, forwardSelectionActive, selectedForwards, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange, onPollVote, onPollRemoveVote, onPollClose, replySelectionActive, selectedReplies, onStartReplySelection, onToggleSelectReply, allMessages, selectedContact }) => {
+  ({ message, isPinned, onPinToggle, onDeleteMessage, onStartForwardSelection, onToggleSelectForward, forwardSelectionActive, selectedForwards, onEditMessage, effectiveTheme, currentUserId, onHoverDateChange, onPollVote, onPollRemoveVote, onPollClose, replySelectionActive, selectedReplies, onStartReplySelection, onToggleSelectReply, allMessages, selectedContact, selectedHasLeftGroup }) => {
     const sender = message.sender;
     const isOwnMessage = (() => {
       if (!sender) return false;
@@ -1012,36 +1012,40 @@ const MessageBubble = React.memo(
         {/* Action buttons - show after message bubble */}
         {!isEditing && (
           <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            {/* Forward button */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              className={`p-1 rounded-full ${forwardSelectionActive && selectedForwards && selectedForwards.includes(message._id || message.id) ? 'bg-blue-500 text-white' : 'bg-white shadow-lg text-blue-600'}`}
-              onClick={handleForwardClick}
-              title="Forward message"
-            >
-              <Share2 className="w-3 h-3" />
-            </motion.button>
+            {/* Forward button: hide when message is a poll AND (it's a group chat OR the user left the group) */}
+            {!(message.type === 'poll' && (isGroupChat || selectedHasLeftGroup)) && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                className={`p-1 rounded-full ${forwardSelectionActive && selectedForwards && selectedForwards.includes(message._id || message.id) ? 'bg-blue-500 text-white' : 'bg-white shadow-lg text-blue-600'}`}
+                onClick={handleForwardClick}
+                title="Forward message"
+              >
+                <Share2 className="w-3 h-3" />
+              </motion.button>
+            )}
 
-            {/* Pin button */}
-            <motion.button
-              whileHover={{
-                scale: 1.1,
-                rotate: [0, -10, 10, 0],
-                transition: { duration: 0.4 },
-              }}
-              className="p-1 rounded-full bg-white shadow-lg"
-              onClick={handlePinClick}
-              title={isPinned ? "Unpin message" : "Pin message"}
-            >
-              <Pin
-                className={`w-3 h-3 ${
-                  isPinned ? "text-yellow-400 fill-current" : "text-gray-500"
-                } hover:text-yellow-400 transition-colors`}
-              />
-            </motion.button>
+            {/* Pin button - hide if user has left the chat */}
+            {!selectedHasLeftGroup && (
+              <motion.button
+                whileHover={{
+                  scale: 1.1,
+                  rotate: [0, -10, 10, 0],
+                  transition: { duration: 0.4 },
+                }}
+                className="p-1 rounded-full bg-white shadow-lg"
+                onClick={handlePinClick}
+                title={isPinned ? "Unpin message" : "Pin message"}
+              >
+                <Pin
+                  className={`w-3 h-3 ${
+                    isPinned ? "text-yellow-400 fill-current" : "text-gray-500"
+                  } hover:text-yellow-400 transition-colors`}
+                />
+              </motion.button>
+            )}
 
-            {/* Delete button - only for own messages */}
-            {isOwnMessage && (
+            {/* Delete button - only for own messages and only if user hasn't left */}
+            {isOwnMessage && !selectedHasLeftGroup && (
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 className="p-1 rounded-full bg-white shadow-lg text-red-600"
@@ -1052,18 +1056,20 @@ const MessageBubble = React.memo(
               </motion.button>
             )}
 
-            {/* Reply button - start multi-select reply (available to everyone) */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              className="p-1 rounded-full bg-white shadow-lg text-blue-600"
-              onClick={() => onStartReplySelection && onStartReplySelection(message._id || message.id)}
-              title="Reply to message"
-            >
-              <MessageSquare className="w-3 h-3" />
-            </motion.button>
+            {/* Reply button - hide if user left */}
+            {!selectedHasLeftGroup && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                className="p-1 rounded-full bg-white shadow-lg text-blue-600"
+                onClick={() => onStartReplySelection && onStartReplySelection(message._id || message.id)}
+                title="Reply to message"
+              >
+                <MessageSquare className="w-3 h-3" />
+              </motion.button>
+            )}
 
-            {/* Edit button - only for own text messages */}
-            {isOwnMessage && !hasAttachments && message.content && (
+            {/* Edit button - only for own text messages and only if user hasn't left */}
+            {isOwnMessage && !hasAttachments && message.content && !selectedHasLeftGroup && (
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 className="p-1 rounded-full bg-white shadow-lg text-green-600"
@@ -1453,6 +1459,7 @@ const MessagesArea = ({
   onPollVote,
   onPollRemoveVote,
   onPollClose,
+  selectedHasLeftGroup,
   // Reply props
   replySelectionActive,
   selectedReplies,
@@ -1608,7 +1615,7 @@ const MessagesArea = ({
             {messagesWithDates.map((item) => {
               if (item && item._isDate) {
                 return (
-                  <div key={item.id} className="w-full flex justify-center">
+                  <div key={item.id} className="w-full flex justify-center mb-4">
                     <DateTag label={formatDayLabel(item.timestamp)} />
                   </div>
                 );
@@ -1656,6 +1663,7 @@ const MessagesArea = ({
                     // Reply props
                     allMessages={filteredMessages}
                     selectedContact={selectedContact}
+                    selectedHasLeftGroup={selectedHasLeftGroup}
                     replySelectionActive={replySelectionActive}
                     selectedReplies={selectedReplies}
                     onStartReplySelection={onStartReplySelection}
@@ -9033,6 +9041,7 @@ useEffect(() => {
                     chatSearchTerm
                   )}
                   selectedContact={selectedContact}
+                  selectedHasLeftGroup={selectedHasLeftGroup}
                   pinnedMessages={pinnedMessages}
                   onPinMessage={handlePinMessage}
                   onHoverDateChange={handleHoverDateChange}

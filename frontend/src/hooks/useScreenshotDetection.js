@@ -33,15 +33,18 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
     // the full-screen NewChat modal is active (it mounts while still on /chats).
     const isNewChatOpen = () => {
       try {
-        const nodes = Array.from(document.querySelectorAll('h1,h2,h3,div'));
+        const nodes = Array.from(document.querySelectorAll('h1,h2,h3,div,span'));
         return nodes.some((n) => {
           if (!n || !n.textContent) return false;
           const txt = n.textContent.trim().toLowerCase();
           if (!txt) return false;
           if (txt.includes('new chat')) {
-            // ensure element is visible
+            // ensure element is visible and likely part of a modal/dialog
             const style = window.getComputedStyle(n);
-            return style && style.display !== 'none' && style.visibility !== 'hidden' && n.offsetParent !== null;
+            if (!style || style.display === 'none' || style.visibility === 'hidden' || n.offsetParent === null) return false;
+            // prefer elements that are inside a dialog/modal container
+            const dialogAncestor = n.closest('[role="dialog"], .modal, .dialog, [data-modal]');
+            return Boolean(dialogAncestor);
           }
           return false;
         });
@@ -50,8 +53,18 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
       }
     };
 
+    // Debug helper
+    const debugStatus = () => ({
+      enabled,
+      chatId,
+      userId,
+      onChatsRoute: isOnChatsRoute(),
+      newChatOpen: isNewChatOpen(),
+      documentHidden: document.hidden,
+    });
+
     if (!isOnChatsRoute() || isNewChatOpen()) {
-      console.log('Screenshot detection not enabled: not on /chats route or NewChat open');
+      console.log('Screenshot detection not enabled - status:', debugStatus());
       return;
     }
 
@@ -63,7 +76,10 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
     const handleScreenshotKey = async (e) => {
       // Only detect screenshot if tab is visible and user is on /chats
       if (document.hidden) return;
-      if (!isOnChatsRoute() || isNewChatOpen()) return;
+      if (!isOnChatsRoute() || isNewChatOpen()) {
+        console.log('Screenshot key pressed but detection blocked - status:', debugStatus(), 'event:', { key: e.key, code: e.code });
+        return;
+      }
       // Debug log for key events
       console.log('Key event:', { key: e.key, code: e.code, keyCode: e.keyCode, ctrl: e.ctrlKey, shift: e.shiftKey, meta: e.metaKey });
       // PrintScreen (Win/Linux/Windows+PrtScr)
@@ -102,7 +118,10 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
     const handlePaste = async (e) => {
       // Only detect screenshot if tab is visible and user is on /chats
       if (document.hidden) return;
-      if (!isOnChatsRoute() || isNewChatOpen()) return;
+      if (!isOnChatsRoute() || isNewChatOpen()) {
+        console.log('Paste event ignored for screenshot detection - status:', debugStatus());
+        return;
+      }
       const items = e.clipboardData?.items;
       if (!items) return;
 
@@ -112,6 +131,7 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
           if (now - lastCaptureTime.current < 2000) return;
           
           lastCaptureTime.current = now;
+          console.log('Screenshot image found in clipboard, capturing...');
           await captureAndUploadScreenshot();
           break;
         }

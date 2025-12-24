@@ -68,7 +68,7 @@ const appFeatures = [
   {
     id: 3,
     title: "Screenshot Detection",
-    description: "Automatically detect and organize screenshots for easy reference and sharing",
+    description: "Automatically detect and organize screenshots for enhanced privacy",
     icon: Camera,
     color: "from-green-500 to-emerald-500",
   },
