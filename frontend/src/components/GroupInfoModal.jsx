@@ -1511,7 +1511,7 @@ const GroupInfoModalWhatsApp = ({
                     <div className="mb-2">
                       <input
                         type="search"
-                        placeholder="Search users by name, email or id"
+                        placeholder="Search users by name or email"
                         value={addSearch}
                         onChange={(e) => setAddSearch(e.target.value)}
                         className={`w-full px-3 py-2 rounded-lg border text-sm ${themeMode === 'dark' ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-400' : 'bg-white border-gray-200 text-gray-900 placeholder-gray-500'}`}
