@@ -47,6 +47,8 @@ export const allMessages = asyncHandler(async (req, res) => {
       ...createdAtFilter,
       // Exclude messages that the current user has soft-deleted
       deletedFor: { $not: { $elemMatch: { $eq: req.user._id } } },
+      // Exclude messages explicitly hidden from this user
+      excludeUsers: { $not: { $elemMatch: { $eq: req.user._id } } },
       $or: [
         { isScheduled: { $ne: true } },
         { scheduledSent: true }
@@ -469,7 +471,9 @@ export const getStarredMessages = asyncHandler(async (req, res) => {
 
   const messages = await Message.find({
     chat: chatId,
-    "starredBy.user": userId
+    "starredBy.user": userId,
+    // Exclude messages explicitly hidden from this user
+    excludeUsers: { $not: { $elemMatch: { $eq: userId } } }
   })
     .populate("sender", "name avatar email")
     .populate({ path: "chat", select: "chatName isGroupChat groupSettings.avatar" })
@@ -915,6 +919,8 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
       chat: { $in: verifiedChatIds },
       // Include messages that are not deletedFor the user OR where the user is listed in keepFor
       $or: [ { deletedFor: { $ne: req.user._id } }, { keepFor: req.user._id } ],
+      // Exclude messages explicitly hidden from this user
+      excludeUsers: { $not: { $elemMatch: { $eq: req.user._id } } },
       attachments: { $exists: true, $ne: [] }
     })
       .populate({
@@ -993,6 +999,8 @@ export const getLinkAttachments = asyncHandler(async (req, res) => {
       chat: { $in: verifiedChatIds },
       // Include messages that are not deletedFor the user OR where the user is listed in keepFor
       $or: [ { deletedFor: { $ne: req.user._id } }, { keepFor: req.user._id } ],
+      // Exclude messages explicitly hidden from this user
+      excludeUsers: { $not: { $elemMatch: { $eq: req.user._id } } },
       content: { $regex: urlRegex }
     })
       .populate('sender', 'name email avatar')
@@ -1040,7 +1048,6 @@ export const getDocumentAttachments = asyncHandler(async (req, res) => {
 
     // Parse comma-separated chat IDs
     const chatIdArray = chatIds.split(',').map(id => id.trim());
-    console.log('📋 Parsed chat IDs:', chatIdArray);
 
     // Verify user has access to these chats
     const chats = await Chat.find({
@@ -1059,6 +1066,8 @@ export const getDocumentAttachments = asyncHandler(async (req, res) => {
       chat: { $in: verifiedChatIds },
       // Include messages that are not deletedFor the user OR where the user is listed in keepFor
       $or: [ { deletedFor: { $ne: req.user._id } }, { keepFor: req.user._id } ],
+      // Exclude messages explicitly hidden from this user
+      excludeUsers: { $not: { $elemMatch: { $eq: req.user._id } } },
       attachments: { $exists: true, $ne: [] }
     })
       .populate({
@@ -1273,7 +1282,7 @@ export const markAsRead = asyncHandler(async (req, res) => {
 
   if (chat.isGroupChat) {
     // For group chats: add user to readBy for unread messages, and set status to 'read' when everyone has read
-    const msgs = await Message.find({ chat: chatId, $or: [ { readBy: { $exists: false } }, { readBy: { $nin: [userId] } } ] });
+    const msgs = await Message.find({ chat: chatId, $or: [ { readBy: { $exists: false } }, { readBy: { $nin: [userId] } } ], excludeUsers: { $not: { $elemMatch: { $eq: userId } } } });
     const updated = [];
     for (const m of msgs) {
       if (!m.readBy) m.readBy = [];

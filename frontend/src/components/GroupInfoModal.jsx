@@ -1,5 +1,5 @@
 // GroupInfoModalWhatsApp.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -314,6 +314,9 @@ const GroupInfoModalWhatsApp = ({
   const [addingUserId, setAddingUserId] = useState(null);
   const [selectedAddIds, setSelectedAddIds] = useState([]);
   const [addingMultiple, setAddingMultiple] = useState(false);
+  const [addSearch, setAddSearch] = useState('');
+  const [addPage, setAddPage] = useState(1);
+  const PAGE_SIZE = 20;
   // Selected members to be promoted when Save is clicked
   const [selectedPromoteIds, setSelectedPromoteIds] = useState([]);
   // Selected members to be removed when Save is clicked
@@ -416,6 +419,24 @@ const GroupInfoModalWhatsApp = ({
       return Array.from(s);
     });
   };
+
+  const filteredAvailableUsers = useMemo(() => {
+    const q = String(addSearch || '').trim().toLowerCase();
+    if (!q) return availableUsers || [];
+    return (availableUsers || []).filter(u => {
+      const name = String(u.name || u.username || u.fullName || '').toLowerCase();
+      const email = String(u.email || u.username || u.phone || '').toLowerCase();
+      const id = String(u._id || u.id || '').toLowerCase();
+      return name.includes(q) || email.includes(q) || id.includes(q);
+    });
+  }, [availableUsers, addSearch]);
+
+  const totalPages = Math.max(1, Math.ceil((filteredAvailableUsers || []).length / PAGE_SIZE));
+  useEffect(() => { setAddPage(1); }, [addSearch, availableUsers]);
+  const paginatedAvailable = useMemo(() => {
+    const start = (Math.max(1, addPage) - 1) * PAGE_SIZE;
+    return (filteredAvailableUsers || []).slice(start, start + PAGE_SIZE);
+  }, [filteredAvailableUsers, addPage]);
 
   const handleAddSelected = async (ids) => {
     const toAdd = Array.isArray(ids) ? ids : Array.from(selectedAddIds || []);
@@ -1183,7 +1204,7 @@ const GroupInfoModalWhatsApp = ({
                   )}
                 </div>
 
-                <div className={`${styles.sectionBg} rounded-xl p-4 flex items-center justify-between`}>
+                {/* <div className={`${styles.sectionBg} rounded-xl p-4 flex items-center justify-between`}>
                   <div>
                     <div className={`${styles.titleText} text-sm font-medium`}>Gallery View</div>
                     <div className={`text-xs ${styles.subText}`}>View all shared media</div>
@@ -1197,7 +1218,7 @@ const GroupInfoModalWhatsApp = ({
                   ) : (
                     <StatusBadge enabled={effectiveGroup.features?.gallery !== false} />
                   )}
-                </div>
+                </div> */}
 
                 <div className={`${styles.sectionBg} rounded-xl p-4 flex items-center justify-between`}>
                   <div>
@@ -1480,50 +1501,91 @@ const GroupInfoModalWhatsApp = ({
                       >
                         {addingMultiple ? 'Adding...' : 'Add Selected'}
                       </button>
-                      <button onClick={() => setShowAddMemberModal(false)} className="p-2 rounded hover:bg-gray-100">
+                      <button onClick={() => setShowAddMemberModal(false)} className={`p-2 rounded ${themeMode === 'dark' ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}`}>
                         <X className={`${modalTitleClass} w-5 h-5`} />
                       </button>
                     </div>
                   </div>
 
-                  <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-                    {loadingUsers && (
-                      <div className="text-sm text-gray-500">Loading users...</div>
-                    )}
+                  <div className="space-y-3">
+                    <div className="mb-2">
+                      <input
+                        type="search"
+                        placeholder="Search users by name, email or id"
+                        value={addSearch}
+                        onChange={(e) => setAddSearch(e.target.value)}
+                        className={`w-full px-3 py-2 rounded-lg border text-sm ${themeMode === 'dark' ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-400' : 'bg-white border-gray-200 text-gray-900 placeholder-gray-500'}`}
+                      />
+                      <div className={`text-xs mt-1 ${styles.subText}`}>{`Showing ${Math.min(((addPage-1)*PAGE_SIZE)+1, (filteredAvailableUsers||[]).length||0)}-${Math.min(addPage*PAGE_SIZE, (filteredAvailableUsers||[]).length||0)} of ${(filteredAvailableUsers||[]).length || 0}`}</div>
+                    </div>
 
-                    {!loadingUsers && availableUsers.length === 0 && (
-                      <div className="text-sm text-gray-500">No available users to add</div>
-                    )}
+                    <div className="max-h-[56vh] overflow-y-auto space-y-2">
+                      {loadingUsers && (
+                        <div className={`${styles.subText} text-sm`}>Loading users...</div>
+                      )}
 
-                    {!loadingUsers && availableUsers.map((u) => {
-                      const uid = u._id || u.id || u.userId || '';
-                      return (
-                        <div key={uid} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-full ${styles.avatarBg} flex items-center justify-center overflow-hidden`}>
-                              {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover rounded-full" /> : <span className={`${styles.titleText}`}>{String(u.name || u.username || 'U').charAt(0)}</span>}
+                      {!loadingUsers && (filteredAvailableUsers || []).length === 0 && (
+                        <div className={`${styles.subText} text-sm`}>No available users to add</div>
+                      )}
+
+                      {!loadingUsers && paginatedAvailable.map((u) => {
+                        const uid = u._id || u.id || u.userId || '';
+                        const isGoogle = Boolean(u.googleId || String(u._id || u.id || '').startsWith('google-'));
+                        return (
+                          <div key={uid} className={`flex items-center justify-between p-2 rounded transition ${themeMode === 'dark' ? 'hover:bg-gray-800 bg-transparent' : 'hover:bg-gray-50 bg-white'}`}>
+                            <div className="flex items-center gap-3">
+                              <div className={`w-10 h-10 rounded-full ${styles.avatarBg} flex items-center justify-center overflow-hidden`}>
+                                {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover rounded-full" /> : <span className={`${styles.titleText}`}>{String(u.name || u.username || 'U').charAt(0)}</span>}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <div className={`${styles.titleText} text-sm font-medium`}>{u.name || u.username || uid}</div>
+                                  {isGoogle && (
+                                    <div className="ml-1">
+                                      {Badge('Google', 'gray')}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className={`text-xs ${styles.subText}`}>{u.email || u.phone || ''}</div>
+                              </div>
                             </div>
+
                             <div>
-                              <div className={`${styles.titleText} text-sm font-medium`}>{u.name || u.username || uid}</div>
-                              <div className={`text-xs ${styles.subText}`}>{u.email || u.phone || ''}</div>
+                              <label className="inline-flex items-center cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedAddIds.includes(String(uid))}
+                                  onChange={() => toggleSelectAvailable(uid)}
+                                  className={`h-4 w-4 mr-2 ${themeMode === 'dark' ? 'accent-white' : ''}`}
+                                />
+                              </label>
                             </div>
                           </div>
+                        );
+                      })}
+                    </div>
 
-                          <div>
-                            <label className="inline-flex items-center cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={selectedAddIds.includes(String(uid))}
-                                onChange={() => toggleSelectAvailable(uid)}
-                                className="form-checkbox h-4 w-4 mr-2"
-                              />
-                              
-                            </label>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    
+                    {/* Pagination controls */}
+                    <div className="flex items-center justify-between mt-3">
+                      <div className={`text-xs ${styles.subText}`}>{`${(filteredAvailableUsers||[]).length} result(s)`}</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setAddPage(p => Math.max(1, p - 1))}
+                          disabled={addPage <= 1}
+                          className={`px-2 py-1 rounded text-sm ${addPage <= 1 ? 'opacity-50 cursor-not-allowed' : (themeMode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800')}`}
+                        >
+                          Prev
+                        </button>
+                        <div className={`text-sm ${styles.subText}`}>{`Page ${addPage} / ${totalPages}`}</div>
+                        <button
+                          onClick={() => setAddPage(p => Math.min(totalPages, p + 1))}
+                          disabled={addPage >= totalPages}
+                          className={`px-2 py-1 rounded text-sm ${addPage >= totalPages ? 'opacity-50 cursor-not-allowed' : (themeMode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800')}`}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </motion.div>
               </motion.div>

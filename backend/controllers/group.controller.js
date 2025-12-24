@@ -263,6 +263,40 @@ export const joinGroupByInviteLink = async (req, res) => {
     group.participants.push(userId);
     await group.save();
 
+    // Notify the user who exited themselves (exitGroup caller) so their UI updates immediately
+    try {
+      const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+      const io = getSocketIOInstance();
+      if (io) {
+        const safeId = (item) => {
+          if (!item) return null;
+          try {
+            if (typeof item === 'string') return item;
+            if (item._id) return String(item._id);
+            if (item.id) return String(item.id);
+            return String(item);
+          } catch (e) {
+            return null;
+          }
+        };
+        const payload = {
+          chatId: safeId(group.chat) || null,
+          groupId: safeId(group._id) || null,
+          removedUserId: String(userId),
+          message: 'You left the group',
+          group: {
+            _id: group._id,
+            name: group.name,
+            participants: group.participants || [],
+          }
+        };
+        try {
+          io.to(String(userId)).emit('removed from group', payload);
+          console.log('[SOCKET] emitted "removed from group" to (self-exit)', String(userId), 'chatId=', payload.chatId);
+        } catch (e) { console.warn('exitGroup: emit removed from group failed', e && e.message); }
+      }
+    } catch (e) { console.warn('exitGroup: failed to emit removed event', e && e.message); }
+
     // Ensure both participants and users arrays on Chat are updated (keep in sync)
     try {
       await Chat.findByIdAndUpdate(group.chat, {
@@ -385,6 +419,7 @@ export const regenerateLink = async (req, res) => {
 export const addMember = async (req, res) => {
   try {
     const { groupId, userId } = req.body;
+    console.log("addMember called with groupId:", groupId, "userId:", userId);
 
     const group = await Group.findById(groupId);
     if (!group) return err(res, "Group not found");
@@ -394,10 +429,6 @@ export const addMember = async (req, res) => {
 
     group.participants.push(userId);
     await group.save();
-
-    await Chat.findByIdAndUpdate(group.chat, {
-      $push: { participants: userId },
-    });
 
     // Create a system message in the GROUP chat announcing the addition
     // and emit it to the group room and each participant so the messages
@@ -409,11 +440,18 @@ export const addMember = async (req, res) => {
 
       const msgContent = `${actor?.name || 'A user'} added ${addedUser?.name || 'a user'}`;
 
+      // Compute excludeUsers: participants other than the target user and admins
+      const adminSetLocal = new Set();
+      if (group.admin) adminSetLocal.add(String(group.admin));
+      if (Array.isArray(group.admins)) group.admins.forEach(a => { if (a) adminSetLocal.add(String(a)); });
+      const excludeUsersList = (group.participants || []).map(p => String(p)).filter(pid => pid && pid !== String(userId) && !adminSetLocal.has(pid));
+
       const created = await Message.create({
         sender: actorId,
         content: msgContent,
         type: 'system',
         chat: group.chat,
+        excludeUsers: excludeUsersList,
       });
 
       const populated = await Message.findById(created._id)
@@ -424,16 +462,18 @@ export const addMember = async (req, res) => {
       try {
         const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
         const io = getSocketIOInstance();
-          if (io && group && group.chat) {
+        if (io && group && group.chat) {
           // mark this system message so clients can skip updating previews
           populated.skipPreview = true;
-          // Emit to the chat room so everyone in the group receives it
-          io.to(String(group.chat)).emit('message recieved', populated);
 
-          // Also emit directly to each participant socket to ensure presence in personal views
-          const users = (group.participants && group.participants.length) ? group.participants : [];
-          users.forEach(u => {
-            try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
+          // Emit only to admins and the newly added user so personal views update.
+          // Do NOT broadcast to the whole room here to avoid exposing the system message to excluded users in real-time.
+          const adminIdsLocal = [];
+          if (group.admin) adminIdsLocal.push(String(group.admin));
+          if (Array.isArray(group.admins)) group.admins.forEach(a => { if (a) adminIdsLocal.push(String(a)); });
+          const emitTargets = new Set([...adminIdsLocal, String(userId)]);
+          emitTargets.forEach(id => {
+            try { io.to(String(id)).emit('message recieved', populated); } catch (e) {}
           });
         }
       } catch (e) {
@@ -448,39 +488,104 @@ export const addMember = async (req, res) => {
       const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
       const io = getSocketIOInstance();
       if (io) {
-        const chat = await Chat.findById(group.chat).lean();
-        const payload = {
-          _id: group._id,
-          id: group._id,
-          chat: group.chat,
-          chatId: group.chat,
-          chatName: group.name,
-          name: group.name,
-          isGroupChat: true,
-          users: chat ? (chat.users || chat.participants || []) : (group.participants || []),
-          participants: group.participants || [],
-          admins: group.admins || [],
-          groupAdmin: group.admin || null,
-          groupSettings: (chat && chat.groupSettings) || {},
+        const chat = await Chat.findById(group.chat).lean().catch(() => null);
+        const safeId = (item) => {
+          if (!item) return null;
+          try {
+            if (typeof item === 'string') return item;
+            if (item._id) return String(item._id);
+            if (item.id) return String(item.id);
+            return String(item);
+          } catch (e) {
+            return null;
+          }
         };
-        try { io.to(String(userId)).emit('added to group', payload); } catch (e) { /* ignore emit errors */ }
+
+        // If the chat document already contains the user in its `users`/`participants`,
+        // do not emit the `added to group` event to avoid duplicate client-side inserts.
+        const chatMembers = (chat && (chat.users || chat.participants) ? (chat.users || chat.participants) : []);
+        const isAlreadyMember = chatMembers && chatMembers.length ? chatMembers.map(u => safeId(u)).filter(Boolean).includes(String(userId)) : false;
+
+        const usersArr = (chat && (chat.users || chat.participants) ? (chat.users || chat.participants) : (group.participants || [])).map(u => safeId(u)).filter(Boolean);
+        const participantsArr = (group.participants || []).map(p => safeId(p)).filter(Boolean);
+        const adminsArr = (group.admins || []).map(a => safeId(a)).filter(Boolean);
+
+        const payload = {
+          _id: safeId(group._id) || null,
+          id: safeId(group._id) || null,
+          chat: safeId(group.chat) || null,
+          chatId: safeId(group.chat) || null,
+          chatName: group.name || '',
+          name: group.name || '',
+          isGroupChat: true,
+          users: usersArr,
+          participants: participantsArr,
+          admins: adminsArr,
+          groupAdmin: group.admin ? safeId(group.admin) : null,
+          groupSettings: (chat && chat.groupSettings) || {},
+          avatar: (chat && chat.groupSettings && chat.groupSettings.avatar) || group.avatar || '',
+        };
+
+        try {
+          if (isAlreadyMember) {
+              console.log('[SOCKET] skipping "added to group" emit for user', String(userId), 'because they are already in chat participants');
+              try {
+                const payload2 = {
+                  _id: safeId(group._id) || null,
+                  id: safeId(group._id) || null,
+                  chat: safeId(group.chat) || null,
+                  chatId: safeId(group.chat) || null,
+                  chatName: group.name || '',
+                  name: group.name || '',
+                  isGroupChat: true,
+                  users: usersArr,
+                  participants: participantsArr,
+                  admins: adminsArr,
+                  groupAdmin: group.admin ? safeId(group.admin) : null,
+                };
+                // Emit a lightweight fallback event so clients that missed the
+                // main "added to group" flow can update their UI (re-enable
+                // inputs, mark membership, join room).
+                io.to(String(userId)).emit('addedtogroup2', payload2);
+                console.log('[SOCKET] emitted "addedtogroup2" to user', String(userId), 'chatId=', payload2.chatId);
+              } catch (emitErr) {
+                /* ignore emit errors */
+              }
+            } else {
+              console.log('[SOCKET] emitting "added to group" to user', String(userId), 'payload chatId=', payload.chatId, 'avatar=', payload.avatar);
+              io.to(String(userId)).emit('added to group', payload);
+            }
+        } catch (e) { /* ignore emit errors */ }
       }
     } catch (e) {
       console.warn('addMember: failed to emit added to group event', e && e.message);
     }
 
+        // Ensure Chat document reflects the new member in both `participants` and `users`
+    // use $addToSet to avoid duplicates
+    try {
+      await Chat.findByIdAndUpdate(group.chat, {
+        $addToSet: { participants: userId, users: userId },
+      });
+    } catch (e) {
+      // fallback to $push if $addToSet fails for any reason
+      try {
+        await Chat.findByIdAndUpdate(group.chat, { $push: { participants: userId } });
+      } catch (ee) {}
+    }
+    
     return ok(res, { message: "Member added", group });
   } catch (error) {
     err(res, error.message, 500);
   }
 };
 
-
 // ----------------------------
 // REMOVE MEMBER
 // ----------------------------
 export const removeMember = async (req, res) => {
   try {
+    console.log("removeMember called with body:", req.body);
     const { groupId, memberId } = req.body;
     const userId = req.user._id;
 
@@ -495,13 +600,88 @@ export const removeMember = async (req, res) => {
     if (Array.isArray(group.admins)) group.admins.forEach(a => { if (a) adminSet.add(String(a)); });
     const adminIds = Array.from(adminSet);
 
+    // Precompute excludeUsers for removal: participants other than the removed member and admins
+    const adminSetLocal = new Set();
+    if (group.admin) adminSetLocal.add(String(group.admin));
+    if (Array.isArray(group.admins)) group.admins.forEach(a => { if (a) adminSetLocal.add(String(a)); });
+    const excludeUsersForRemove = (group.participants || []).map(p => String(p)).filter(pid => pid && pid !== String(memberId) && !adminSetLocal.has(pid));
+
+    // Emit 'removed from group' BEFORE creating the system message so clients
+    // receive the removal event immediately (pre-removal state). Add logs
+    // to help debug delivery issues.
+    try {
+      const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+      const io = getSocketIOInstance();
+      if (io) {
+        const safeId = (item) => {
+          if (!item) return null;
+          try {
+            if (typeof item === 'string') return item;
+            if (item._id) return String(item._id);
+            if (item.id) return String(item.id);
+            return String(item);
+          } catch (e) {
+            return null;
+          }
+        };
+
+        const prePayload = {
+          chatId: safeId(group.chat) || null,
+          groupId: safeId(group._id) || null,
+          removedUserId: String(memberId),
+          message: 'A member was removed from the group',
+          group: {
+            _id: group._id,
+            name: group.name,
+            participants: group.participants || [],
+          },
+          excludeUsers: excludeUsersForRemove
+        };
+
+        console.log('[SOCKET] removeMember: pre-remove emit prepared', { chatId: prePayload.chatId, groupId: prePayload.groupId, removedUserId: prePayload.removedUserId, excludeUsers: prePayload.excludeUsers });
+
+        try {
+          io.to(String(memberId)).emit('removed from group', prePayload);
+          console.log('[SOCKET] removeMember: pre-remove emitted to removed user', String(memberId));
+        } catch (e) {
+          console.warn('removeMember: pre-remove emit to removed user failed', e && e.message);
+        }
+
+        try {
+          const notifyTargets = new Set();
+          if (group.admin) notifyTargets.add(String(group.admin));
+          if (Array.isArray(group.admins)) group.admins.forEach(a => { if (a) notifyTargets.add(String(a)); });
+          (group.participants || []).forEach(p => { if (p) notifyTargets.add(String(p)); });
+          notifyTargets.delete(String(memberId));
+
+          notifyTargets.forEach(id => {
+            try { io.to(String(id)).emit('removed from group', prePayload); } catch (e) {}
+          });
+
+          try { io.to(String(safeId(group.chat))).emit('removed from group', prePayload); } catch (e) {}
+        } catch (e) {
+          console.warn('removeMember: pre-remove notify failed', e && e.message);
+        }
+      }
+    } catch (e) {
+      console.warn('removeMember: failed to perform pre-remove emit', e && e.message);
+    }
+
     // Create a system message in the GROUP chat announcing the removal
     // and EMIT IT BEFORE actually removing the member from the group.
     try {
       const actor = await User.findById(userId).select('name avatar');
       const target = await User.findById(memberId).select('name avatar');
       const content = `${actor?.name || 'Someone'} removed ${target?.name || 'a member'} from the group`;
-      const created = await Message.create({ sender: userId, content, type: 'system', chat: group.chat });
+      console.log('removeMember: excludeUsersForRemove ->', excludeUsersForRemove);
+      const created = await Message.create({ sender: userId, content, type: 'system', chat: group.chat, excludeUsers: excludeUsersForRemove });
+      // Debug: refetch raw saved document to inspect stored fields
+      try {
+        const raw = await Message.findById(created._id).lean();
+        console.log('removeMember: raw created message in DB:', { id: created._id, excludeUsers: raw && raw.excludeUsers });
+      } catch (e) {
+        console.warn('removeMember: failed to read created message for debug', e && e.message);
+      }
       const populatedMsg = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
       // instruct clients not to use this system message as recent chat preview
       populatedMsg.skipPreview = true;
@@ -510,6 +690,7 @@ export const removeMember = async (req, res) => {
         const io = getSocketIOInstance();
         if (io && group && group.chat) {
           // Emit to the chat room so the group's message area updates
+          // Emit the system message to the room; clients may filter by `excludeUsers` on fetch
           io.to(String(group.chat)).emit('message recieved', populatedMsg);
 
           // Emit only to admins and the removed user so their personal views update
@@ -538,6 +719,49 @@ export const removeMember = async (req, res) => {
 
     await group.save();
 
+    // After removing member, emit a 'removed from group' event to the removed user so their UI updates immediately
+    try {
+      const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+      const io = getSocketIOInstance();
+      if (io) {
+        const safeId = (item) => {
+          if (!item) return null;
+          try {
+            if (typeof item === 'string') return item;
+            if (item._id) return String(item._id);
+            if (item.id) return String(item.id);
+            return String(item);
+          } catch (e) {
+            return null;
+          }
+        };
+
+        const payload = {
+          chatId: safeId(group.chat) || null,
+          groupId: safeId(group._id) || null,
+          removedUserId: String(memberId),
+          message: 'You were removed from the group',
+          group: {
+            _id: group._id,
+            name: group.name,
+            participants: group.participants || [],
+          }
+        };
+
+        try {
+          // include excludeUsers so client can know which users should not see the system message
+          payload.excludeUsers = excludeUsersForRemove;
+          console.log('[SOCKET] emitting "removed from group" to', String(memberId), 'payload:', { chatId: payload.chatId, groupId: payload.groupId, excludeUsers: payload.excludeUsers });
+          io.to(String(memberId)).emit('removed from group', payload);
+          console.log('[SOCKET] emitted "removed from group" to', String(memberId), 'chatId=', payload.chatId);
+        } catch (e) {
+          console.warn('removeMember: emit removed from group failed', e && e.message);
+        }
+      }
+    } catch (e) {
+      console.warn('removeMember: failed to emit removed event', e && e.message);
+    }
+
     // Return a populated group so frontend receives participant objects (name/avatar)
     try {
       const populatedGroup = await Group.findById(group._id)
@@ -554,7 +778,6 @@ export const removeMember = async (req, res) => {
     err(res, error.message, 500);
   }
 };
-
 
 // ----------------------------
 // PROMOTE NEW ADMIN
@@ -703,6 +926,44 @@ export const exitGroup = async (req, res) => {
     await group.save();
 
     // Do NOT modify Chat.participants here — keep Chat as-is per request.
+
+    // Emit a 'removed from group' event to the leaving user so their UI updates immediately
+    try {
+      const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+      const io = getSocketIOInstance();
+      if (io) {
+        const safeId = (item) => {
+          if (!item) return null;
+          try {
+            if (typeof item === 'string') return item;
+            if (item._id) return String(item._id);
+            if (item.id) return String(item.id);
+            return String(item);
+          } catch (e) {
+            return null;
+          }
+        };
+
+        const payload = {
+          chatId: safeId(group.chat) || null,
+          groupId: safeId(group._id) || null,
+          removedUserId: String(userId),
+          message: 'You left the group',
+          group: {
+            _id: group._id,
+            name: group.name,
+            participants: group.participants || [],
+          }
+        };
+
+        try {
+          io.to(String(userId)).emit('removed from group', payload);
+          console.log('[SOCKET] emitted "removed from group" to (self-exit)', String(userId), 'chatId=', payload.chatId);
+        } catch (e) {
+          console.warn('exitGroup: emit removed from group failed', e && e.message);
+        }
+      }
+    } catch (e) { console.warn('exitGroup: failed to emit removed event', e && e.message); }
 
     return ok(res, { message: "Exited group", group });
   } catch (error) {
@@ -965,6 +1226,41 @@ export const updateGroupSettings = async (req, res) => {
                 // emit to admins and the removed user
                 const emitTargets = new Set([...adminIdsLocal, String(rid)]);
                 emitTargets.forEach(id => { try { io.to(String(id)).emit('message recieved', populated); } catch (e) {} });
+              }
+              // Emit 'removed from group' only to the removed user(s) provided
+              // by the frontend. Do NOT broadcast this event to the room or
+              // to other participants here.
+              try {
+                const safeId = (item) => {
+                  if (!item) return null;
+                  try {
+                    if (typeof item === 'string') return item;
+                    if (item._id) return String(item._id);
+                    if (item.id) return String(item.id);
+                    return String(item);
+                  } catch (e) { return null; }
+                };
+
+                const payload = {
+                  chatId: safeId(group.chat) || null,
+                  groupId: safeId(group._id) || null,
+                  removedUserId: String(rid),
+                  message: `${targetName} was removed from the group`,
+                  group: {
+                    _id: group._id,
+                    name: group.name,
+                    participants: group.participants || [],
+                  }
+                };
+
+                try {
+                  io.to(String(rid)).emit('removed from group', payload);
+                  console.log('[SOCKET] updateGroupSettings: emitted removed from group to', String(rid));
+                } catch (e) {
+                  console.warn('updateGroupSettings: emit to removed user failed', e && e.message);
+                }
+              } catch (e) {
+                console.warn('updateGroupSettings: failed to construct removed payload', e && e.message);
               }
             } catch (e) {
               console.warn('Failed to create removal message for', rid, e && e.message);

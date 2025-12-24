@@ -55,9 +55,10 @@ export const getUserMediaAndDocs = async (req, res) => {
       });
     }
 
-    // Find all messages in this chat with attachments
+    // Find all messages in this chat with attachments, excluding messages hidden from current user
     const messages = await Message.find({
-      chat: chat._id
+      chat: chat._id,
+      excludeUsers: { $not: { $elemMatch: { $eq: currentUserId } } }
     }).sort({ createdAt: -1 });
 
     const media = [];

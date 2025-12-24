@@ -78,20 +78,36 @@ const MessageNotification = ({ notification, onClose, onReply, onOpen }) => {
       </div>
 
       {/* Content */}
-      <div 
+      <div
         className="px-4 py-3 cursor-pointer hover:bg-white/5 transition"
         onClick={() => {
+          // normalize avatar: treat empty/"null"/"undefined" as missing
+          const normalizeAvatar = (a) => {
+            if (!a && a !== 0) return undefined; // null, undefined, empty string -> undefined
+            if (typeof a === 'string') {
+              const v = a.trim();
+              if (!v) return undefined;
+              if (v.toLowerCase() === 'null' || v.toLowerCase() === 'undefined') return undefined;
+              return v;
+            }
+            return a;
+          };
+
           // If group message, navigate to /groups and close notification
           if (notification && (notification.isGroup || notification.groupName)) {
+            const displayName = notification.groupName || notification.senderName || 'Group';
+            const cleanedAvatar = normalizeAvatar(notification.avatar);
+            const payload = { ...notification, openedGroup: true, senderName: displayName, avatar: cleanedAvatar };
             try {
               navigate('/groups');
             } catch (e) {}
-            try { onOpen && onOpen({ ...notification, openedGroup: true }); } catch (e) {}
+            try { onOpen && onOpen(payload); } catch (e) {}
             try { onClose && onClose(); } catch (e) {}
             return;
           }
-          // default: open chat
-          try { onOpen && onOpen(notification); } catch (e) {}
+
+          // default: open chat (sanitize avatar before forwarding)
+          try { onOpen && onOpen({ ...notification, avatar: normalizeAvatar(notification.avatar) }); } catch (e) {}
           try { onClose && onClose(); } catch (e) {}
         }}
       >

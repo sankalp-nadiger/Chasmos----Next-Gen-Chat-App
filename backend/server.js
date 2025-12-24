@@ -1454,7 +1454,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
               message.status = 'delivered';
             }
           } else {
-            console.log('[SOCKET] message-delivered: not all participants delivered yet', { messageId: String(message._id), expected: expectedCount, deliveredCountForParticipants, otherParticipantIds, deliveredBy: uniqueDeliverers });
+            //console.log('[SOCKET] message-delivered: not all participants delivered yet', { messageId: String(message._id), expected: expectedCount, deliveredCountForParticipants, otherParticipantIds, deliveredBy: uniqueDeliverers });
           }
         }
 
@@ -1501,7 +1501,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
                 }
               });
             } else {
-              console.log('[SOCKET] skipping message-delivered emit until threshold met', { messageId: String(message._id), expected: otherParticipantIdsLocal.length, deliveredCountForParticipantsLocal, otherParticipantIds: otherParticipantIdsLocal, deliveredBy: Array.from(deliveredSetLocal) });
+              //console.log('[SOCKET] skipping message-delivered emit until threshold met', { messageId: String(message._id), expected: otherParticipantIdsLocal.length, deliveredCountForParticipantsLocal, otherParticipantIds: otherParticipantIdsLocal, deliveredBy: Array.from(deliveredSetLocal) });
             }
           } catch (e) { console.error('Error emitting message-delivered to personal rooms', e); }
         } catch (saveErr) {

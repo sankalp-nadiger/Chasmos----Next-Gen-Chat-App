@@ -699,12 +699,12 @@ const GroupCreation = ({
                     value={featureMedia}
                     setValue={setFeatureMedia}
                   />
-                  <FeatureToggle
+                  {/* <FeatureToggle
                     label="Gallery"
                     desc="View shared media"
                     value={featureGallery}
                     setValue={setFeatureGallery}
-                  />
+                  /> */}
                   <FeatureToggle
                     label="Docs"
                     desc="Share documents"

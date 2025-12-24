@@ -49,6 +49,9 @@ const messageSchema = new Schema(
     ,
     // For delivery tracking per-user (useful for group delivered state)
     deliveredBy: [{ type: Schema.Types.ObjectId, ref: 'User' }]
+    ,
+    // List of user ids who should NOT see this message when fetching messages
+    excludeUsers: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: [] }
   },
   { timestamps: true }
 );
@@ -64,5 +67,7 @@ messageSchema.index({ repliedTo: 1 });
 messageSchema.index({ keepFor: 1 });
 // Index mentions for fast unread-mention queries
 messageSchema.index({ mentions: 1 });
+// Index excludeUsers for efficient filtering of per-message visibility
+messageSchema.index({ excludeUsers: 1 });
 
 export default mongoose.model("Message", messageSchema);

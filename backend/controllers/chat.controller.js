@@ -1059,7 +1059,7 @@ const groupChat = await Chat.findById(chatId)
         .populate('admins', '_id name avatar email username');
 
       if (linkedGroup) {
-        console.log('[getGroupChatById] linked Group found for chat', String(chatId), String(linkedGroup._id));
+        //console.log('[getGroupChatById] linked Group found for chat', String(chatId), String(linkedGroup._id));
         groupObj.group = linkedGroup;
         // copy important settings to top-level for backward-compatibility
         groupObj.inviteEnabled = Boolean(linkedGroup.inviteEnabled);

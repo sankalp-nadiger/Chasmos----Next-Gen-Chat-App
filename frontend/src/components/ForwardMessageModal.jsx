@@ -3,11 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Search, Check, Send, Users, User, Video, FileText } from 'lucide-react';
 import CosmosBackground from './CosmosBg';
 
-const ForwardMessageModal = ({ 
-  isOpen, 
-  onClose, 
-  onForward, 
-  contacts, 
+const ForwardMessageModal = ({
+  isOpen,
+  onClose,
+  onForward,
+  contacts,
   effectiveTheme,
   currentUserId,
   message, // optional single message object being forwarded
@@ -21,20 +21,30 @@ const ForwardMessageModal = ({
   const videoProbeRef = useRef(null);
 
   const multiForward = Array.isArray(messages) && messages.length > 0;
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+
+  // map of chatId -> features object fetched from server when missing locally
+  const [groupFeaturesByChatId, setGroupFeaturesByChatId] = useState({});
+  const [crunching, setCrunching] = useState(false);
 
   // Probe video metadata for duration when attachment URL changes and no duration present (only for single message preview)
   useEffect(() => {
     setDetectedDuration(null);
     if (!message || multiForward) return;
+
     const firstAttachment = Array.isArray(message.attachments) && message.attachments.length > 0 ? message.attachments[0] : null;
     if (!firstAttachment) return;
+
     const ft = firstAttachment.fileType || '';
     if (!ft.startsWith || !ft.startsWith('video/')) return;
+
     const existing = (
-      firstAttachment.duration || firstAttachment.length || firstAttachment.fileDuration || firstAttachment.durationSeconds ||
-      firstAttachment.duration_ms || firstAttachment.durationMs || firstAttachment.duration_seconds || firstAttachment.durationStr || firstAttachment.duration_str ||
+      firstAttachment.duration || firstAttachment.length || firstAttachment.fileDuration ||
+      firstAttachment.durationSeconds || firstAttachment.duration_ms || firstAttachment.durationMs ||
+      firstAttachment.duration_seconds || firstAttachment.durationStr || firstAttachment.duration_str ||
       (firstAttachment.meta && (firstAttachment.meta.duration || firstAttachment.meta.length || firstAttachment.meta.durationSeconds))
     );
+
     if (existing) return;
 
     // create a detached video element to read metadata
@@ -43,8 +53,10 @@ const ForwardMessageModal = ({
       videoProbeRef.current = v;
       v.preload = 'metadata';
       v.crossOrigin = 'anonymous';
+
       const src = firstAttachment.fileUrl || firstAttachment.file || firstAttachment.url || firstAttachment.fileUrl;
       if (!src) return;
+
       const onLoaded = () => {
         try {
           const dur = Math.floor(v.duration || 0);
@@ -52,7 +64,11 @@ const ForwardMessageModal = ({
         } catch (e) {}
         cleanup();
       };
-      const onError = () => { cleanup(); };
+
+      const onError = () => {
+        cleanup();
+      };
+
       const cleanup = () => {
         try {
           v.removeEventListener('loadedmetadata', onLoaded);
@@ -61,6 +77,7 @@ const ForwardMessageModal = ({
           if (videoProbeRef.current === v) videoProbeRef.current = null;
         } catch (e) {}
       };
+
       v.addEventListener('loadedmetadata', onLoaded);
       v.addEventListener('error', onError);
       v.src = src;
@@ -79,11 +96,11 @@ const ForwardMessageModal = ({
   // Filter and sort contacts
   const filteredContacts = useMemo(() => {
     if (!contacts || contacts.length === 0) return [];
-    
+
     const filtered = contacts.filter(contact => {
       // Exclude current user's own chat if any
       if (contact.id === currentUserId || contact._id === currentUserId) return false;
-      
+
       const name = contact.name || contact.chatName || '';
       const matchesSearch = name.toLowerCase().includes(searchTerm.toLowerCase());
       return matchesSearch;
@@ -97,11 +114,121 @@ const ForwardMessageModal = ({
     });
   }, [contacts, searchTerm, currentUserId]);
 
+  // Determine whether the forwarded content requires media or docs features
+  const needs = useMemo(() => {
+    const msgs = multiForward ? (Array.isArray(messages) ? messages : []) : (message ? [message] : []);
+    let needMedia = false;
+    let needDocs = false;
+
+    for (const m of msgs) {
+      if (!m) continue;
+      const atts = Array.isArray(m.attachments) ? m.attachments : (m.attachments ? [m.attachments] : []);
+      if (atts.length === 0) continue;
+
+      for (const a of atts) {
+        const ft = (a && (a.fileType || a.fileTypeString || a.mimeType || a.type)) || '';
+        const t = String(ft || '').toLowerCase();
+        if (t.startsWith('image/') || t.startsWith('video/') || t.startsWith('audio/')) {
+          needMedia = true;
+        } else {
+          needDocs = true;
+        }
+      }
+    }
+
+    return { needMedia, needDocs };
+  }, [message, messages, multiForward]);
+
+  // When modal opens, fetch missing group features for group chats if backend hasn't provided them.
+  useEffect(() => {
+    let cancelled = false;
+    if (!isOpen) return;
+
+    // collect group chat ids that lack features info
+    const groupsToFetch = (contacts || []).filter(c =>
+      (c.isGroupChat || c.isGroup) &&
+      !(c.features || (c.group && c.group.features) || (c.groupSettings && c.groupSettings.features))
+    ).map(c => c.id || c._id || c.chatId).filter(Boolean);
+
+    if (groupsToFetch.length === 0) {
+      setCrunching(false);
+      return;
+    }
+
+    setCrunching(true);
+
+    (async () => {
+      try {
+        const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        const promises = groupsToFetch.map(async (gid) => {
+          try {
+            const res = await fetch(`${API_BASE_URL}/api/group/group/${encodeURIComponent(gid)}`, { headers });
+            if (!res.ok) return { gid, features: null };
+            const json = await res.json();
+            // json may be the full group object or contain group property
+            const groupObj = json && (json.group || json);
+            const derived = (groupObj && (groupObj.features || groupObj.group && groupObj.group.features)) || groupObj.features || null;
+            return { gid, features: derived };
+          } catch (e) {
+            return { gid, features: null };
+          }
+        });
+
+        const results = await Promise.all(promises);
+        if (cancelled) return;
+
+        setGroupFeaturesByChatId(prev => {
+          const copy = { ...(prev || {}) };
+          for (const r of results) {
+            if (r && r.gid) {
+              copy[String(r.gid)] = r.features || {};
+            }
+          }
+          return copy;
+        });
+      } catch (e) {
+        // ignore
+      } finally {
+        if (!cancelled) setCrunching(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  // Derive features for a chat/group object in a tolerant way (similar to GroupInfoModal)
+  const deriveFeatures = (chat) => {
+    const chatId = chat && (chat.id || chat._id || chat.chatId);
+    const fetched = chatId ? groupFeaturesByChatId[String(chatId)] : null;
+    const derivedFeaturesRaw = fetched || chat?.features || (chat?.group && chat.group.features) || (chat?.groupSettings && chat.groupSettings.features) || {};
+    return {
+      media: derivedFeaturesRaw.media !== false,
+      gallery: derivedFeaturesRaw.gallery !== false,
+      docs: derivedFeaturesRaw.docs !== false,
+      polls: derivedFeaturesRaw.polls !== false,
+    };
+  };
+
+  const isChatSelectable = (chat) => {
+    const isGroup = chat.isGroupChat || chat.isGroup || false;
+    if (!isGroup) return { allowed: true };
+
+    const features = deriveFeatures(chat);
+    if (needs.needMedia && !features.media) return { allowed: false, reason: 'media-disabled' };
+    if (needs.needDocs && !features.docs) return { allowed: false, reason: 'docs-disabled' };
+
+    return { allowed: true };
+  };
+
   const toggleChatSelection = (chat) => {
     setSelectedChats(prev => {
       const chatId = chat.chatId || chat._id || chat.id;
       const isSelected = prev.some(c => (c.chatId || c._id || c.id) === chatId);
-      
+
       if (isSelected) {
         return prev.filter(c => (c.chatId || c._id || c.id) !== chatId);
       } else {
@@ -118,8 +245,11 @@ const ForwardMessageModal = ({
         onForward(selectedChats, messages);
       } else {
         if (localForwardContent !== (message && message.content)) {
-          try { setMessage && setMessage(prev => prev ? { ...prev, content: localForwardContent } : prev); } catch (e) {}
+          try {
+            setMessage && setMessage(prev => prev ? { ...prev, content: localForwardContent } : prev);
+          } catch (e) {}
         }
+
         // Build optional forward payload (include content and attachments when present)
         if (message) {
           const payload = {
@@ -132,6 +262,7 @@ const ForwardMessageModal = ({
           onForward(selectedChats);
         }
       }
+
       setSelectedChats([]);
       setSearchTerm('');
       onClose();
@@ -143,6 +274,10 @@ const ForwardMessageModal = ({
     return selectedChats.some(c => (c.chatId || c._id || c.id) === chatId);
   };
 
+  const forwardBtnClass = selectedChats.length > 0
+    ? 'bg-blue-500 text-white hover:bg-blue-600 shadow-lg shadow-blue-500/30'
+    : `${effectiveTheme.secondary} ${effectiveTheme.textSecondary} cursor-not-allowed opacity-50`;
+
   if (!isOpen) return null;
 
   return (
@@ -152,49 +287,57 @@ const ForwardMessageModal = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
           onClick={onClose}
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
         >
           {/* CosmosBg for day mode */}
           {effectiveTheme.mode !== 'dark' && (
-            <div className="absolute inset-0 w-full h-full pointer-events-none select-none z-0">
+            <div className="absolute inset-0 overflow-hidden">
               <CosmosBackground />
             </div>
           )}
+
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={e => e.stopPropagation()}
             className={`${effectiveTheme.primary} rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[80vh] relative z-10 ${effectiveTheme.mode !== 'dark' ? 'bg-white/90' : ''}`}
           >
             {/* Header */}
             <div className={`${effectiveTheme.secondary} p-4 flex items-center justify-between border-b ${effectiveTheme.border}`}>
               <h2 className={`text-xl font-semibold ${effectiveTheme.text}`}>
-                  {multiForward ? `Forward ${messages.length} message${messages.length > 1 ? 's' : ''}` : 'Forward Message'}
-                </h2>
+                {multiForward ? `Forward ${messages.length} message${messages.length > 1 ? 's' : ''}` : 'Forward Message'}
+              </h2>
               <button
                 onClick={onClose}
-                className={`${effectiveTheme.textSecondary} transition-colors p-1 rounded-full hover:bg-red-500 hover:text-white dark:hover:bg-red-600`}
+                className={`${effectiveTheme.textSecondary} hover:${effectiveTheme.text} transition-colors`}
               >
-                <X className="w-5 h-5" />
+                <X size={24} />
               </button>
             </div>
 
             {message && (() => {
-              const hasImageAttachment = Array.isArray(message.attachments) && message.attachments.some(a => a && a.fileType && a.fileType.startsWith && a.fileType.startsWith('image/'));
+              const hasImageAttachment = Array.isArray(message.attachments) && message.attachments.some(a =>
+                a && a.fileType && a.fileType.startsWith && a.fileType.startsWith('image/')
+              );
+
               // Only show preview block when there's user text or an image attachment
               if (!(message.content || hasImageAttachment)) return null;
 
-              const firstImage = hasImageAttachment ? message.attachments.find(a => a && a.fileType && a.fileType.startsWith && a.fileType.startsWith('image/')) : null;
+              const firstImage = hasImageAttachment ? message.attachments.find(a =>
+                a && a.fileType && a.fileType.startsWith && a.fileType.startsWith('image/')
+              ) : null;
+
               const firstAttachment = Array.isArray(message.attachments) && message.attachments.length > 0 ? message.attachments[0] : null;
 
-            
               const formatDuration = (val) => {
                 if (val === null || val === undefined || val === '') return null;
+
                 // If already in mm:ss or h:mm:ss form
                 if (typeof val === 'string') {
                   const s = val.trim();
+
                   // ISO 8601 duration like PT1M13S
                   const isoMatch = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/i.exec(s);
                   if (isoMatch) {
@@ -204,11 +347,14 @@ const ForwardMessageModal = ({
                     const total = h * 3600 + m * 60 + Math.round(sec);
                     return formatDuration(total);
                   }
+
                   // If already mm:ss or h:mm:ss keep as-is (validate)
                   if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) return s;
+
                   // If numeric string in seconds or milliseconds
                   const asNum = Number(s);
                   if (!isNaN(asNum)) return formatDuration(asNum);
+
                   // If trailing 's' like '13s' or '1m13s'
                   const humanMatch = /(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/i.exec(s);
                   if (humanMatch && (humanMatch[1] || humanMatch[2] || humanMatch[3])) {
@@ -218,18 +364,23 @@ const ForwardMessageModal = ({
                     const total = h * 3600 + m * 60 + sec;
                     return formatDuration(total);
                   }
+
                   return null;
                 }
 
                 // Numeric value
                 let seconds = Number(val);
                 if (isNaN(seconds)) return null;
+
                 // Convert milliseconds to seconds if value is large
                 if (seconds > 10000) seconds = Math.round(seconds / 1000);
+
                 seconds = Math.max(0, Math.floor(seconds));
+
                 const h = Math.floor(seconds / 3600);
                 const m = Math.floor((seconds % 3600) / 60);
                 const s = seconds % 60;
+
                 if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
                 return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
               };
@@ -237,21 +388,10 @@ const ForwardMessageModal = ({
               const getAttachmentDuration = (att) => {
                 if (!att) return null;
                 const cand = (
-                  att.duration ||
-                  att.length ||
-                  att.fileDuration ||
-                  att.durationSeconds ||
-                  att.duration_ms ||
-                  att.durationMs ||
-                  att.duration_seconds ||
-                  att.durationStr ||
-                  att.duration_str ||
-                  att.fileDurationMs ||
-                  att.lengthSeconds ||
-                  att.time ||
-                  att.video_length ||
-                  att.videoDuration ||
-                  att.video_duration ||
+                  att.duration || att.length || att.fileDuration || att.durationSeconds ||
+                  att.duration_ms || att.durationMs || att.duration_seconds || att.durationStr ||
+                  att.duration_str || att.fileDurationMs || att.lengthSeconds || att.time ||
+                  att.video_length || att.videoDuration || att.video_duration ||
                   (att.meta && (att.meta.duration || att.meta.length || att.meta.durationSeconds || att.meta.videoDuration)) ||
                   (att.file && (att.file.duration || att.file.durationMs || (att.file.metadata && att.file.metadata.duration))) ||
                   (att.info && att.info.duration) ||
@@ -265,59 +405,73 @@ const ForwardMessageModal = ({
               const displayDuration = firstAttachmentDuration || detectedDuration;
 
               return (
-                <div className={`p-3 border-b ${effectiveTheme.border} flex items-start space-x-3 ${effectiveTheme.secondary}`}>
+                <div className={`${effectiveTheme.secondary} p-3 border-b ${effectiveTheme.border} flex items-start space-x-3`}>
                   {/* Attachment thumbnail only for images; show icon for non-image when caption exists */}
-                  <div className="flex-shrink-0 w-14 h-14 flex items-center justify-center">
+                  <div className="flex-shrink-0">
                     {firstImage ? (
-                      <img src={firstImage.fileUrl || firstImage.file || ''} alt="attachment" className="w-14 h-14 rounded-md object-cover" />
+                      <img
+                        src={firstImage.fileUrl || firstImage.file || firstImage.url}
+                        alt="attachment"
+                        className="w-12 h-12 rounded object-cover"
+                      />
                     ) : (firstAttachment && message.content) ? (
                       (() => {
                         const ft = firstAttachment.fileType || '';
-                                if (ft.startsWith('video/')) {
+                        if (ft.startsWith('video/')) {
                           return (
-                            <div className={`w-14 h-14 rounded-md flex flex-col items-center justify-center text-sm ${effectiveTheme.secondary}`} style={{minWidth: 56, minHeight: 56}}>
-                              <Video className={`w-6 h-6 ${effectiveTheme.text}`} />
+                            <div className="relative w-12 h-12 bg-gray-700 rounded flex items-center justify-center">
+                              <Video size={20} className="text-white" />
                               {formatDuration(displayDuration) && (
-                                <div className={`text-[10px] mt-1 ${effectiveTheme.textSecondary}`}>{formatDuration(displayDuration)}</div>
+                                <div className="absolute bottom-0 right-0 bg-black/70 text-white text-[9px] px-1 rounded">
+                                  {formatDuration(displayDuration)}
+                                </div>
                               )}
                             </div>
                           );
                         }
                         // fallback to document icon
                         return (
-                          <div className={`w-14 h-14 rounded-md flex items-center justify-center ${effectiveTheme.secondary}`} style={{minWidth:56, minHeight:56}}>
-                            <FileText className={`w-6 h-6 ${effectiveTheme.text}`} />
+                          <div className="w-12 h-12 bg-gray-700 rounded flex items-center justify-center">
+                            <FileText size={20} className="text-white" />
                           </div>
                         );
                       })()
                     ) : null}
                   </div>
-                  <div className="flex-1 text-sm">
-                    {message.content ? (
-                      <div className="flex items-start justify-between">
-                        <div className={`text-sm ${effectiveTheme.text} mr-2 break-words`}>{localForwardContent || message.content}</div>
-                        {/* Only show X to remove caption when there are attachments or content */}
-                        {(Array.isArray(message.attachments) && message.attachments.length > 0) && (
-                          <button onClick={() => {
-                            try { setMessage && setMessage(prev => prev ? { ...prev, content: '' } : prev); } catch (e) {}
+
+                  {message.content ? (
+                    <div className="flex-1 flex items-start justify-between">
+                      <p className={`${effectiveTheme.text} text-sm line-clamp-2 flex-1`}>
+                        {localForwardContent || message.content}
+                      </p>
+                      {/* Only show X to remove caption when there are attachments or content */}
+                      {(Array.isArray(message.attachments) && message.attachments.length > 0) && (
+                        <button
+                          onClick={() => {
+                            try {
+                              setMessage && setMessage(prev => prev ? { ...prev, content: '' } : prev);
+                            } catch (e) {}
                             setLocalForwardContent('');
-                          }} className={`${effectiveTheme.textSecondary} ml-2 rounded-full p-1`}>
-                            <X className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className={`text-sm ${effectiveTheme.textSecondary}`}>{hasImageAttachment ? 'Photo' : (message.type === 'poll' ? 'Poll' : 'Forwarded message')}</div>
-                    )}
-                  </div>
+                          }}
+                          className={`${effectiveTheme.textSecondary} ml-2 rounded-full p-1`}
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <p className={`${effectiveTheme.textSecondary} text-sm italic flex-1`}>
+                      {hasImageAttachment ? 'Photo' : (message.type === 'poll' ? 'Poll' : 'Forwarded message')}
+                    </p>
+                  )}
                 </div>
               );
             })()}
 
             {/* Search Bar */}
-            <div className={`p-4 border-b ${effectiveTheme.border}`}>
-              <div className={`flex items-center space-x-2 ${effectiveTheme.secondary} rounded-lg px-3 py-2 border ${effectiveTheme.border}`}>
-                <Search className={`w-4 h-4 ${effectiveTheme.textSecondary}`} />
+            <div className={`${effectiveTheme.secondary} p-4 border-b ${effectiveTheme.border}`}>
+              <div className={`flex items-center space-x-2 ${effectiveTheme.input} rounded-lg px-3 py-2`}>
+                <Search size={20} className={effectiveTheme.textSecondary} />
                 <input
                   type="text"
                   placeholder="Search chats..."
@@ -330,27 +484,41 @@ const ForwardMessageModal = ({
             </div>
 
             {/* Chat List */}
-            <div className="flex-1 overflow-y-auto min-h-0">
-              {filteredContacts.length === 0 ? (
-                <div className={`p-8 text-center ${effectiveTheme.textSecondary}`}>
-                  {searchTerm ? 'No chats found' : 'No recent chats'}
+            <div className="flex-1 overflow-y-auto">
+              {crunching ? (
+                <div className="flex flex-col items-center justify-center h-full space-y-2 p-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                  <p className={`${effectiveTheme.textSecondary} text-sm`}>Crunching latest chats for you...</p>
+                  <p className={`${effectiveTheme.textSecondary} text-xs`}>Checking which groups accept this content</p>
+                </div>
+              ) : (filteredContacts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full p-8">
+                  <Users size={48} className={effectiveTheme.textSecondary} />
+                  <p className={`${effectiveTheme.textSecondary} mt-4`}>
+                    {searchTerm ? 'No chats found' : 'No recent chats'}
+                  </p>
                 </div>
               ) : (
                 filteredContacts.map((chat) => {
                   const chatId = chat.id || chat._id || chat.chatId;
                   const selected = isSelected(chat);
                   const isGroup = chat.isGroupChat || chat.isGroup || false;
+                  const { allowed, reason } = isChatSelectable(chat);
                   const chatName = chat.name || chat.chatName || 'Unknown';
                   const chatAvatar = chat.avatar || chat.groupSettings?.avatar || chat.pic || null;
 
                   return (
                     <motion.div
                       key={chatId}
-                      onClick={() => toggleChatSelection(chat)}
-                      whileHover={{ backgroundColor: effectiveTheme.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)' }}
-                      className={`p-4 flex items-center space-x-3 cursor-pointer transition-colors ${
+                      onClick={() => {
+                        if (allowed) toggleChatSelection(chat);
+                      }}
+                      whileHover={{
+                        backgroundColor: effectiveTheme.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)'
+                      }}
+                      className={`p-4 flex items-center space-x-3 transition-colors ${
                         selected ? (effectiveTheme.mode === 'dark' ? 'bg-blue-500/20' : 'bg-blue-50') : ''
-                      }`}
+                      } ${!allowed ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                     >
                       {/* Avatar */}
                       <div className="relative flex-shrink-0">
@@ -361,47 +529,51 @@ const ForwardMessageModal = ({
                             className="w-12 h-12 rounded-full object-cover"
                           />
                         ) : (
-                          <div className={`w-12 h-12 rounded-full flex items-center justify-center font-semibold ${isGroup ? 'bg-gray-200 text-gray-700' : `${effectiveTheme.accent} text-white`}`}>
+                          <div className={`w-12 h-12 rounded-full ${effectiveTheme.secondary} flex items-center justify-center`}>
                             {isGroup ? (
-                              <Users className="w-6 h-6" />
+                              <Users size={24} className={effectiveTheme.textSecondary} />
                             ) : (
-                              <User className="w-6 h-6" />
+                              <User size={24} className={effectiveTheme.textSecondary} />
                             )}
                           </div>
                         )}
-                        
+
                         {/* Selection Indicator */}
-                        <AnimatePresence>
-                          {selected && (
-                            <motion.div
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                              exit={{ scale: 0 }}
-                              className="absolute -top-1 -right-1 bg-blue-500 rounded-full p-1"
-                            >
-                              <Check className="w-3 h-3 text-white" />
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
+                        {selected && (
+                          <div className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
+                            <Check size={12} className="text-white" />
+                          </div>
+                        )}
                       </div>
 
                       {/* Chat Info */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-2">
-                          <h3 className={`font-medium ${effectiveTheme.text} truncate`}>
-                            {chatName}
-                          </h3>
-                          {isGroup && (
-                            <span className={`text-xs ${effectiveTheme.textSecondary} flex items-center`}>
-                              <Users className="w-3 h-3 mr-1" />
+                        <h3 className={`font-medium ${effectiveTheme.text} truncate`}>
+                          {chatName}
+                        </h3>
+
+                        {isGroup && (
+                          <div className="flex items-center space-x-2 mt-0.5">
+                            <span className={`text-xs ${effectiveTheme.textSecondary}`}>
                               Group
                             </span>
-                          )}
-                        </div>
+                            {!allowed && reason === 'media-disabled' && (
+                              <span className="text-xs text-red-500">
+                                Media disabled
+                              </span>
+                            )}
+                            {!allowed && reason === 'docs-disabled' && (
+                              <span className="text-xs text-red-500">
+                                Docs disabled
+                              </span>
+                            )}
+                          </div>
+                        )}
+
                         {(() => {
                           // Handle last message display with attachment support
                           let lastMessageText = '';
-                          
+
                           if (chat.lastMessage) {
                             // If lastMessage is a string (from backend preview)
                             if (typeof chat.lastMessage === 'string') {
@@ -431,13 +603,13 @@ const ForwardMessageModal = ({
                           }
                           // Check if hasAttachment flag is set
                           else if (chat.hasAttachment) {
-                            lastMessageText = chat.attachmentFileName 
-                              ? `📎 ${chat.attachmentFileName}` 
+                            lastMessageText = chat.attachmentFileName
+                              ? `📎 ${chat.attachmentFileName}`
                               : '📎 Attachment';
                           }
 
                           return lastMessageText ? (
-                            <p className={`text-sm ${effectiveTheme.textSecondary} truncate`}>
+                            <p className={`text-sm ${effectiveTheme.textSecondary} truncate mt-0.5`}>
                               {lastMessageText}
                             </p>
                           ) : null;
@@ -445,37 +617,31 @@ const ForwardMessageModal = ({
                       </div>
 
                       {/* Checkbox */}
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                        selected 
-                          ? 'bg-blue-500 border-blue-500' 
-                          : `border-gray-300 dark:border-gray-600`
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                        selected ? 'bg-blue-500 border-blue-500' : `border-gray-400 ${effectiveTheme.secondary}`
                       }`}>
-                        {selected && <Check className="w-3 h-3 text-white" />}
+                        {selected && <Check size={16} className="text-white" />}
                       </div>
                     </motion.div>
                   );
                 })
-              )}
+              ))}
             </div>
 
             {/* Footer */}
-            <div className={`${effectiveTheme.primary} p-4 border-t ${effectiveTheme.border} flex items-center justify-between flex-shrink-0`}>
+            <div className={`${effectiveTheme.secondary} p-4 border-t ${effectiveTheme.border} flex items-center justify-between`}>
               <span className={`text-sm ${effectiveTheme.textSecondary}`}>
-                {selectedChats.length > 0 
+                {selectedChats.length > 0
                   ? `${selectedChats.length} chat${selectedChats.length > 1 ? 's' : ''} selected`
                   : 'Select chats to forward'}
               </span>
               <button
                 onClick={handleForward}
                 disabled={selectedChats.length === 0}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                  selectedChats.length > 0
-                    ? 'bg-blue-500 text-white hover:bg-blue-600 shadow-lg shadow-blue-500/30'
-                    : `${effectiveTheme.secondary} ${effectiveTheme.textSecondary} cursor-not-allowed opacity-50`
-                }`}
+                className={`px-6 py-2 rounded-lg font-medium transition-all flex items-center space-x-2 ${forwardBtnClass}`}
               >
-                <Send className="w-4 h-4" />
                 <span>Forward</span>
+                <Send size={18} />
               </button>
             </div>
           </motion.div>
