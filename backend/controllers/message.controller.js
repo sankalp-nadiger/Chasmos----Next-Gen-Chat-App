@@ -885,8 +885,6 @@ export const getPinnedMessages = asyncHandler(async (req, res) => {
 // Get media attachments (images, videos) from chats
 export const getMediaAttachments = asyncHandler(async (req, res) => {
   try {
-    console.log('📸 [getMediaAttachments] Request received');
-    console.log('Query params:', req.query);
     
     const { chatIds } = req.query;
 
@@ -898,7 +896,6 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
 
     // Parse comma-separated chat IDs
     const chatIdArray = chatIds.split(',').map(id => id.trim());
-    console.log('📋 Parsed chat IDs:', chatIdArray);
 
     // Verify user has access to these chats
     const chats = await Chat.find({
@@ -906,15 +903,12 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
       users: req.user._id
     });
 
-    console.log(`✅ Found ${chats.length} chats user has access to`);
-
     if (chats.length === 0) {
       console.log('⚠️ No accessible chats found, returning empty array');
       return res.json([]);
     }
 
     const verifiedChatIds = chats.map(chat => chat._id);
-    console.log('🔐 Verified chat IDs:', verifiedChatIds);
 
     // Find all messages with media attachments in these chats
     const messages = await Message.find({
@@ -932,8 +926,6 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
       .populate('sender', 'name email avatar')
       .sort({ createdAt: -1 })
       .lean();
-
-    console.log(`📨 Found ${messages.length} messages with attachments`);
 
     // Extract and flatten attachments
     const mediaItems = [];
@@ -959,7 +951,6 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
       }
     });
 
-    console.log(`✨ Returning ${mediaItems.length} media items`);
     res.json(mediaItems);
   } catch (error) {
     res.status(400);
@@ -970,8 +961,6 @@ export const getMediaAttachments = asyncHandler(async (req, res) => {
 // Get link attachments from chats
 export const getLinkAttachments = asyncHandler(async (req, res) => {
   try {
-    console.log('🔗 [getLinkAttachments] Request received');
-    console.log('Query params:', req.query);
     
     const { chatIds } = req.query;
 
@@ -983,7 +972,6 @@ export const getLinkAttachments = asyncHandler(async (req, res) => {
 
     // Parse comma-separated chat IDs
     const chatIdArray = chatIds.split(',').map(id => id.trim());
-    console.log('📋 Parsed chat IDs:', chatIdArray);
 
     // Verify user has access to these chats
     const chats = await Chat.find({
@@ -1041,8 +1029,6 @@ export const getLinkAttachments = asyncHandler(async (req, res) => {
 // Get document attachments from chats
 export const getDocumentAttachments = asyncHandler(async (req, res) => {
   try {
-    console.log('📄 [getDocumentAttachments] Request received');
-    console.log('Query params:', req.query);
     
     const { chatIds } = req.query;
 

@@ -123,8 +123,6 @@ export const uploadScreenshot = asyncHandler(async (req, res) => {
 // Get all screenshots for specific chats
 export const getScreenshots = asyncHandler(async (req, res) => {
   try {
-    console.log('📸 [getScreenshots] Request received');
-    console.log('Query params:', req.query);
     
     const { chatIds } = req.query;
 
@@ -136,7 +134,6 @@ export const getScreenshots = asyncHandler(async (req, res) => {
 
     // Parse comma-separated chat IDs
     const chatIdArray = chatIds.split(',').map(id => id.trim());
-    console.log('📋 Parsed chat IDs:', chatIdArray);
 
     // Verify user has access to these chats
     const chats = await Chat.find({
@@ -152,7 +149,6 @@ export const getScreenshots = asyncHandler(async (req, res) => {
     }
 
     const verifiedChatIds = chats.map(chat => chat._id);
-    console.log('🔐 Verified chat IDs:', verifiedChatIds);
 
     // Find all screenshots in these chats
     const screenshots = await Screenshot.find({
@@ -164,8 +160,6 @@ export const getScreenshots = asyncHandler(async (req, res) => {
       .populate('chat', 'chatName isGroupChat')
       .sort({ createdAt: -1 })
       .lean();
-
-    console.log(`✨ Found ${screenshots.length} screenshots`);
 
     // Transform screenshots for frontend
     const screenshotItems = screenshots.map(screenshot => ({
@@ -183,7 +177,6 @@ export const getScreenshots = asyncHandler(async (req, res) => {
       messageId: screenshot.systemMessage // For navigation to message
     }));
 
-    console.log(`✨ Returning ${screenshotItems.length} screenshot items`);
     res.json(screenshotItems);
   } catch (error) {
     console.error('Error fetching screenshots:', error);
