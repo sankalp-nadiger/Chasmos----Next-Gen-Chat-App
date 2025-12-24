@@ -2499,6 +2499,7 @@ const togglePin = async (docId, isPinnedNow) => {
   const [loading, setLoading] = useState(true);
 const [error, setError] = useState(null);
 const [minLoadingComplete, setMinLoadingComplete] = useState(false);
+const [dataFetched, setDataFetched] = useState(false);
 
   // Ref for chat search container (click-outside functionality)
   const chatSearchRef = useRef(null);
@@ -4413,6 +4414,7 @@ useEffect(() => {
   // Fetch recent chats
   refreshRecentChats().finally(() => {
     chatsFetched = true;
+    setDataFetched(true);
     maybeHideLoader();
   });
   
@@ -8536,7 +8538,7 @@ useEffect(() => {
       ) : (
         <>
           {/* Filtered Chats/Groups List */}
-          {loading || (!minLoadingComplete && recentChats.length === 0) ? (
+          {(loading || !minLoadingComplete || !dataFetched) ? (
   <div className="flex flex-col items-center justify-center py-10">
     <svg
       className="animate-spin h-8 w-8 text-blue-500 mb-3"
@@ -8595,23 +8597,21 @@ useEffect(() => {
               onSelect={(c) => handleOpenChat(c)}
             />
           ))
-        ) : activeNavItem === 'groups' ? (
-          !minLoadingComplete ? null : (
+        ) : (!loading && minLoadingComplete && dataFetched) ? (
+          activeNavItem === 'groups' ? (
             <div className="mt-2 text-sm">
               <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
                 You're not in any group!
               </p>
             </div>
-          )
-        ) : (
-          !minLoadingComplete ? null : (
+          ) : (
             <div className="mt-2 text-sm">
               <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
                 You don't have any active chat going on!
               </p>
             </div>
           )
-        )}
+        ) : null}
       </div>
     );
   })()
@@ -8620,7 +8620,7 @@ useEffect(() => {
       )}
 
       {/* Empty State: Only show if loading is false and there are no chats or contacts */}
-      {(!loading && minLoadingComplete && !searchTerm.trim() && recentChats.length === 0 && contacts.length === 0) ? (
+      {(!loading && minLoadingComplete && dataFetched && !searchTerm.trim() && recentChats.length === 0 && contacts.length === 0) ? (
         <div className="text-center space-y-4 mt-10">
           <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
             Start chatting with Chasmos!
