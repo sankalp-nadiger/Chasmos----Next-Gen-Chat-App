@@ -83,13 +83,23 @@ export const createGroup = async (req, res) => {
       });
     }
 
+    // Normalize incoming participants (accept array of ids or objects)
+    const incomingParticipants = Array.isArray(req.body.participants) ? req.body.participants : [];
+    const normalizedExtraParticipants = incomingParticipants
+      .map(p => (p && (p._id || p.id || p.userId)) ? (p._id || p.id || p.userId) : p)
+      .filter(Boolean)
+      .map(String);
+
+    // Ensure admin is included and dedupe
+    const initialParticipantsSet = new Set([String(adminId), ...normalizedExtraParticipants]);
+
     // ✅ Create group with all settings - EXPLICIT VALUES
     const groupData = {
       name: name.trim(),
       description: description || "",
       avatar: avatarUrl,
       icon: avatarUrl,
-      participants: [adminId],
+      participants: Array.from(initialParticipantsSet),
       admin: adminId,
       admins: [adminId],
       chat: chat._id,
@@ -175,6 +185,51 @@ export const createGroup = async (req, res) => {
       }
     } catch (e) {
       console.error('group.controller: failed to emit group created', e);
+    }
+
+    // If caller provided an initial participants list in the request body,
+    // add them to the group and notify each via their personal 1:1 chat.
+    try {
+      const actorId = adminId;
+      const participantIds = (Array.isArray(group.participants) ? group.participants : []).map(p => String(p));
+      for (const pidStr of participantIds) {
+        if (!pidStr) continue;
+        if (String(actorId) === pidStr) continue;
+
+        // ensure chat participants updated
+        try {
+          await Chat.findByIdAndUpdate(group.chat, { $addToSet: { participants: pidStr } });
+        } catch (e) {}
+
+        // create personal system message for this participant
+        try {
+          const actor = await User.findById(actorId).select('name avatar');
+          const addedUser = await User.findById(pidStr).select('name avatar');
+          let personalChat = await Chat.findOne({ isGroupChat: false, participants: { $all: [actorId, pidStr] } });
+          if (!personalChat) {
+            personalChat = await Chat.create({ chatName: 'private', isGroupChat: false, users: [actorId, pidStr], participants: [actorId, pidStr] });
+          }
+          const msgContent = `${actor?.name || 'A user'} added ${addedUser?.name || 'a user'} to the group ${group.name}`;
+          const created = await Message.create({ sender: actorId, content: msgContent, type: 'system', chat: personalChat._id });
+          const populated = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
+          try {
+            const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+            const io = getSocketIOInstance();
+            if (io) {
+              io.to(String(personalChat._id)).emit('message recieved', populated);
+              try { io.to(String(pidStr)).emit('message recieved', populated); } catch (e) {}
+            }
+          } catch (e) {
+            console.warn('createGroup: failed to emit personal system message', e && e.message);
+          }
+        } catch (e) {
+          console.warn('createGroup: failed to create personal system message for participant', pidStr, e && e.message);
+        }
+      }
+      // persist any participant additions (group already created with participants)
+      await group.save();
+    } catch (e) {
+      console.warn('createGroup: processing participants failed', e && e.message);
     }
 
     return ok(res, { message: "Group created", group });
@@ -325,6 +380,60 @@ export const addMember = async (req, res) => {
       $push: { participants: userId },
     });
 
+    // Create a personal system message notifying the added user that
+    // they were added to the group. Ensure a 1:1 Chat exists between
+    // the actor (req.user) and the added user, then create a 'system'
+    // message in that personal room and emit socket events so the
+    // frontend displays it in the added user's personal chat.
+    try {
+      const actorId = req.user._id;
+      const actor = await User.findById(actorId).select('name avatar');
+      const addedUser = await User.findById(userId).select('name avatar');
+
+      // Find or create a personal (non-group) chat between actor and added user
+      let personalChat = await Chat.findOne({
+        isGroupChat: false,
+        participants: { $all: [actorId, userId] }
+      });
+
+      if (!personalChat) {
+        personalChat = await Chat.create({
+          chatName: 'private',
+          isGroupChat: false,
+          users: [actorId, userId],
+          participants: [actorId, userId]
+        });
+      }
+
+      const msgContent = `${actor?.name || 'A user'} added ${addedUser?.name || 'a user'} to the group ${group.name}`;
+
+      const created = await Message.create({
+        sender: actorId,
+        content: msgContent,
+        type: 'system',
+        chat: personalChat._id,
+      });
+
+      const populated = await Message.findById(created._id)
+        .populate('sender', 'name avatar email')
+        .populate('attachments')
+        .populate('chat');
+
+      try {
+        const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+        const io = getSocketIOInstance();
+        if (io) {
+          // emit to the personal chat room and directly to the user socket
+          io.to(String(personalChat._id)).emit('message recieved', populated);
+          try { io.to(String(userId)).emit('message recieved', populated); } catch (e) {}
+        }
+      } catch (e) {
+        console.warn('addMember: failed to emit personal system message', e && e.message);
+      }
+    } catch (e) {
+      console.warn('addMember: failed to create personal system message', e && e.message);
+    }
+
     return ok(res, { message: "Member added", group });
   } catch (error) {
     err(res, error.message, 500);
@@ -434,6 +543,43 @@ export const exitGroup = async (req, res) => {
       }
     }
 
+    // Create a system message announcing the user will leave and emit to all current participants (including the leaving user)
+    try {
+      const user = await User.findById(userId).select('name avatar');
+      const actorName = user?.name || 'A user';
+
+      const created = await Message.create({
+        sender: userId,
+        content: `${actorName} left the group`,
+        type: 'system',
+        chat: group.chat,
+      });
+
+      const populated = await Message.findById(created._id)
+        .populate('sender', 'name avatar email')
+        .populate('attachments')
+        .populate('chat');
+
+      try {
+        const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
+        const io = getSocketIOInstance();
+        if (io && group && group.chat) {
+          // Emit to the chat room
+          io.to(String(group.chat)).emit('message recieved', populated);
+
+          // Emit to each current participant (this includes the leaving user)
+          const users = (group.participants && group.participants.length) ? group.participants : [];
+          users.forEach(u => {
+            try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
+          });
+        }
+      } catch (e) {
+        console.warn('exitGroup: failed to emit socket event', e && e.message);
+      }
+    } catch (e) {
+      console.warn('exitGroup: failed to create system message', e && e.message);
+    }
+
     // Remove user from participants and admins arrays
     group.participants = Array.isArray(group.participants)
       ? group.participants.filter((id) => String(id) !== userIdStr)
@@ -460,6 +606,8 @@ export const exitGroup = async (req, res) => {
     }
 
     await group.save();
+
+    // Do NOT modify Chat.participants here — keep Chat as-is per request.
 
     return ok(res, { message: "Exited group", group });
   } catch (error) {

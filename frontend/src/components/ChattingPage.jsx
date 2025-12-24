@@ -2236,6 +2236,9 @@ const togglePin = async (docId, isPinnedNow) => {
     }
   }, [activeSection]);
   const [recentChats, setRecentChats] = useState([]);
+  // Separate list used only for the Forward Message modal to avoid
+  // mutating the main recent chats list when preparing forward targets.
+  const [forwardRecentChats, setForwardRecentChats] = useState([]);
 
   // Guard: set to avoid duplicate in-flight group participant fetches
   const fetchingGroupParticipantsRef = useRef(new Set());
@@ -2688,10 +2691,53 @@ const [minLoadingComplete, setMinLoadingComplete] = useState(false);
   };
 
   // Forward message handlers (supports forwarding multiple messages)
-  const handleForwardMessage = useCallback((message) => {
+  // Fetch recent chats using the dedicated forward endpoint and normalize
+  const fetchRecentChatsForForward = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`${API_BASE_URL}/api/chat/recent/forward`, { headers });
+      if (!res.ok) throw new Error('Failed to fetch recent chats for forward');
+      const json = await res.json();
+      try {
+        const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+        const myId = String(_local._id || _local.id || _local.userId || '');
+        const mapped = (Array.isArray(json) ? json : []).map((c) => {
+          try {
+            const participants = c.participants || c.users || [];
+            if (!c.isGroupChat && Array.isArray(participants) && participants.length > 0) {
+              const other = participants.find(p => {
+                const pid = p && (p._id || p.id || p.userId || p);
+                return pid && String(pid) !== myId;
+              }) || participants[0];
+              if (other) {
+                const name = other.name || other.email || other.username || other._id || c.name || c.chatName || '';
+                const avatar = other.avatar || other.image || other.avatarUrl || c.avatar || c.groupSettings?.avatar || '';
+                return { ...c, name, avatar };
+              }
+            }
+          } catch (e) {}
+          return c;
+        });
+        setForwardRecentChats(mapped);
+        return mapped;
+      } catch (e) {
+        console.warn('Normalization of recent chats failed', e);
+        setForwardRecentChats(Array.isArray(json) ? json : []);
+        return Array.isArray(json) ? json : [];
+      }
+    } catch (err) {
+      console.warn('fetchRecentChatsForForward error', err);
+      return [];
+    }
+  }, []);
+
+  const handleForwardMessage = useCallback(async (message) => {
+    // Fetch freshest recent chats tailored for forwarding before opening modal
+    await fetchRecentChatsForForward();
     setMessagesToForward([message]);
     setShowForwardModal(true);
-  }, []);
+  }, [fetchRecentChatsForForward]);
 
   const handleForwardToChats = async (selectedChats) => {
     if (!messagesToForward || messagesToForward.length === 0 || selectedChats.length === 0) return;
@@ -7564,7 +7610,9 @@ useEffect(() => {
           setMessagesToForward([]);
         }}
         onForward={handleForwardToChats}
-        contacts={recentChats}
+        // Use the dedicated forward-only list when available so we don't
+        // overwrite or disturb the main `recentChats` list used elsewhere.
+        contacts={forwardRecentChats && forwardRecentChats.length > 0 ? forwardRecentChats : recentChats}
         effectiveTheme={effectiveTheme}
         currentUserId={currentUserId}
         // Pass single message when only one, else pass messages array
@@ -9040,7 +9088,13 @@ useEffect(() => {
                     </button>
                     <button
                       className={`text-sm px-3 py-1 rounded bg-blue-500 text-white`}
-                      onClick={() => {
+                      onClick={async () => {
+                        // Fetch freshest recent chats for forwarding, then open modal
+                        try {
+                          await fetchRecentChatsForForward();
+                        } catch (e) {
+                          console.warn('Failed to prefetch recent chats for forward', e);
+                        }
                         // Build messages array from selected ids and open modal without preview
                         const all = getMessagesForContact(selectedContact.id, chatSearchTerm) || [];
                         const msgs = all.filter(m => selectedForwards.includes(m._id || m.id));

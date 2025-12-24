@@ -223,11 +223,45 @@ const GroupInfoModalWhatsApp = ({
     let cancelled = false;
     const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch(`${API_BASE_URL}/api/chat/recent`, { headers })
+    fetch(`${API_BASE_URL}/api/chat/recent/forward`, { headers })
       .then(async (res) => {
         if (!res.ok) throw new Error('Failed to load recent chats');
         const json = await res.json();
-        if (!cancelled) setRecentChats(Array.isArray(json) ? json : []);
+        console.log('Fetched recent chats for forward modal:', json);
+        if (cancelled) return;
+
+        // Prefer other participant's name/avatar for 1-on-1 chats
+        try {
+          const _local = JSON.parse(localStorage.getItem('chasmos_user_data') || '{}');
+          const myId = String(_local._id || _local.id || _local.userId || '');
+          const mapped = (Array.isArray(json) ? json : []).map((c) => {
+            try {
+              // Normalize participant sources
+              const participants = c.participants || c.users || [];
+              if (!c.isGroupChat && Array.isArray(participants) && participants.length > 0) {
+                // Find the other participant (not current user)
+                const other = participants.find(p => {
+                  const pid = p && (p._id || p.id || p.userId || p);
+                  return pid && String(pid) !== myId;
+                }) || participants[0];
+
+                if (other) {
+                  const name = other.name || other.email || other.username || other._id || c.name || c.chatName || '';
+                  const avatar = other.avatar || other.image || other.avatarUrl || c.avatar || c.groupSettings?.avatar || '';
+                  return { ...c, name, avatar };
+                }
+              }
+            } catch (e) {
+              // fall back to original
+            }
+            return c;
+          });
+
+          setRecentChats(mapped);
+        } catch (e) {
+          console.warn('Failed to normalize recent chats for forward modal', e);
+          setRecentChats(Array.isArray(json) ? json : []);
+        }
       })
       .catch((e) => {
         console.warn('Failed to fetch recent chats for forward modal', e);

@@ -166,6 +166,159 @@ export const fetchChats = asyncHandler(async (req, res) => {
   }
 });
 
+// Fetch recent chats tailored for the Forward modal: exclude group chats
+// where the linked Group document explicitly shows the current user is no longer a participant.
+export const fetchRecentChatsForForward = asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const user = await User.findById(userId).select("archivedChats");
+    const archivedChatIds = (user && Array.isArray(user.archivedChats)) ? user.archivedChats.map(a => a.chat.toString()) : [];
+
+    const chats = await Chat.find({ 
+      participants: userId,
+      _id: { $nin: archivedChatIds },
+      // Exclude chats the current user has soft-deleted
+      deletedBy: { $not: { $elemMatch: { $eq: userId } } }
+    })
+      .sort({ updatedAt: -1 })
+      .populate('participants', '_id name email avatar')
+      .populate('users', '_id name email avatar')
+      .populate('admins', '_id name email avatar')
+      .populate('groupAdmin', '_id name email avatar')
+      .populate({ path: 'lastMessage', populate: { path: 'attachments' } })
+      .populate({ path: 'lastMessage.sender', select: '_id email name' })
+      .lean();
+
+    const formattedChats = [];
+    for (const chat of chats) {
+      try {
+        // For group chats, consult Group document to ensure the user is still a participant
+        if (chat.isGroupChat) {
+          try {
+            const group = await Group.findOne({ chat: chat._id }).select('participants');
+            if (group && Array.isArray(group.participants) && group.participants.length > 0) {
+              const isMember = group.participants.some(p => String(p) === String(userId));
+              if (!isMember) {
+                // skip this chat entirely
+                continue;
+              }
+            }
+          } catch (e) {
+            // on error, include the chat to avoid false negatives
+          }
+        }
+
+        let unread = 0;
+        try {
+          unread = await Message.countDocuments({
+            chat: chat._id,
+            isDeleted: { $ne: true },
+            type: { $ne: 'system' },
+            readBy: { $not: { $elemMatch: { $eq: userId } } },
+            sender: { $ne: userId },
+          });
+        } catch (e) {
+          unread = 0;
+        }
+
+        let mentionCount = 0;
+        try {
+          mentionCount = await Message.countDocuments({
+            chat: chat._id,
+            mentions: userId,
+            isDeleted: { $ne: true },
+            readBy: { $not: { $elemMatch: { $eq: userId } } },
+            sender: { $ne: userId },
+          });
+        } catch (e) {
+          mentionCount = 0;
+        }
+
+        const otherUser =
+          (Array.isArray(chat.participants) &&
+            chat.participants.find((p) => String(p._id) !== String(userId))) ||
+          (Array.isArray(chat.participants) ? chat.participants[0] : null);
+
+        if (typeof chat.unreadCount === "number") {
+          unread = chat.unreadCount;
+        } else if (chat.unreadCount && typeof chat.unreadCount === "object") {
+          unread = chat.unreadCount[String(userId)] || chat.unreadCount[userId] || 0;
+        }
+
+        let previewTimestamp = chat.updatedAt || chat.timestamp;
+        if (chat.lastMessage) {
+          const lm = chat.lastMessage;
+          previewTimestamp = (lm.isScheduled && lm.scheduledSent && lm.scheduledFor) ? lm.scheduledFor : (lm.createdAt || lm.updatedAt || previewTimestamp);
+        }
+
+        let lastMessageText = "";
+        if (chat.lastMessage) {
+          const msg = chat.lastMessage;
+          if (msg.type === 'system') {
+            lastMessageText = "";
+          } else {
+            const text = (msg.content || msg.text || "").toString().trim();
+            const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+            if (text && text.length > 0) {
+              const preview = text.split(/\s+/).slice(0, 8).join(" ");
+              lastMessageText = hasAttachments ? `${preview} 📎` : preview;
+            } else if (hasAttachments) {
+              const att = msg.attachments[0];
+              let filename = att.fileName || att.file_name || att.filename || "";
+              if (!filename && att.fileUrl) {
+                try {
+                  filename = path.basename(new URL(att.fileUrl).pathname);
+                } catch (e) {
+                  filename = path.basename(att.fileUrl || "");
+                }
+              }
+              filename = filename.replace(/^[\d\-:.]+_/, "");
+              lastMessageText = filename || "Attachment";
+            }
+          }
+        }
+
+        const chatData = {
+          chatId: chat._id,
+          lastMessage: lastMessageText || "Say hi!",
+          timestamp: previewTimestamp,
+          unreadCount: unread,
+          mentionCount: mentionCount || 0,
+          isGroupChat: !!chat.isGroupChat,
+          chatName: chat.chatName,
+          name: chat.chatName || chat.name || (chat.groupSettings && chat.groupSettings.name) || (chat.isGroupChat ? "Group" : (otherUser?.name || otherUser?.email || "")),
+        };
+
+        if (chat.isGroupChat) {
+          chatData.users = chat.users || chat.participants || [];
+          chatData.admins = chat.admins || [];
+          chatData.groupAdmin = chat.groupAdmin || null;
+          chatData.groupSettings = chat.groupSettings || {};
+        } else {
+          chatData.participants = chat.participants;
+          chatData.otherUser = {
+            id: otherUser?._id ? String(otherUser._id) : null,
+            username: otherUser?.name || otherUser?.email || null,
+            email: otherUser?.email || null,
+            avatar: otherUser?.avatar || null,
+            isOnline: !!otherUser?.isOnline,
+          };
+        }
+
+        formattedChats.push(chatData);
+      } catch (err) {
+        // skip problematic chat
+        continue;
+      }
+    }
+    res.status(200).json(formattedChats);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to fetch recent chats for forward" });
+  }
+});
+
 export const updateUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
 
