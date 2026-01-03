@@ -122,12 +122,17 @@ export const createGroup = async (req, res) => {
       },
     };
 
-    console.log("💾 Saving group with data:");
-    console.log("- inviteEnabled:", groupData.inviteEnabled, typeof groupData.inviteEnabled);
-    console.log("- Permissions:", groupData.permissions);
-    console.log("- Features:", groupData.features);
-
     const group = await Group.create(groupData);
+
+    // Record initial joinedBy/joinedAt entries for all initial participants
+    try {
+      group.joinedBy = Array.isArray(group.participants) ? group.participants.map(p => p) : [];
+      const now = new Date();
+      group.joinedAt = group.joinedBy.map(() => now);
+      await group.save();
+    } catch (e) {
+      console.warn('createGroup: failed to record joinedBy/joinedAt', e && e.message);
+    }
 
     // Ensure the related Chat document has matching groupSettings (invite link, allowInvites, avatar, description)
     try {
@@ -261,6 +266,15 @@ export const joinGroupByInviteLink = async (req, res) => {
       return err(res, "User already in group");
 
     group.participants.push(userId);
+    // Record joinedBy/joinedAt for this member
+    try {
+      group.joinedBy = Array.isArray(group.joinedBy) ? group.joinedBy : [];
+      group.joinedAt = Array.isArray(group.joinedAt) ? group.joinedAt : [];
+      group.joinedBy.push(userId);
+      group.joinedAt.push(new Date());
+    } catch (e) {
+      console.warn('addMember: failed to record joinedBy/joinedAt', e && e.message);
+    }
     await group.save();
 
     // Notify the user who exited themselves (exitGroup caller) so their UI updates immediately
@@ -428,6 +442,15 @@ export const addMember = async (req, res) => {
       return err(res, "User already in group");
 
     group.participants.push(userId);
+    // Record joinedBy/joinedAt for this member (invite join)
+    try {
+      group.joinedBy = Array.isArray(group.joinedBy) ? group.joinedBy : [];
+      group.joinedAt = Array.isArray(group.joinedAt) ? group.joinedAt : [];
+      group.joinedBy.push(userId);
+      group.joinedAt.push(new Date());
+    } catch (e) {
+      console.warn('joinGroupByInviteLink: failed to record joinedBy/joinedAt', e && e.message);
+    }
     await group.save();
 
     // Create a system message in the GROUP chat announcing the addition
@@ -715,6 +738,16 @@ export const removeMember = async (req, res) => {
     }
     if (group.admin && String(group.admin) === String(memberId)) {
       group.admin = (Array.isArray(group.admins) && group.admins.length) ? group.admins[0] : null;
+    }
+
+    // Record that this user was removed (leftBy/leftAt arrays kept in parallel)
+    try {
+      group.leftBy = Array.isArray(group.leftBy) ? group.leftBy : [];
+      group.leftAt = Array.isArray(group.leftAt) ? group.leftAt : [];
+      group.leftBy.push(memberId);
+      group.leftAt.push(new Date());
+    } catch (e) {
+      console.warn('removeMember: failed to record leftBy/leftAt', e && e.message);
     }
 
     await group.save();

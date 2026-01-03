@@ -19,32 +19,10 @@ const normalizeMessage = (m) => {
 export const allMessages = asyncHandler(async (req, res) => {
   try {
     // Exclude messages that are scheduled and not yet sent
-    // If this is a group chat and the requesting user has left previously,
-    // only return messages created before their last leftAt timestamp.
-    let createdAtFilter = {};
-    try {
-      const group = await Group.findOne({ chat: req.params.chatId }).select('leftBy leftAt').lean();
-      if (group && Array.isArray(group.leftBy) && group.leftBy.length) {
-        // find last index of this user in leftBy
-        const uid = String(req.user._id);
-        const indices = [];
-        group.leftBy.forEach((entry, idx) => {
-          try { if (String(entry) === uid) indices.push(idx); } catch (e) {}
-        });
-        if (indices.length) {
-          const lastIdx = indices[indices.length - 1];
-          const leftAt = group.leftAt && group.leftAt[lastIdx];
-          if (leftAt) {
-            createdAtFilter = { createdAt: { $lte: new Date(leftAt) } };
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('allMessages: failed to compute leftAt filter', e && e.message);
-    }
-    const messages = await Message.find({
+    // We will compute membership intervals (joined/joinedAt and left/leftAt)
+    // and only return messages that fall within any membership interval for this user.
+    let messages = await Message.find({
       chat: req.params.chatId,
-      ...createdAtFilter,
       // Exclude messages that the current user has soft-deleted
       deletedFor: { $not: { $elemMatch: { $eq: req.user._id } } },
       // Exclude messages explicitly hidden from this user
@@ -80,7 +58,124 @@ export const allMessages = asyncHandler(async (req, res) => {
       .populate("reactions.user", "name avatar")
       .populate("mentions", "name avatar")
       .sort({ createdAt: 1 });
-      
+      // If this chat is not a group chat, skip membership interval checks
+      const chatObj = await Chat.findById(req.params.chatId).select('isGroupChat').lean();
+      if (!chatObj || !chatObj.isGroupChat) {
+        const out = messages.map(normalizeMessage);
+        return res.json(out);
+      }
+    // Compute membership intervals for this user from Group.joinedBy/joinedAt and leftBy/leftAt
+    try {
+      const group = await Group.findOne({ chat: req.params.chatId }).select('joinedBy joinedAt leftBy leftAt participants').lean();
+      const uid = String(req.user._id);
+      let intervals = [];
+
+      if (group) {
+        const events = [];
+        if (Array.isArray(group.joinedBy) && Array.isArray(group.joinedAt)) {
+          group.joinedBy.forEach((entry, idx) => {
+            try {
+              if (String(entry) === uid && group.joinedAt && group.joinedAt[idx]) {
+                events.push({ t: new Date(group.joinedAt[idx]), type: 'join' });
+              }
+            } catch (e) {}
+          });
+        }
+        if (Array.isArray(group.leftBy) && Array.isArray(group.leftAt)) {
+          group.leftBy.forEach((entry, idx) => {
+            try {
+              if (String(entry) === uid && group.leftAt && group.leftAt[idx]) {
+                events.push({ t: new Date(group.leftAt[idx]), type: 'left' });
+              }
+            } catch (e) {}
+          });
+        }
+
+        // Build sorted events and derive intervals (apply same logic whether or not
+        // the user is currently a participant — we will add an open interval
+        // from the last join if they are currently in the group).
+        events.sort((a, b) => a.t - b.t);
+        let currentStart = null;
+        for (const ev of events) {
+          if (ev.type === 'join') {
+            // start a membership window
+            if (!currentStart) currentStart = ev.t;
+          } else if (ev.type === 'left') {
+            if (currentStart) {
+              intervals.push([currentStart, ev.t]);
+              currentStart = null;
+            } else {
+              // left without a prior recorded join: assume membership from epoch
+              intervals.push([new Date(0), ev.t]);
+            }
+          }
+        }
+        // If a join was seen without a subsequent left, create an open interval
+        if (currentStart) intervals.push([currentStart, null]);
+
+        // If no events recorded but the user is currently a participant, fall back
+        // to an open interval (they should see messages from now onwards). If
+        // events exist and the user is currently participant but no open interval
+        // was created (e.g., left/join records missing), attempt to derive last
+        // join from the group's joinedAt array and open from there.
+        const currentlyParticipant = Array.isArray(group.participants) && group.participants.some(p => String(p) === uid);
+        if (currentlyParticipant) {
+          const hasOpen = intervals.some(([s, e]) => e === null);
+          if (!hasOpen) {
+            // try to find the last recorded join time for this user
+            let lastJoin = null;
+            if (Array.isArray(group.joinedBy) && Array.isArray(group.joinedAt)) {
+              for (let i = 0; i < group.joinedBy.length; i++) {
+                try {
+                  if (String(group.joinedBy[i]) === uid && group.joinedAt[i]) lastJoin = new Date(group.joinedAt[i]);
+                } catch (e) {}
+              }
+            }
+            if (lastJoin) {
+              intervals.push([lastJoin, null]);
+            } else if (intervals.length === 0) {
+              // absolute fallback: allow all time if we have no event data
+              intervals.push([new Date(0), null]);
+            }
+          }
+        }
+      }
+
+      // Filter messages by intervals (if intervals empty and user not participant, result will be empty)
+      if (intervals && intervals.length) {
+        const filtered = messages.filter(m => {
+          // Use scheduledFor when this was a scheduled message that was sent,
+          // otherwise use createdAt/timestamp. This prevents a scheduled message
+          // (created earlier but scheduled to send later) from being included
+          // in membership windows based on its creation time.
+          let t = null;
+          try {
+            if (m && m.isScheduled && m.scheduledSent && m.scheduledFor) {
+              t = new Date(m.scheduledFor);
+            } else if (m && (m.createdAt || m.timestamp)) {
+              t = new Date(m.createdAt || m.timestamp);
+            } else {
+              t = new Date();
+            }
+          } catch (e) {
+            t = new Date(m.createdAt || m.timestamp || Date.now());
+          }
+
+          return intervals.some(([s, e]) => {
+            const startOk = s ? t >= s : true;
+            const endOk = e ? t <= e : true;
+            return startOk && endOk;
+          });
+        });
+        messages = filtered;
+      } else {
+        // No intervals -> if user not participant return empty
+        messages = [];
+      }
+    } catch (e) {
+      console.warn('allMessages: failed to apply membership intervals', e && e.message);
+    }
+
     // Attach a normalized `timestamp` field so clients can use scheduledFor when appropriate
     const out = messages.map(normalizeMessage);
     res.json(out);

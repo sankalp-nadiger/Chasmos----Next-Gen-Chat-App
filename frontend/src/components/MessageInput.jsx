@@ -167,15 +167,30 @@ const MessageInput = React.memo(({
   const handleCreatePoll = useCallback(async (pollData) => {
     try {
       setCreatingPoll(true);
-      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const storageCandidates = [
+        { store: 'localStorage', key: 'token' },
+        { store: 'localStorage', key: 'chasmos_auth_token' },
+        { store: 'localStorage', key: 'chasmos_token' },
+        { store: 'sessionStorage', key: 'token' },
+        { store: 'sessionStorage', key: 'chasmos_auth_token' },
+      ];
+
+      let token = null;
+      for (const s of storageCandidates) {
+        try {
+          const val = (s.store === 'localStorage' ? localStorage.getItem(s.key) : sessionStorage.getItem(s.key));
+          if (val) { token = val; break; }
+        } catch (e) {}
+      }
+
       const chatId = selectedContact?.chatId || selectedContact?.id || selectedContact?._id;
+
+      const headersObj = { 'Content-Type': 'application/json' };
+      if (token) headersObj.Authorization = `Bearer ${token}`;
 
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/api/poll/create`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: headersObj,
         body: JSON.stringify({
           ...pollData,
           chatId
