@@ -207,17 +207,21 @@ const avatarFallbackText =
                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
               )}
             </div>
-
         <div>
+          
               <div className="flex items-center gap-2">
                 <h2 className={`font-semibold ${effectiveTheme.text}`}>{selectedContact.name}</h2>
+                {isBlocked && (
+                  <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${effectiveTheme.mode === 'dark' ? 'bg-red-700 text-white' : 'bg-red-100 text-red-800'}`}>
+                    Blocked
+                  </span>
+                )}
                 {selectedContact?.unreadCount > 0 && (
                   <div className="ml-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-500 text-white text-xs font-semibold">
                     {selectedContact.unreadCount > 99 ? '99+' : selectedContact.unreadCount}
                   </div>
                 )}
               </div>
-
 
              <p className={`text-sm ${effectiveTheme.textSecondary}`}>
                {selectedContact?.isTyping
@@ -228,7 +232,6 @@ const avatarFallbackText =
                  ? "Online"
                  : "Offline"}
              </p>
-
             </div>
           </div>
 
@@ -3206,8 +3209,10 @@ const [dataFetched, setDataFetched] = useState(false);
           try {
             const status = await blockService.checkBlockStatus(userId);
             if (!mounted) return;
-            // status may contain isBlocked/hasBlockedYou
-            setIsBlockedState(Boolean(status?.isBlocked || status?.hasBlockedYou));
+            // `isBlocked` means the current user has blocked the other user.
+            // `hasBlockedYou` means the other user has blocked the current user.
+            // Only mark `isBlockedState` when the current user has blocked the contact.
+            setIsBlockedState(Boolean(status?.isBlocked));
           } catch (e) {
             // ignore errors
           }
@@ -4560,15 +4565,20 @@ useEffect(() => {
       const exists = prev.find((c) => c.id === chatId || c.chatId === chatId || c.userId === chatId);
       if (exists) {
         // Update existing entry but DO NOT overwrite preview/timestamp/attachment for system messages
+        // If meta indicates the update comes from the current user, do not apply sender metadata
+        const metaIsFromMe = meta && (meta.userId && String(meta.userId) === String(currentUserId));
+
         const updated = Object.assign({}, exists, {
           ...(isSystem ? {} : { lastMessage: preview }),
           ...(isSystem ? {} : { timestamp: useTs }),
           ...(isSystem ? {} : { hasAttachment: !!hasAttachment }),
           ...(isSystem ? {} : (hasAttachment && meta.attachmentFileName ? { attachmentFileName: meta.attachmentFileName } : {})),
           ...(isSystem ? {} : (hasAttachment && meta.attachmentMime ? { attachmentMime: meta.attachmentMime } : {})),
-          ...(meta.name ? { name: meta.name } : {}),
-          ...(meta.avatar ? { avatar: meta.avatar } : {}),
-          ...(meta.userId ? { userId: meta.userId } : {}),
+          // Do NOT overwrite identifying metadata (name/avatar/userId) when this update comes from a system message
+          // or when the metadata indicates the sender is the current user (prevents your profile replacing the contact)
+          ...(!isSystem && !metaIsFromMe && meta.name ? { name: meta.name } : {}),
+          ...(!isSystem && !metaIsFromMe && meta.avatar ? { avatar: meta.avatar } : {}),
+          ...(!isSystem && !metaIsFromMe && meta.userId ? { userId: meta.userId } : {}),
         });
 
         // If system message, keep order (don't move to top). Otherwise move to top.
@@ -4583,17 +4593,19 @@ useEffect(() => {
       }
 
       // New entry: show in list. For system-originated creation we still add the chat but avoid showing system preview text
+      // For new entries, avoid using sender metadata when it's a system message or from current user
+      const metaIsFromMeNew = meta && (meta.userId && String(meta.userId) === String(currentUserId));
       return [
         Object.assign(
           {
             id: chatId,
             chatId,
             // associate a userId for one-to-one chats when provided so presence/status works
-            userId: meta.userId || null,
+            userId: !isSystem && !metaIsFromMeNew ? (meta.userId || null) : (selectedContact?.userId || null),
             // Prefer explicit meta.name/meta.avatar when provided (server or message payload),
             // otherwise fall back to currently selected contact or a default.
-            name: meta.name || selectedContact?.name || '',
-            avatar: meta.avatar || selectedContact?.avatar || '/default-avatar.png',
+            name: !isSystem && !metaIsFromMeNew ? (meta.name || selectedContact?.name || '') : (selectedContact?.name || ''),
+            avatar: !isSystem && !metaIsFromMeNew ? (meta.avatar || selectedContact?.avatar || '/default-avatar.png') : (selectedContact?.avatar || '/default-avatar.png'),
             lastMessage: isSystem ? '' : preview,
             hasAttachment: isSystem ? false : !!hasAttachment,
             timestamp: isSystem ? useTs : useTs,

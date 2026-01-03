@@ -47,6 +47,9 @@ const groupSchema = new mongoose.Schema(
     // Track users who left and when. Arrays kept in parallel order: leftBy[i] leftAt[i]
     leftBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     leftAt: [{ type: Date }],
+    // Track users who joined and when (parallel arrays): joinedBy[i] joinedAt[i]
+    joinedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    joinedAt: [{ type: Date }],
   },
   { timestamps: true }
 );

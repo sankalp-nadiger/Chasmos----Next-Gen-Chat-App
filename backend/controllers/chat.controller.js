@@ -3,10 +3,7 @@ import Chat from "../models/chat.model.js";
 import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
 import Group from "../models/group.model.js";
-import Attachment from "../models/attachment.model.js";
 import Screenshot from "../models/screenshot.model.js";
-import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
-import path from "path";
 import { getSocketIOInstance } from "../services/scheduledMessageCron.js";
 import { uploadBase64ImageToSupabase } from "../utils/uploadToSupabase.js";
 import crypto from "crypto";
@@ -168,6 +165,77 @@ export const fetchChats = asyncHandler(async (req, res) => {
           chatObj.features = maybeGroup.features || chatObj.features || {};
           chatObj.groupSettings = chatObj.groupSettings || {};
           chatObj.groupSettings.features = maybeGroup.features || chatObj.groupSettings.features || {};
+
+          // If the linked Group records membership changes for this user, ensure the
+          // `lastMessage` preview we return corresponds to the last message visible
+          // to them according to join/leave windows.
+          try {
+            const uid = String(userId);
+            const joinedBy = Array.isArray(maybeGroup.joinedBy) ? maybeGroup.joinedBy : [];
+            const joinedAt = Array.isArray(maybeGroup.joinedAt) ? maybeGroup.joinedAt : [];
+            const leftBy = Array.isArray(maybeGroup.leftBy) ? maybeGroup.leftBy : [];
+            const leftAt = Array.isArray(maybeGroup.leftAt) ? maybeGroup.leftAt : [];
+
+            const events = [];
+            joinedBy.forEach((entry, idx) => { try { if (String(entry) === uid && joinedAt[idx]) events.push({ t: new Date(joinedAt[idx]), type: 'join' }); } catch(e){} });
+            leftBy.forEach((entry, idx) => { try { if (String(entry) === uid && leftAt[idx]) events.push({ t: new Date(leftAt[idx]), type: 'left' }); } catch(e){} });
+
+            const currentlyParticipant = (maybeGroup.participants || []).some(p => String(p) === uid);
+
+            if (currentlyParticipant) {
+              // they are in the group now — no restriction
+            } else if (events.length === 0) {
+              // nothing recorded, keep default lastMessage
+            } else {
+              // build intervals and search for the most recent message in those intervals
+              events.sort((a, b) => a.t - b.t);
+              const intervals = [];
+              let currentStart = null;
+              for (const ev of events) {
+                if (ev.type === 'join') {
+                  currentStart = ev.t;
+                } else if (ev.type === 'left') {
+                  if (currentStart) {
+                    intervals.push([currentStart, ev.t]);
+                    currentStart = null;
+                  } else {
+                    intervals.push([new Date(0), ev.t]);
+                  }
+                }
+              }
+              if (currentStart) intervals.push([currentStart, null]);
+
+              // search intervals from newest to oldest for a last message
+              let found = null;
+              for (let i = intervals.length - 1; i >= 0 && !found; i--) {
+                const [start, end] = intervals[i];
+                const q = { chat: chat._id, isDeleted: { $ne: true } };
+                if (start) q.createdAt = q.createdAt || {};
+                if (start) q.createdAt.$gte = start;
+                if (end) {
+                  q.createdAt = q.createdAt || {};
+                  q.createdAt.$lte = end;
+                }
+                // exclude system messages created specifically as skipPreview
+                q.type = { $ne: 'system' };
+                const last = await Message.findOne(q).sort({ createdAt: -1 }).populate('sender', 'name avatar email').populate('attachments');
+                if (last) found = last;
+              }
+
+              if (found) {
+                const lmObj = (found.toObject && typeof found.toObject === 'function') ? found.toObject() : { ...found };
+                const ts = (lmObj.isScheduled && lmObj.scheduledSent && lmObj.scheduledFor) ? lmObj.scheduledFor : (lmObj.createdAt || lmObj.updatedAt || null);
+                lmObj.timestamp = ts;
+                chatObj.lastMessage = lmObj;
+                chatObj.unreadCount = 0;
+              } else {
+                chatObj.lastMessage = null;
+                chatObj.unreadCount = 0;
+              }
+            }
+          } catch (e) {
+            console.warn('[fetchChats] failed to compute lastMessage via membership windows for user', String(userId), e && e.message);
+          }
         }
         chatObj.unreadCount = unreadCount || 0;
         // ensure frontend has a stable `name` field
@@ -392,7 +460,6 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
   });
 });
 
-
 export const createGroupChat = asyncHandler(async (req, res) => {
   const { name, users, description, isPublic, avatarBase64, inviteEnabled, inviteLink, permissions, features, groupType } = req.body;
 
@@ -563,6 +630,77 @@ export const createGroupChat = asyncHandler(async (req, res) => {
   } catch (e) {
     console.error("Failed to emit group created socket event:", e);
   }
+    // Create a system message announcing additions and emit to each participant's personal room
+    try {
+      const participants = Array.isArray(fullGroupChat.participants) && fullGroupChat.participants.length ? fullGroupChat.participants : fullGroupChat.users || [];
+      const creatorIdStr = String(req.user._id);
+
+      // 1) Create system message for other participants: "You were added"
+      try {
+        const participantSys = await Message.create({
+          sender: req.user._id,
+          content: 'You were added',
+          type: 'system',
+          chat: fullGroupChat._id,
+          excludeUsers: [req.user._id]
+        });
+        const populatedParticipantSys = await Message.findById(participantSys._id)
+          .populate('sender', 'name avatar email')
+          .populate('attachments')
+          .populate('chat');
+        populatedParticipantSys.skipPreview = true;
+
+        try {
+          const io2 = getSocketIOInstance();
+          if (io2 && Array.isArray(participants)) {
+            participants.forEach((p) => {
+              const pid = p && (p._id ? String(p._id) : (typeof p === 'string' ? p : (p && p.toString && p.toString())));
+              if (!pid) return;
+              // Don't emit the "You were added" message to the creator's personal room
+              if (pid === creatorIdStr) return;
+              try { io2.to(String(pid)).emit('message recieved', populatedParticipantSys); } catch (e) { console.error('emit participant system message to personal room failed', pid, e); }
+            });
+          }
+        } catch (e) {
+          console.warn('[createGroupChat] failed to emit participant personal system messages', e && e.message);
+        }
+      } catch (e) {
+        console.warn('[createGroupChat] failed to create participant system message for new group', e && e.message);
+      }
+
+      // 2) Create system message for the creator only: "You created this group"
+      try {
+        // Exclude all other participants so only creator receives this message
+        const excludeUsersForCreator = (Array.isArray(participants) ? participants.map(p => (p && p._id ? String(p._id) : (typeof p === 'string' ? p : (p && p.toString && p.toString())))).filter(id => id && id !== creatorIdStr) : []);
+
+        const creatorSys = await Message.create({
+          sender: req.user._id,
+          content: 'You created this group',
+          type: 'system',
+          chat: fullGroupChat._id,
+          excludeUsers: excludeUsersForCreator,
+        });
+        const populatedCreatorSys = await Message.findById(creatorSys._id)
+          .populate('sender', 'name avatar email')
+          .populate('attachments')
+          .populate('chat');
+        populatedCreatorSys.skipPreview = true;
+
+        try {
+          const io3 = getSocketIOInstance();
+          if (io3) {
+            io3.to(creatorIdStr).emit('message recieved', populatedCreatorSys);
+          }
+        } catch (e) {
+          console.warn('[createGroupChat] failed to emit creator personal system message', e && e.message);
+        }
+      } catch (e) {
+        console.warn('[createGroupChat] failed to create creator system message for new group', e && e.message);
+      }
+
+    } catch (e) {
+      console.warn('[createGroupChat] unexpected error while creating system messages', e && e.message);
+    }
   const fullObj = (fullGroupChat && fullGroupChat.toObject && typeof fullGroupChat.toObject === 'function') ? fullGroupChat.toObject() : { ...fullGroupChat };
   fullObj.name = fullObj.chatName || fullObj.name || (fullObj.groupSettings && fullObj.groupSettings.name) || "";
   console.log('[createGroupChat] responding with chat:', { chatId: String(fullGroupChat._id), hasGroup: !!group, groupId: group && group._id ? String(group._id) : null });
@@ -645,12 +783,138 @@ export const getRecentChats = async (req, res) => {
 
       // For group chats, return all members; for 1-on-1, return the other user
       let lastMessageText = "";
-      if (chat.lastMessage) {
-        const msg = chat.lastMessage;
-        // Skip system messages for chat preview
-        if (msg.type === 'system') {
-          lastMessageText = "";
-        } else {
+      // Default preview source is chat.lastMessage, but for group chats
+      // where the requesting user may have left, compute the preview from
+      // membership intervals (joinedAt/leftAt) so we don't show messages
+      // sent after they were removed.
+      if (chat.isGroupChat) {
+        try {
+          const group = await Group.findOne({ chat: chat._id }).select('joinedBy joinedAt leftBy leftAt participants').lean();
+          const uid = String(userId);
+          const currentlyParticipant = group && Array.isArray(group.participants) && group.participants.some(p => String(p) === uid);
+
+          if (currentlyParticipant) {
+            // Use chat.lastMessage as normal
+            if (chat.lastMessage && chat.lastMessage.type !== 'system') {
+              const msg = chat.lastMessage;
+              const text = (msg.content || msg.text || "").toString().trim();
+              const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+              if (text && text.length > 0) {
+                const preview = text.split(/\s+/).slice(0, 8).join(" ");
+                lastMessageText = hasAttachments ? `${preview} 📎` : preview;
+              } else if (hasAttachments) {
+                const att = msg.attachments[0];
+                let filename = att.fileName || att.file_name || att.filename || "";
+                if (!filename && att.fileUrl) {
+                  try { filename = path.basename(new URL(att.fileUrl).pathname); } catch (e) { filename = path.basename(att.fileUrl || ""); }
+                }
+                filename = filename.replace(/^[\d\-:.]+_/, "");
+                lastMessageText = filename || "Attachment";
+              }
+            }
+          } else if (group) {
+            // Build membership events
+            const events = [];
+            if (Array.isArray(group.joinedBy) && Array.isArray(group.joinedAt)) {
+              group.joinedBy.forEach((entry, idx) => { try { if (String(entry) === uid && group.joinedAt[idx]) events.push({ t: new Date(group.joinedAt[idx]), type: 'join' }); } catch(e){} });
+            }
+            if (Array.isArray(group.leftBy) && Array.isArray(group.leftAt)) {
+              group.leftBy.forEach((entry, idx) => { try { if (String(entry) === uid && group.leftAt[idx]) events.push({ t: new Date(group.leftAt[idx]), type: 'left' }); } catch(e){} });
+            }
+
+            if (events.length) {
+              events.sort((a, b) => a.t - b.t);
+              const intervals = [];
+              let currentStart = null;
+              for (const ev of events) {
+                if (ev.type === 'join') { currentStart = ev.t; }
+                else if (ev.type === 'left') {
+                  if (currentStart) { intervals.push([currentStart, ev.t]); currentStart = null; }
+                  else { intervals.push([new Date(0), ev.t]); }
+                }
+              }
+              if (currentStart) intervals.push([currentStart, null]);
+
+              // Search intervals newest-first for the most recent non-system message
+              let found = null;
+              for (let i = intervals.length - 1; i >= 0 && !found; i--) {
+                const [start, end] = intervals[i];
+                const q = { chat: chat._id, isDeleted: { $ne: true }, type: { $ne: 'system' } };
+                if (start) { q.createdAt = q.createdAt || {}; q.createdAt.$gte = start; }
+                if (end) { q.createdAt = q.createdAt || {}; q.createdAt.$lte = end; }
+                const last = await Message.findOne(q).sort({ createdAt: -1 }).populate('attachments');
+                if (last) found = last;
+              }
+
+              if (found) {
+                const msg = found;
+                const text = (msg.content || msg.text || "").toString().trim();
+                const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+                if (text && text.length > 0) {
+                  const preview = text.split(/\s+/).slice(0, 8).join(" ");
+                  lastMessageText = hasAttachments ? `${preview} 📎` : preview;
+                } else if (hasAttachments) {
+                  const att = msg.attachments[0];
+                  let filename = att.fileName || att.file_name || att.filename || "";
+                  if (!filename && att.fileUrl) {
+                    try { filename = path.basename(new URL(att.fileUrl).pathname); } catch (e) { filename = path.basename(att.fileUrl || ""); }
+                  }
+                  filename = filename.replace(/^[\d\-:.]+_/, "");
+                  lastMessageText = filename || "Attachment";
+                }
+                // Since user is not currently participant, clear unread
+                unread = 0;
+              } else {
+                lastMessageText = "";
+                unread = 0;
+              }
+            } else {
+              // no events recorded: fallback to lastMessage but clear unread
+              if (chat.lastMessage && chat.lastMessage.type !== 'system') {
+                const msg = chat.lastMessage;
+                const text = (msg.content || msg.text || "").toString().trim();
+                const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+                if (text && text.length > 0) {
+                  const preview = text.split(/\s+/).slice(0, 8).join(" ");
+                  lastMessageText = hasAttachments ? `${preview} 📎` : preview;
+                } else if (hasAttachments) {
+                  const att = msg.attachments[0];
+                  let filename = att.fileName || att.file_name || att.filename || "";
+                  if (!filename && att.fileUrl) {
+                    try { filename = path.basename(new URL(att.fileUrl).pathname); } catch (e) { filename = path.basename(att.fileUrl || ""); }
+                  }
+                  filename = filename.replace(/^[\d\-:.]+_/, "");
+                  lastMessageText = filename || "Attachment";
+                }
+              }
+              unread = 0;
+            }
+          }
+        } catch (e) {
+          console.warn('[getRecentChats] membership preview error for chat', String(chat._id), e && e.message);
+          // fallback to lastMessage as-is
+          if (chat.lastMessage && chat.lastMessage.type !== 'system') {
+            const msg = chat.lastMessage;
+            const text = (msg.content || msg.text || "").toString().trim();
+            const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+            if (text && text.length > 0) {
+              const preview = text.split(/\s+/).slice(0, 8).join(" ");
+              lastMessageText = hasAttachments ? `${preview} 📎` : preview;
+            } else if (hasAttachments) {
+              const att = msg.attachments[0];
+              let filename = att.fileName || att.file_name || att.filename || "";
+              if (!filename && att.fileUrl) {
+                try { filename = path.basename(new URL(att.fileUrl).pathname); } catch (e) { filename = path.basename(att.fileUrl || ""); }
+              }
+              filename = filename.replace(/^[\d\-:.]+_/, "");
+              lastMessageText = filename || "Attachment";
+            }
+          }
+        }
+      } else {
+        // non-group chat: use lastMessage as before
+        if (chat.lastMessage && chat.lastMessage.type !== 'system') {
+          const msg = chat.lastMessage;
           const text = (msg.content || msg.text || "").toString().trim();
           const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
           if (text && text.length > 0) {
@@ -660,11 +924,7 @@ export const getRecentChats = async (req, res) => {
             const att = msg.attachments[0];
             let filename = att.fileName || att.file_name || att.filename || "";
             if (!filename && att.fileUrl) {
-              try {
-                filename = path.basename(new URL(att.fileUrl).pathname);
-              } catch (e) {
-                filename = path.basename(att.fileUrl || "");
-              }
+              try { filename = path.basename(new URL(att.fileUrl).pathname); } catch (e) { filename = path.basename(att.fileUrl || ""); }
             }
             filename = filename.replace(/^[\d\-:.]+_/, "");
             lastMessageText = filename || "Attachment";
