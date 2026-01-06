@@ -140,7 +140,7 @@ const ChatHeader = React.memo(
       <div className={`${effectiveTheme.secondary} relative`}>
         <div className="p-4 flex items-center justify-between">
           <div
-            className={`flex items-center space-x-3 flex-1 ${selectedHasLeftGroup ? "cursor-default opacity-95" : "cursor-pointer hover:bg-white/5"} transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1`}
+            className={`flex items-center space-x-3 flex-1 ${selectedHasLeftGroup || selectedContact?.hasBlockedYou ? "cursor-default opacity-95" : "cursor-pointer hover:bg-white/5"} transition-colors rounded-lg -ml-2 pl-2 pr-4 py-1`}
             onClick={() => {
               console.log(
                 "❌ Header clicked - selectedContact:",
@@ -152,6 +152,13 @@ const ChatHeader = React.memo(
               console.log("🔍 isgroupchat:", selectedContact.isgroupchat);
 
               if (selectedContact.isDocument) return;
+              
+              // Prevent interaction if contact has blocked the user
+              if (selectedContact?.hasBlockedYou) {
+                console.log("⛔ Header click suppressed: blocked relationship exists");
+                return;
+              }
+              
               const isGroup =
                 selectedContact.isGroup ||
                 selectedContact.isGroupChat ||
@@ -3228,8 +3235,12 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
         html: `You must leave the group before you can delete it. Open Group Info and leave the group first.`,
         icon: "warning",
         confirmButtonText: "OK",
-        background: effectiveTheme.secondary,
-        color: effectiveTheme.toastText,
+        confirmButtonColor: effectiveTheme.mode === 'dark' ? '#6b7280' : '#3b82f6',
+        background: effectiveTheme.mode === 'dark' ? '#1f2937' : '#ffffff',
+        color: effectiveTheme.mode === 'dark' ? '#f3f4f6' : '#111827',
+        customClass: {
+          popup: effectiveTheme.mode === 'dark' ? '' : 'swal2-light-popup',
+        },
       });
       return;
     }
@@ -11657,39 +11668,116 @@ const handleOpenGroupInfo = (group) => {
                 groupOnlineCount={selectedContact.__computedGroupOnlineCount}
                 onOpenGroupInfo={handleOpenGroupInfo}
                 onOpenUserProfile={() => {
-                  console.log(
-                    "🔔 onOpenUserProfile called with selectedContact:",
-                    selectedContact
-                  );
-                  // Get current user from localStorage
-                  const currentUser = JSON.parse(
-                    localStorage.getItem("chasmos_user_data") || "{}"
-                  );
-                  const currentUserId = currentUser._id || currentUser.id;
-
-                  // Try to get userId from selectedContact first (most direct)
-                  let userIdToShow = selectedContact.userId;
-
-                  // If not found, try to find from participants array
-                  if (
-                    !userIdToShow &&
-                    selectedContact.participants?.length > 0
-                  ) {
-                    const otherUser = selectedContact.participants.find(
-                      (p) => String(p._id || p.id) !== String(currentUserId)
+                  (async () => {
+                    console.log(
+                      "🔔 onOpenUserProfile called with selectedContact:",
+                      selectedContact
                     );
-                    userIdToShow = otherUser?._id || otherUser?.id;
-                  }
+                    
+                    // Don't open modal if blocked
+                    if (selectedContact?.hasBlockedYou) {
+                      console.log("🚫 Cannot open profile - contact has blocked you");
+                      return;
+                    }
 
-                  console.log(
-                    "👤 Opening user profile with userId:",
-                    userIdToShow
-                  );
+                    // Get current user ID
+                    const currentUser = JSON.parse(
+                      localStorage.getItem("chasmos_user_data") || "{}"
+                    );
+                    const currentUserId = currentUser._id || currentUser.id;
 
-                  if (userIdToShow) {
-                    setProfileUserId(userIdToShow);
-                    setShowUserProfileModal(true);
-                  }
+                    // Try multiple sources to get the other user's ID
+                    let userIdToShow = selectedContact.userId;
+
+                    // Fallback 1: Try otherUser object
+                    if (!userIdToShow && selectedContact.otherUser) {
+                      userIdToShow = selectedContact.otherUser.id || selectedContact.otherUser._id;
+                    }
+
+                    // Fallback 2: Try participants array (find user that's not current user)
+                    if (!userIdToShow && selectedContact.participants?.length > 0) {
+                      const otherParticipant = selectedContact.participants.find(
+                        (p) => {
+                          const pId = p._id || p.id || p;
+                          return String(pId) !== String(currentUserId);
+                        }
+                      );
+                      if (otherParticipant) {
+                        userIdToShow = otherParticipant._id || otherParticipant.id || otherParticipant;
+                      }
+                    }
+
+                    // Fallback 3: Try users array
+                    if (!userIdToShow && selectedContact.users?.length > 0) {
+                      const otherUser = selectedContact.users.find(
+                        (u) => {
+                          const uId = u._id || u.id || u;
+                          return String(uId) !== String(currentUserId);
+                        }
+                      );
+                      if (otherUser) {
+                        userIdToShow = otherUser._id || otherUser.id || otherUser;
+                      }
+                    }
+
+                    // Fallback 4: Direct ID fields (excluding chatId which is the chat's ID)
+                    if (!userIdToShow) {
+                      if (selectedContact.participantId) userIdToShow = selectedContact.participantId;
+                      else if (selectedContact.user_id) userIdToShow = selectedContact.user_id;
+                      else if (selectedContact._id && selectedContact._id !== selectedContact.chatId) {
+                        userIdToShow = selectedContact._id;
+                      }
+                      else if (selectedContact.id && selectedContact.id !== selectedContact.chatId) {
+                        userIdToShow = selectedContact.id;
+                      }
+                    }
+
+                    // Fallback 5: Fetch chat participants from backend
+                    if (!userIdToShow && selectedContact.chatId) {
+                      try {
+                        console.log("📡 Fetching chat participants from backend for chatId:", selectedContact.chatId);
+                        const token = localStorage.getItem("token") || localStorage.getItem("chasmos_auth_token");
+                        const response = await fetch(`${API_BASE_URL}/api/chat/${selectedContact.chatId}/participants`, {
+                          headers: token ? { Authorization: `Bearer ${token}` } : {},
+                        });
+                        
+                        if (response.ok) {
+                          const data = await response.json();
+                          console.log("📡 Fetched participants data:", data);
+                          
+                          // API returns { members: [...] }
+                          const members = data.members || data.participants || [];
+                          if (members.length > 0) {
+                            const otherParticipant = members.find(
+                              (p) => {
+                                const pId = p._id || p.id || p;
+                                return String(pId) !== String(currentUserId);
+                              }
+                            );
+                            if (otherParticipant) {
+                              userIdToShow = otherParticipant._id || otherParticipant.id || otherParticipant;
+                              console.log("✅ Found userId from backend participants:", userIdToShow);
+                            }
+                          }
+                        }
+                      } catch (fetchError) {
+                        console.error("Failed to fetch chat participants:", fetchError);
+                      }
+                    }
+
+                    console.log(
+                      "👤 Opening user profile with userId:",
+                      userIdToShow
+                    );
+
+                    if (userIdToShow) {
+                      setProfileUserId(userIdToShow);
+                      setShowUserProfileModal(true);
+                    } else {
+                      console.warn("⚠️ Could not determine userId to show profile for contact:", selectedContact?.name);
+                      console.warn("Full selectedContact object:", selectedContact);
+                    }
+                  })();
                 }}
                 selectedHasLeftGroup={selectedHasLeftGroup}
               />

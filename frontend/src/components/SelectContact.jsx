@@ -109,7 +109,11 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme, onUnblock,
             <div className={`text-xs ${effectiveTheme.textSecondary} mr-2`}>You've blocked this contact</div>
             <button
               onClick={(e) => { e.stopPropagation(); if (onUnblock) onUnblock(contactId); }}
-              className={`text-xs px-2 py-1 rounded ${effectiveTheme.mode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800'}`}
+              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                effectiveTheme.mode === 'dark' 
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                  : 'bg-blue-500 hover:bg-blue-600 text-white shadow-sm'
+              } ${unblockLoading ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md'}`}
               disabled={unblockLoading}
             >
               {unblockLoading ? 'Unblocking...' : 'Unblock'}

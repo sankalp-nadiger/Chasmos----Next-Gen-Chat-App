@@ -1220,7 +1220,11 @@ const GroupInfoModalWhatsApp = ({
                                 }
                               }}
                               disabled={unblockLoadingMemberIds.has(String(memberId))}
-                              className={`text-xs px-2 py-1 rounded ${themeMode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800'} disabled:opacity-50 disabled:cursor-not-allowed transition`}
+                              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                                themeMode === 'dark' 
+                                  ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                                  : 'bg-blue-500 hover:bg-blue-600 text-white shadow-sm'
+                              } ${unblockLoadingMemberIds.has(String(memberId)) ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md'}`}
                             >
                               {unblockLoadingMemberIds.has(String(memberId)) ? 'Unblocking...' : 'Unblock'}
                             </button>
@@ -1347,8 +1351,6 @@ const GroupInfoModalWhatsApp = ({
             <Section title="Permissions">
               <div className={`${styles.sectionBg} rounded-xl p-4 space-y-3`}>
                 {(() => {
-                  const isPrimaryAdmin = String(effectiveGroup.admin?._id || effectiveGroup.admin || '') === String(currentUserId || '');
-                  if (!isPrimaryAdmin) return null;
                   return (
                     <div className="flex items-center justify-between">
                       <div>
@@ -1765,7 +1767,11 @@ const GroupInfoModalWhatsApp = ({
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleUnblockAvailableUser(uid); }}
                                     disabled={isUnblocking}
-                                    className={`text-xs px-2 py-1 rounded ${themeMode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800'} ${isUnblocking ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                                      themeMode === 'dark' 
+                                        ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                                        : 'bg-blue-500 hover:bg-blue-600 text-white shadow-sm'
+                                    } ${isUnblocking ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md'}`}
                                   >
                                     {isUnblocking ? 'Unblocking...' : 'Unblock'}
                                   </button>

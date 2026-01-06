@@ -1594,10 +1594,10 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
         try {
           const stringUpdatedIds = updatedIds.map(id => String(id));
           if (stringUpdatedIds.length > 0) {
-            console.log(`[SOCKET] Emitting message-read to chat room ${chatId} for ${stringUpdatedIds.length} fully-read messages`);
+            //console.log(`[SOCKET] Emitting message-read to chat room ${chatId} for ${stringUpdatedIds.length} fully-read messages`);
             socket.to(chatId).emit('message-read', { chatId: String(chatId), reader: String(userId), updatedIds: stringUpdatedIds });
           } else {
-            console.log('[SOCKET] No messages reached full-read status; skipping chat-room message-read emit');
+            //console.log('[SOCKET] No messages reached full-read status; skipping chat-room message-read emit');
           }
         } catch (e) { console.error('emit chat room message-read error', e); }
         try {
@@ -1611,7 +1611,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
               } catch (e) { console.error('Error emitting message-read to personal room', e); }
             });
           } else {
-            console.log('[SOCKET] No messages reached full-read status; skipping personal-room message-read emits');
+            //console.log('[SOCKET] No messages reached full-read status; skipping personal-room message-read emits');
           }
         } catch (e) {
           console.error('Error broadcasting message-read to personal rooms', e);
@@ -1643,18 +1643,18 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
               expectedCount = Math.max(expectedCount - 1, 0);
             }
             const readCountForParticipants = otherParticipantIds.filter(d => uniqueReaders.includes(d)).length;
-            console.log('[SOCKET] message-read check (1:1)', { messageId: String(m._id), expectedCount, readCountForParticipants, otherParticipantIds, readBy: uniqueReaders, wasReadByUpdated });
+            //console.log('[SOCKET] message-read check (1:1)', { messageId: String(m._id), expectedCount, readCountForParticipants, otherParticipantIds, readBy: uniqueReaders, wasReadByUpdated });
 
             if (readCountForParticipants >= expectedCount) {
               m.status = 'read';
               await m.save();
-              console.log(`[SOCKET] (1:1) Message ${String(m._id)} marked as fully read, status set to 'read'`);
+              //console.log(`[SOCKET] (1:1) Message ${String(m._id)} marked as fully read, status set to 'read'`);
               updatedIds.push(m._id);
             } else {
               if (wasReadByUpdated) {
                 try { 
                   await m.save(); 
-                  console.log(`[SOCKET] (1:1) Saved partial readBy update for message ${String(m._id)}, readBy count: ${m.readBy.length}/${expectedCount}`);
+                  //console.log(`[SOCKET] (1:1) Saved partial readBy update for message ${String(m._id)}, readBy count: ${m.readBy.length}/${expectedCount}`);
                 } catch (e) { 
                   console.error(`[SOCKET] (1:1) Error saving partial readBy for message ${String(m._id)}`, e); 
                 }
@@ -1667,16 +1667,16 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
         try {
           const stringUpdatedIds = updatedIds.map(id => String(id));
           if (stringUpdatedIds.length > 0) {
-            console.log(`[SOCKET] (1:1) Emitting message-read to chat room ${chatId} for ${stringUpdatedIds.length} fully-read messages`);
+            //console.log(`[SOCKET] (1:1) Emitting message-read to chat room ${chatId} for ${stringUpdatedIds.length} fully-read messages`);
             socket.to(chatId).emit('message-read', { chatId: String(chatId), reader: String(userId), updatedIds: stringUpdatedIds });
           } else {
-            console.log('[SOCKET] (1:1) No messages reached full-read status; skipping chat-room message-read emit');
+            //console.log('[SOCKET] (1:1) No messages reached full-read status; skipping chat-room message-read emit');
           }
         } catch (e) { console.error('emit chat room message-read error (1:1)', e); }
         try {
           const participantIds = (chat.participants && chat.participants.length) ? chat.participants.map(p => String(p)) : (chat.users || []).map(u => String(u));
           if ((updatedIds || []).length > 0) {
-            console.log(`[SOCKET] (1:1) Emitting message-read to personal rooms for ${participantIds.length} participants`);
+            //console.log(`[SOCKET] (1:1) Emitting message-read to personal rooms for ${participantIds.length} participants`);
             participantIds.forEach(pid => {
               if (pid === String(userId)) return;
               try {
@@ -1684,7 +1684,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
               } catch (e) { console.error('Error emitting message-read to personal room (1:1)', e); }
             });
           } else {
-            console.log('[SOCKET] (1:1) No messages reached full-read status; skipping personal-room message-read emits');
+            //console.log('[SOCKET] (1:1) No messages reached full-read status; skipping personal-room message-read emits');
           }
         } catch (e) {
           console.error('Error broadcasting message-read to personal rooms (1:1)', e);

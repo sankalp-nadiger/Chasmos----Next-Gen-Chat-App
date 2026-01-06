@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, 
@@ -11,11 +11,17 @@ import {
   Link as LinkIcon,
   Download,
   ChevronRight,
-  Calendar
+  Calendar,
+  MoreVertical,
+  LogOut,
+  Archive,
+  ArchiveRestore,
+  EllipsisVertical
 } from 'lucide-react';
 import axios from 'axios';
 import CosmosBg from './CosmosBg';
 import { useNavigate } from 'react-router-dom';
+import Swal from 'sweetalert2';
 
 const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateToMessage }) => {
   const [userDetails, setUserDetails] = useState(null);
@@ -26,7 +32,13 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
   const [loading, setLoading] = useState(false);
   const [commonGroups, setCommonGroups] = useState([]);
   const [loadingCommonGroups, setLoadingCommonGroups] = useState(false);
+  const [openDropdownId, setOpenDropdownId] = useState(null);
+  const [hoveredGroupId, setHoveredGroupId] = useState(null);
+  const [archivedChats, setArchivedChats] = useState([]);
+  const dropdownRef = useRef(null);
   const navigate = useNavigate();
+
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
   const tryOpenGroup = (g) => {
     try {
@@ -212,6 +224,18 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
       }).catch(() => ({ data: { groups: [] } }));
       const groups = (res && res.data && res.data.groups) ? res.data.groups : [];
       setCommonGroups(groups || []);
+      
+      // Fetch archived chats
+      try {
+        const archivedResponse = await axios.get(`${base}/api/archive/chats`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        const archivedChatIds = (archivedResponse.data || []).map(chat => chat._id || chat.id);
+        setArchivedChats(archivedChatIds);
+      } catch (archiveError) {
+        console.error('Failed to fetch archived chats', archiveError);
+        setArchivedChats([]);
+      }
     } catch (e) {
       console.error('Failed to fetch common groups', e);
       setCommonGroups([]);
@@ -253,6 +277,179 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
       }, 300);
     } else {
       console.warn('Cannot navigate - messageId:', messageId, 'onNavigateToMessage:', !!onNavigateToMessage);
+    }
+  };
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setOpenDropdownId(null);
+      }
+    };
+
+    if (openDropdownId) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [openDropdownId]);
+
+  const handleLeaveGroup = async (group) => {
+    try {
+      const result = await Swal.fire({
+        title: 'Leave Group?',
+        text: `Are you sure you want to leave "${group.name}"?`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        cancelButtonColor: '#6b7280',
+        confirmButtonText: 'Leave Group',
+        cancelButtonText: 'Cancel',
+        background: effectiveTheme.mode === 'dark' ? '#1f2937' : '#ffffff',
+        color: effectiveTheme.mode === 'dark' ? '#f3f4f6' : '#111827',
+      });
+
+      if (!result.isConfirmed) return;
+
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const response = await axios.post(
+        `${API_BASE_URL}/api/group/exit-group`,
+        { groupId: group._id },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Update the list immediately after successful response
+      if (response.data) {
+        // Remove the group from the common groups list
+        setCommonGroups(prev => prev.filter(g => g._id !== group._id));
+        
+        Swal.fire({
+          title: 'Left Group',
+          text: `You have left "${group.name}"`,
+          icon: 'success',
+          timer: 2000,
+          showConfirmButton: false,
+          background: effectiveTheme.mode === 'dark' ? '#1f2937' : '#ffffff',
+          color: effectiveTheme.mode === 'dark' ? '#f3f4f6' : '#111827',
+        });
+      }
+    } catch (error) {
+      console.error('Failed to leave group:', error);
+      Swal.fire({
+        title: 'Failed to Leave Group',
+        text: error.response?.data?.message || 'Failed to leave group',
+        icon: 'error',
+        background: effectiveTheme.mode === 'dark' ? '#1f2937' : '#ffffff',
+        color: effectiveTheme.mode === 'dark' ? '#f3f4f6' : '#111827',
+      });
+    } finally {
+      setOpenDropdownId(null);
+    }
+  };
+
+  const handleArchiveGroup = async (group) => {
+    try {
+      const result = await Swal.fire({
+        title: 'Archive Chat?',
+        text: `Are you sure you want to archive "${group.name}"?`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#3b82f6',
+        cancelButtonColor: '#6b7280',
+        confirmButtonText: 'Archive',
+        cancelButtonText: 'Cancel',
+        background: effectiveTheme.mode === 'dark' ? '#1f2937' : '#ffffff',
+        color: effectiveTheme.mode === 'dark' ? '#f3f4f6' : '#111827',
+      });
+
+      if (!result.isConfirmed) return;
+
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const chatId = group.chat || group._id;
+      
+      const response = await axios.post(
+        `${API_BASE_URL}/api/archive/chat/${chatId}`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (response.data) {
+        // Add to archived chats list
+        setArchivedChats(prev => [...prev, chatId]);
+        
+        Swal.fire({
+          title: 'Chat Archived',
+          text: `"${group.name}" has been archived`,
+          icon: 'success',
+          timer: 2000,
+          showConfirmButton: false,
+          background: effectiveTheme.mode === 'dark' ? '#1f2937' : '#ffffff',
+          color: effectiveTheme.mode === 'dark' ? '#f3f4f6' : '#111827',
+        });
+      }
+    } catch (error) {
+      console.error('Failed to archive chat:', error);
+      Swal.fire({
+        title: 'Failed to Archive',
+        text: error.response?.data?.message || 'Failed to archive chat',
+        icon: 'error',
+        background: effectiveTheme.mode === 'dark' ? '#1f2937' : '#ffffff',
+        color: effectiveTheme.mode === 'dark' ? '#f3f4f6' : '#111827',
+      });
+    } finally {
+      setOpenDropdownId(null);
+    }
+  };
+
+  const handleUnarchiveGroup = async (group) => {
+    try {
+      const result = await Swal.fire({
+        title: 'Unarchive Chat?',
+        text: `Are you sure you want to unarchive "${group.name}"?`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#10b981',
+        cancelButtonColor: '#6b7280',
+        confirmButtonText: 'Unarchive',
+        cancelButtonText: 'Cancel',
+        background: effectiveTheme.mode === 'dark' ? '#1f2937' : '#ffffff',
+        color: effectiveTheme.mode === 'dark' ? '#f3f4f6' : '#111827',
+      });
+
+      if (!result.isConfirmed) return;
+
+      const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+      const chatId = group.chat || group._id;
+      
+      const response = await axios.delete(
+        `${API_BASE_URL}/api/archive/chat/${chatId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (response.data) {
+        // Remove from archived chats list
+        setArchivedChats(prev => prev.filter(id => id !== chatId));
+        
+        Swal.fire({
+          title: 'Chat Unarchived',
+          text: `"${group.name}" has been unarchived`,
+          icon: 'success',
+          timer: 2000,
+          showConfirmButton: false,
+          background: effectiveTheme.mode === 'dark' ? '#1f2937' : '#ffffff',
+          color: effectiveTheme.mode === 'dark' ? '#f3f4f6' : '#111827',
+        });
+      }
+    } catch (error) {
+      console.error('Failed to unarchive chat:', error);
+      Swal.fire({
+        title: 'Failed to Unarchive',
+        text: error.response?.data?.message || 'Failed to unarchive chat',
+        icon: 'error',
+        background: effectiveTheme.mode === 'dark' ? '#1f2937' : '#ffffff',
+        color: effectiveTheme.mode === 'dark' ? '#f3f4f6' : '#111827',
+      });
+    } finally {
+      setOpenDropdownId(null);
     }
   };
 
@@ -731,27 +928,41 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.9 }}
                     className="mt-4 px-4"
-                    style={{ marginLeft: '3rem' }}
+                    style={{ marginLeft: '2rem' }}
                   >
                     <h4 className={`font-semibold mb-2 ${effectiveTheme.text}`}>Groups in common</h4>
                     <div className="space-y-2">
                       {loadingCommonGroups ? (
                         <div className={`text-sm ${effectiveTheme.textSecondary}`}>Loading groups...</div>
                       ) : (commonGroups && commonGroups.length > 0) ? (
-                        commonGroups.map((g, idx) => (
+                        commonGroups.map((g, idx) => {
+                          const getMargins = (index) => {
+                            const patterns = [
+                              { marginLeft: '2rem', marginRight: '0' },
+                              { marginLeft: '1rem', marginRight: '1rem' },
+                              { marginLeft: '0rem', marginRight: '2rem' },
+                            ];
+                            return patterns[index % patterns.length];
+                          };
+                          
+                          return (
                           <motion.div
                             key={g._id}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => tryOpenGroup(g)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tryOpenGroup(g); } }}
                             initial={{ x: -24, opacity: 0 }}
                             animate={{ x: 0, opacity: 1 }}
                             transition={{ delay: 0.8 + (idx * 0.06), type: 'spring', stiffness: 260, damping: 24 }}
-                            style={{ marginLeft: `${Math.max(0.75, 3 - idx * 0.18)}rem`, marginRight: '0' }}
-                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer ${effectiveTheme.mode === 'dark' ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-50'} transition`}
+                            style={getMargins(idx)}
+                            className={`flex items-center justify-between p-2 rounded-lg ${effectiveTheme.mode === 'dark' ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-50'} transition relative`}
+                            onMouseEnter={() => setHoveredGroupId(g._id)}
+                            onMouseLeave={() => setHoveredGroupId(null)}
                           >
-                            <div className="flex items-center gap-3">
+                            <div 
+                              className="flex items-center gap-3 flex-1 cursor-pointer"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => tryOpenGroup(g)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { tryOpenGroup(g); } }}
+                            >
                               <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                                 {g.avatar ? <img src={g.avatar} alt={g.name} className="w-full h-full object-cover" /> : <span className="font-semibold">{(g.name||'G').charAt(0)}</span>}
                               </div>
@@ -760,9 +971,76 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
                                 <div className={`text-xs ${effectiveTheme.textSecondary}`}>{g.participantsCount || 0} members</div>
                               </div>
                             </div>
-                            <div />
+                            
+                            {/* Dropdown Menu - Show only on hover */}
+                            {hoveredGroupId === g._id && (
+                              <div className="relative" ref={openDropdownId === g._id ? dropdownRef : null}>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenDropdownId(openDropdownId === g._id ? null : g._id);
+                                  }}
+                                  className={`p-1.5 rounded-full ${effectiveTheme.mode === 'dark' ? 'hover:bg-gray-600' : 'hover:bg-gray-200'} transition-colors`}
+                                >
+                                  <EllipsisVertical className={`w-4 h-4 ${effectiveTheme.textSecondary}`} />
+                                </button>
+                                
+                                {openDropdownId === g._id && (
+                                  <motion.div
+                                    initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                                    transition={{ duration: 0.15 }}
+                                    className={`absolute right-0 top-8 w-44 ${
+                                      effectiveTheme.mode === 'dark' 
+                                        ? 'bg-gray-800 border-gray-700' 
+                                        : 'bg-white border-gray-200'
+                                    } border rounded-lg shadow-lg z-50 overflow-hidden`}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {archivedChats.includes(g.chat || g._id) ? (
+                                      <button
+                                        onClick={() => handleUnarchiveGroup(g)}
+                                        className={`w-full px-4 py-2.5 flex items-center gap-2 text-sm ${
+                                          effectiveTheme.mode === 'dark'
+                                            ? 'text-green-400 hover:bg-green-900/20'
+                                            : 'text-green-600 hover:bg-green-50'
+                                        } transition-colors`}
+                                      >
+                                        <ArchiveRestore className="w-4 h-4" />
+                                        <span>Unarchive Chat</span>
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleArchiveGroup(g)}
+                                        className={`w-full px-4 py-2.5 flex items-center gap-2 text-sm ${
+                                          effectiveTheme.mode === 'dark'
+                                            ? 'text-blue-400 hover:bg-blue-900/30'
+                                            : 'text-blue-600 hover:bg-blue-50'
+                                        } transition-colors`}
+                                      >
+                                        <Archive className="w-4 h-4" />
+                                        <span>Archive Chat</span>
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => handleLeaveGroup(g)}
+                                      className={`w-full px-4 py-2.5 flex items-center gap-2 text-sm ${
+                                        effectiveTheme.mode === 'dark'
+                                          ? 'text-red-400 hover:bg-red-900/20'
+                                          : 'text-red-600 hover:bg-red-50'
+                                      } transition-colors`}
+                                    >
+                                      <LogOut className="w-4 h-4" />
+                                      <span>Leave Group</span>
+                                    </button>
+                                  </motion.div>
+                                )}
+                              </div>
+                            )}
                           </motion.div>
-                        ))
+                        );
+                        })
                       ) : (
                         <div className={`text-sm ${effectiveTheme.textSecondary}`}>No groups in common</div>
                       )}

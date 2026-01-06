@@ -1125,6 +1125,7 @@ export const updateGroupSettings = async (req, res) => {
       if (permissions.allowCreatorAdmin !== undefined) group.permissions.allowCreatorAdmin = !!permissions.allowCreatorAdmin;
       if (permissions.allowOthersAdmin !== undefined) group.permissions.allowOthersAdmin = !!permissions.allowOthersAdmin;
       if (permissions.allowMembersAdd !== undefined) group.permissions.allowMembersAdd = !!permissions.allowMembersAdd;
+      group.markModified('permissions'); // Mark nested object as modified for Mongoose
     }
 
     if (features && typeof features === 'object') {
@@ -1133,6 +1134,7 @@ export const updateGroupSettings = async (req, res) => {
       if (features.gallery !== undefined) group.features.gallery = !!features.gallery;
       if (features.docs !== undefined) group.features.docs = !!features.docs;
       if (features.polls !== undefined) group.features.polls = !!features.polls;
+      group.markModified('features'); // Mark nested object as modified for Mongoose
     }
 
     // Handle avatar upload (base64) or clearing avatar
