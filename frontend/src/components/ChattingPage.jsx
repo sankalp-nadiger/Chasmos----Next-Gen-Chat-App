@@ -113,8 +113,6 @@ const ChatHeader = React.memo(
     isArchived,
     onOpenUserProfile,
     onOpenGroupInfo,
-    setShowDeleteChatModal,
-    setChatToDelete,
     // New props passed from parent
     isOnline,
     groupOnlineCount,
@@ -137,9 +135,6 @@ const ChatHeader = React.memo(
       document.addEventListener("mousedown", handler);
       return () => document.removeEventListener("mousedown", handler);
     }, [menuOpen]);
-    const pinnedCount = Object.values(pinnedMessages || {}).filter(
-      Boolean
-    ).length;
 
     return (
       <div className={`${effectiveTheme.secondary} relative`}>
@@ -209,7 +204,7 @@ const ChatHeader = React.memo(
                 </div>
               )}
 
-              {isOnline && !selectedContact.isDocument && (
+              {(!selectedContact?.hasBlockedYou && !selectedHasLeftGroup && isOnline && !selectedContact.isDocument) && (
                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
               )}
             </div>
@@ -231,15 +226,17 @@ const ChatHeader = React.memo(
                 )}
               </div>
 
-             <p className={`text-sm ${effectiveTheme.textSecondary}`}>
-               {selectedContact?.isTyping
-                 ? "Typing..."
-                 : (selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat)
-                 ? `${groupOnlineCount || 0} online`
-                 : isOnline
-                 ? "Online"
-                 : "Offline"}
-             </p>
+             {!selectedContact?.hasBlockedYou && (
+               <p className={`text-sm ${effectiveTheme.textSecondary}`}>
+                 {selectedContact?.isTyping
+                   ? "Typing..."
+                   : (selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat)
+                   ? (selectedHasLeftGroup ? "" : `${groupOnlineCount || 0} online`)
+                   : isOnline
+                   ? "Online"
+                   : "Offline"}
+               </p>
+             )}
             </div>
           </div>
 
@@ -489,6 +486,8 @@ const ChatHeader = React.memo(
   (prevProps, nextProps) => {
     return (
       prevProps.selectedContact?.id === nextProps.selectedContact?.id &&
+      prevProps.selectedContact?.name === nextProps.selectedContact?.name &&
+      prevProps.selectedContact?.avatar === nextProps.selectedContact?.avatar &&
       prevProps.selectedContact?.isTyping ===
         nextProps.selectedContact?.isTyping &&
       prevProps.showChatSearch === nextProps.showChatSearch &&
@@ -2091,7 +2090,12 @@ const MessagesArea = ({
     if (isSameDay(d, today)) return "Today";
     if (isSameDay(d, yesterday)) return "Yesterday";
 
-    return d.toLocaleDateString();
+    // Use en-GB to ensure day/month/year ordering (dd/mm/yyyy)
+    try {
+      return d.toLocaleDateString('en-GB');
+    } catch (e) {
+      return d.toLocaleDateString();
+    }
   }, []);
 
   // Inject date markers before the first message of each day
@@ -2708,6 +2712,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [isBlockedState, setIsBlockedState] = useState(false);
+  const [hasBlockedYouState, setHasBlockedYouState] = useState(false);
   const [isArchivedState, setIsArchivedState] = useState(false);
   const [archivedChatIds, setArchivedChatIds] = useState(new Set());
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -2950,71 +2955,18 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   // mutating the main recent chats list when preparing forward targets.
   const [forwardRecentChats, setForwardRecentChats] = useState([]);
 
-  // Guard: set to avoid duplicate in-flight group participant fetches
-  const fetchingGroupParticipantsRef = useRef(new Set());
-
-  // Ensure group chats have authoritative participants (prefer group.participants over chat.participants)
-  useEffect(() => {
-    if (!Array.isArray(recentChats) || recentChats.length === 0) return;
-    const token =
-      localStorage.getItem("token") ||
-      localStorage.getItem("chasmos_auth_token");
-
-    recentChats.forEach((c) => {
-      const isGroup =
-        c.isGroup || c.isGroupChat || c.isgroupchat || c.isGroupChat;
-      if (!isGroup) return;
-      const hasMembers =
-        (c.group &&
-          (c.group.participants || c.group.users) &&
-          (c.group.participants || c.group.users).length > 0) ||
-        (c.participants && c.participants.length > 0) ||
-        (c.users && c.users.length > 0);
-      const chatId = c.chatId || c.id || c._id || c.chatId;
-      if (hasMembers) return;
-      if (!chatId) return;
-      // avoid duplicate fetches
-      if (fetchingGroupParticipantsRef.current.has(String(chatId))) return;
-      fetchingGroupParticipantsRef.current.add(String(chatId));
-
-      (async () => {
-        try {
-          const headers = token ? { Authorization: `Bearer ${token}` } : {};
-          const url = `${API_BASE_URL}/api/group/group/${encodeURIComponent(chatId)}`;
-          const res = await fetch(url, { headers });
-          if (!res.ok) return;
-          const data = await res.json();
-          const group = data && data.success && data.group ? data.group : data;
-          const members =
-            group && (group.participants || group.users)
-              ? group.participants || group.users
-              : [];
-          setRecentChats((prev) =>
-            (prev || []).map((x) => {
-              if (String(x.chatId || x.id || x._id) === String(chatId)) {
-                return { ...x, participants: members, users: members, group };
-              }
-              return x;
-            })
-          );
-        } catch (e) {
-          // ignore
-        } finally {
-          fetchingGroupParticipantsRef.current.delete(String(chatId));
-        }
-      })();
-    });
-  }, [recentChats]);
-
   // Track whether selected contact (group) has the current user removed/left
   const [selectedHasLeftGroup, setSelectedHasLeftGroup] = useState(false);
+  const lastFetchedGroupIdRef = useRef(null);
 
-  // Recompute when selectedContact changes
+  // Recompute when selectedContact ID changes (not the whole object to avoid loops)
   useEffect(() => {
     if (!selectedContact) {
       setSelectedHasLeftGroup(false);
+      lastFetchedGroupIdRef.current = null;
       return;
     }
+    
     const isGroup = Boolean(
       selectedContact.isGroup ||
         selectedContact.isGroupChat ||
@@ -3022,81 +2974,139 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
         selectedContact.group ||
         selectedContact.chat?.isGroupChat
     );
+    
     if (!isGroup) {
       setSelectedHasLeftGroup(false);
+      lastFetchedGroupIdRef.current = null;
       return;
     }
 
-    // Derive members from multiple possible payload shapes to avoid false negatives.
-    // If participants are missing or empty, fetch authoritative group info from backend.
+    // Determine the groupId or chatId to query
+    const groupId =
+      selectedContact.group?._id ||
+      selectedContact.groupId ||
+      selectedContact.chatId ||
+      selectedContact._id ||
+      selectedContact.id;
+
+    if (!groupId) {
+      setSelectedHasLeftGroup(false);
+      lastFetchedGroupIdRef.current = null;
+      return;
+    }
+
+    // Only fetch if groupId has changed to prevent infinite loops
+    const groupIdStr = String(groupId);
+    if (lastFetchedGroupIdRef.current === groupIdStr) {
+      return;
+    }
+
+    lastFetchedGroupIdRef.current = groupIdStr;
+
+    // ALWAYS fetch from Group model to get authoritative participants list
+    // The Chat model's users/participants may be out of sync when users leave
     (async () => {
       try {
-        let members =
-          selectedContact.users ||
-          selectedContact.participants ||
-          (selectedContact.group &&
-            (selectedContact.group.participants ||
-              selectedContact.group.users)) ||
-          (selectedContact.chat &&
-            (selectedContact.chat.participants ||
-              selectedContact.chat.users)) ||
-          [];
-
-        // If participants array is empty or not present but we have a chatId/group id, fetch from API
-        const groupId =
-          selectedContact.group?._id ||
-          selectedContact.groupId ||
-          selectedContact.chatId ||
-          selectedContact._id ||
-          selectedContact.id;
-        if ((!members || members.length === 0) && groupId) {
-          try {
-            const token =
-              localStorage.getItem("token") ||
-              localStorage.getItem("chasmos_auth_token");
-            const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            // Use the same authoritative endpoint as GroupInfoModal which accepts either groupId or chatId
-            const url = `${API_BASE_URL}/api/group/group/${encodeURIComponent(groupId)}`;
-            const res = await fetch(url, { headers });
-            if (res.ok) {
-              const data = await res.json();
-              // API returns success wrapper { success: true, ... } or plain group — handle both
-              const group =
-                data && data.success && data.group ? data.group : data;
-              if (group && (group.participants || group.users)) {
-                members = group.participants || group.users || [];
-                // Update selectedContact to include authoritative participants so UI uses it
-                setSelectedContact((prev) =>
-                  prev ? { ...prev, participants: members } : prev
-                );
-              }
-            }
-          } catch (e) {
-            console.warn(
-              "Failed to fetch group info for membership check",
-              e && e.message
-            );
-          }
-        }
-
         const _local = JSON.parse(
           localStorage.getItem("chasmos_user_data") || "{}"
         );
         const currentUserIdLocal =
           _local._id || _local.id || _local.userId || null;
 
-        const isMember = (members || []).some((m) => {
+        // Fetch authoritative Group document from backend
+        const token =
+          localStorage.getItem("token") ||
+          localStorage.getItem("chasmos_auth_token");
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const url = `${API_BASE_URL}/api/group/group/${encodeURIComponent(groupIdStr)}`;
+        
+        const res = await fetch(url, { headers });
+        if (!res.ok) {
+          console.warn("Failed to fetch group info, status:", res.status);
+          setSelectedHasLeftGroup(false);
+          return;
+        }
+
+        const data = await res.json();
+        // API returns { success: true, ...groupData } or plain group object
+        const group = data && data.success ? data : (data.participants ? data : null);
+        
+        if (!group || !group.participants) {
+          console.warn("Group has no participants array");
+          setSelectedHasLeftGroup(false);
+          return;
+        }
+
+        // Check if current user is in Group.participants (authoritative source)
+        const isMember = (group.participants || []).some((m) => {
           const uid = m && (m._id || m.id || m.userId || m);
           return uid && String(uid) === String(currentUserIdLocal);
         });
 
         setSelectedHasLeftGroup(!isMember);
+        
+        // Only update selectedContact if participants actually changed
+        setSelectedContact((prev) => {
+          if (!prev) return prev;
+          
+          // Check if participants are different
+          const prevParticipants = prev.participants || [];
+          const newParticipants = group.participants || [];
+          
+          const participantsChanged = 
+            prevParticipants.length !== newParticipants.length ||
+            !prevParticipants.every((p, i) => {
+              const pId = String(p?._id || p?.id || p);
+              const nId = String(newParticipants[i]?._id || newParticipants[i]?.id || newParticipants[i]);
+              return pId === nId;
+            });
+          
+          if (!participantsChanged) {
+            return prev;
+          }
+          
+          return { ...prev, participants: group.participants, group };
+        });
       } catch (err) {
         console.error("selectedContact membership check failed", err);
         setSelectedHasLeftGroup(false);
       }
     })();
-  }, [selectedContact]);
+  }, [selectedContact?._id, selectedContact?.chatId, selectedContact?.groupId, selectedContact?.id]);
+
+  // Helper function to compute hasLeftGroup for a chat
+  const computeHasLeftGroup = useCallback((chat) => {
+    const isGroup = Boolean(
+      chat.isGroup ||
+      chat.isGroupChat ||
+      chat.isgroupchat ||
+      chat.group ||
+      chat.chat?.isGroupChat
+    );
+
+    if (!isGroup) {
+      return false;
+    }
+
+    const members =
+      chat.users ||
+      chat.participants ||
+      chat.group?.participants ||
+      chat.group?.users ||
+      chat.chat?.participants ||
+      chat.chat?.users ||
+      [];
+
+    const _local = JSON.parse(localStorage.getItem("chasmos_user_data") || "{}");
+    const currentUserIdLocal = _local._id || _local.id || _local.userId || null;
+
+    const isMember = (members || []).some((m) => {
+      const uid = m && (m._id || m.id || m.userId || m);
+      return uid && String(uid) === String(currentUserIdLocal);
+    });
+
+    return !isMember;
+  }, []);
 
   // Attempt to leave a group (calls backend then updates local state)
   const leaveGroupFromChat = async (contact, keepMedia = false) => {
@@ -3999,15 +4009,14 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             copy.__computedGroupOnlineCount = count;
             copy.isOnline = count > 0;
           } else {
-            const uid =
-              copy.userId ||
-              copy._id ||
-              copy.id ||
-              copy.participantId ||
-              (copy.participants && copy.participants[0]?._id);
-            copy.isOnline = uid
-              ? onlineUsers.has(String(uid))
-              : Boolean(copy.isOnline);
+            const uid = copy.userId || copy._id || copy.id || copy.participantId || (copy.participants && copy.participants[0]?._id);
+            const presence = uid ? onlineUsers.has(String(uid)) : Boolean(copy.isOnline);
+            // If this chat's other user has blocked the current user, never show online
+            if (copy.hasBlockedYou) {
+              copy.isOnline = false;
+            } else {
+              copy.isOnline = presence;
+            }
           }
           return copy;
         });
@@ -4047,15 +4056,14 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             copy.__computedGroupOnlineCount = count;
             copy.isOnline = count > 0;
           } else {
-            const uid =
-              copy.userId ||
-              copy._id ||
-              copy.id ||
-              copy.participantId ||
-              (copy.participants && copy.participants[0]?._id);
-            copy.isOnline = uid
-              ? onlineUsers.has(String(uid))
-              : Boolean(copy.isOnline);
+            const uid = copy.userId || copy._id || copy.id || copy.participantId || (copy.participants && copy.participants[0]?._id);
+            const presence = uid ? onlineUsers.has(String(uid)) : Boolean(copy.isOnline);
+            // Respect hasBlockedYou for contacts as well
+            if (copy.hasBlockedYou) {
+              copy.isOnline = false;
+            } else {
+              copy.isOnline = presence;
+            }
           }
           return copy;
         });
@@ -4109,6 +4117,10 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
           }
           copy.__computedGroupOnlineCount = count;
           copy.isOnline = count > 0;
+          // If this chat's other user has blocked the current user, always treat as offline
+          if (copy.hasBlockedYou) {
+            copy.isOnline = false;
+          }
         } else {
           const candidateIds = [];
           if (copy.userId) candidateIds.push(String(copy.userId));
@@ -4132,6 +4144,10 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
               : false
           );
           copy.isOnline = foundOnline || Boolean(copy.isOnline);
+          // Respect block flag if present
+          if (copy.hasBlockedYou) {
+            copy.isOnline = false;
+          }
         }
         return copy;
       });
@@ -4160,6 +4176,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
     (async () => {
       try {
         setIsBlockedState(false);
+        setHasBlockedYouState(false);
         setIsArchivedState(false);
 
         if (!selectedContact) return;
@@ -4180,6 +4197,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             // `hasBlockedYou` means the other user has blocked the current user.
             // Only mark `isBlockedState` when the current user has blocked the contact.
             setIsBlockedState(Boolean(status?.isBlocked));
+            setHasBlockedYouState(Boolean(status?.hasBlockedYou));
           } catch (e) {
             // ignore errors
           }
@@ -4725,13 +4743,56 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
 
   //After chatting with accepted chats
   const handleOpenChat = (chat) => {
-    console.log("🎯 handleOpenChat called with chat:", chat);
-    console.log("🔎 Checking fields:");
-    console.log("   - chat.isGroup:", chat.isGroup);
-    console.log("   - chat.isGroupChat:", chat.isGroupChat);
-    console.log("   - chat.isgroupchat:", chat.isgroupchat);
-    console.log("   - chat.name:", chat.name);
-    console.log("   - chat.chatId:", chat.chatId);
+    console.log('🎯 handleOpenChat called with chat:', chat);
+    console.log('🔎 Checking fields:');
+    console.log('   - chat.isGroup:', chat.isGroup);
+    console.log('   - chat.isGroupChat:', chat.isGroupChat);
+    console.log('   - chat.isgroupchat:', chat.isgroupchat);
+    console.log('   - chat.name:', chat.name);
+    console.log('   - chat.chatId:', chat.chatId);
+    // Immediately set a minimal selectedContact with offline presence to avoid flash
+    try {
+      const earlyId = chat.chatId || chat._id || chat.id || chat.userId || chat.email || null;
+      const earlyIsGroup = chat.isGroup || chat.isGroupChat || chat.isgroupchat || (chat.participants && chat.participants.length > 1) || false;
+      if (earlyId) {
+        const earlyContact = {
+          id: String(earlyId),
+          chatId: chat.chatId || null,
+          name: chat.name || chat.email || '',
+          avatar: chat.avatar || null,
+          isGroup: earlyIsGroup,
+          isOnline: false,
+          hasLeftGroup: chat.hasLeftGroup || false,
+        };
+        setSelectedContact(normalizeContact(earlyContact));
+        // Set selectedHasLeftGroup immediately to prevent flicker
+        if (earlyIsGroup && chat.hasLeftGroup !== undefined) {
+          setSelectedHasLeftGroup(chat.hasLeftGroup);
+        } else if (!earlyIsGroup) {
+          setSelectedHasLeftGroup(false);
+        }
+        // Also set recentChats/contact entries offline immediately to prevent sidebar flash
+        // Preserve hasLeftGroup if it exists
+        setRecentChats(prev => (prev || []).map(c => {
+          if (String(c.chatId) === String(earlyId) || String(c.id) === String(earlyId) || String(c.userId) === String(earlyId)) {
+            return { 
+              ...c, 
+              isOnline: false,
+              hasLeftGroup: chat.hasLeftGroup !== undefined ? chat.hasLeftGroup : c.hasLeftGroup
+            };
+          }
+          return c;
+        }));
+        setContacts(prev => (prev || []).map(c => {
+          if (String(c.chatId) === String(earlyId) || String(c.id) === String(earlyId) || String(c.userId) === String(earlyId)) {
+            return { ...c, isOnline: false };
+          }
+          return c;
+        }));
+      }
+    } catch (e) {
+      // ignore
+    }
     // When opening a chat with a contact from accepted requests,
     // DO NOT create a chat automatically - just show the UI
     // Chat will be created when they send first message
@@ -4784,12 +4845,55 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             })(),
           };
 
-          console.log(
-            "📝 Created contactForUI from existing chat:",
-            contactForUI,
-            "from chat:",
-            chat
-          );
+          console.log('📝 Created contactForUI from existing chat:', contactForUI, 'from chat:', chat);
+          try {
+            if (!contactForUI.isGroup && contactForUI.userId) {
+              const status = await blockService.checkBlockStatus(String(contactForUI.userId));
+              contactForUI.hasBlockedYou = Boolean(status?.hasBlockedYou);
+              if (contactForUI.hasBlockedYou) contactForUI.isOnline = false;
+              
+              // Update recentChats to preserve hasBlockedYou flag
+              setRecentChats(prev => (prev || []).map(c => {
+                if (String(c.chatId) === String(normalizedChatId) || String(c.id) === String(normalizedChatId)) {
+                  return { ...c, hasBlockedYou: contactForUI.hasBlockedYou, isOnline: contactForUI.hasBlockedYou ? false : c.isOnline };
+                }
+                return c;
+              }));
+            }
+            
+            // Compute hasLeftGroup for groups
+            if (contactForUI.isGroup) {
+              const members =
+                contactForUI.users ||
+                contactForUI.participants ||
+                chat.users ||
+                chat.participants ||
+                [];
+              const _local = JSON.parse(localStorage.getItem("chasmos_user_data") || "{}");
+              const currentUserIdLocal = _local._id || _local.id || _local.userId || null;
+              const isMember = (members || []).some((m) => {
+                const uid = m && (m._id || m.id || m.userId || m);
+                return uid && String(uid) === String(currentUserIdLocal);
+              });
+              contactForUI.hasLeftGroup = !isMember;
+              
+              // Update recentChats to preserve hasLeftGroup flag and set selectedHasLeftGroup immediately
+              setRecentChats(prev => (prev || []).map(c => {
+                if (String(c.chatId) === String(normalizedChatId) || String(c.id) === String(normalizedChatId)) {
+                  return { ...c, hasLeftGroup: contactForUI.hasLeftGroup };
+                }
+                return c;
+              }));
+              setSelectedHasLeftGroup(contactForUI.hasLeftGroup);
+            } else {
+              contactForUI.hasLeftGroup = false;
+              setSelectedHasLeftGroup(false);
+            }
+          } catch (e) {
+            contactForUI.hasBlockedYou = false;
+            contactForUI.hasLeftGroup = false;
+            setSelectedHasLeftGroup(false);
+          }
           setSelectedContact(normalizeContact(contactForUI));
 
           // Clear unread count for this chat
@@ -4877,6 +4981,15 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             isAcceptedRequest: true, // Flag to indicate this needs chat creation
           };
 
+          try {
+            if (contactForUI.userId) {
+              const status = await blockService.checkBlockStatus(String(contactForUI.userId));
+              contactForUI.hasBlockedYou = Boolean(status?.hasBlockedYou);
+              if (contactForUI.hasBlockedYou) contactForUI.isOnline = false;
+            }
+          } catch (e) {
+            contactForUI.hasBlockedYou = false;
+          }
           setSelectedContact(normalizeContact(contactForUI));
           setMessages((prev) => ({ ...prev, [userId]: [] })); // Empty messages
           return;
@@ -4930,6 +5043,24 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
           isGroup: chatObj.isGroupChat || false,
         };
 
+        try {
+          // annotate block status for 1:1 chats to avoid flashing online
+          if (!contactForUI.isGroup && otherUser && (otherUser._id || otherUser.id)) {
+            const status = await blockService.checkBlockStatus(String(otherUser._id || otherUser.id));
+            contactForUI.hasBlockedYou = Boolean(status?.hasBlockedYou);
+            if (contactForUI.hasBlockedYou) contactForUI.isOnline = false;
+            
+            // Update recentChats to preserve hasBlockedYou flag
+            setRecentChats(prev => (prev || []).map(c => {
+              if (String(c.chatId) === String(normalizedChatId) || String(c.id) === String(normalizedChatId)) {
+                return { ...c, hasBlockedYou: contactForUI.hasBlockedYou, isOnline: contactForUI.hasBlockedYou ? false : c.isOnline };
+              }
+              return c;
+            }));
+          }
+        } catch (e) {
+          contactForUI.hasBlockedYou = false;
+        }
         setSelectedContact(normalizeContact(contactForUI));
 
         // Clear unread count for this chat
@@ -5029,8 +5160,43 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   //Group functions
   const [currentGroup, setCurrentGroup] = useState(null);
 
-  const handleOpenGroupInfo = (group) => {
-    if (!group || (!group.isGroup && !group.isGroupChat)) return;
+  // When a group is updated (from GroupInfoModal), reflect changes immediately
+  useEffect(() => {
+    if (!currentGroup) return;
+    const chatId = currentGroup.chatId || currentGroup._id || currentGroup.id;
+    const avatar = currentGroup.avatar || currentGroup.icon || (currentGroup.groupSettings && currentGroup.groupSettings.avatar) || '';
+    const name = currentGroup.name || currentGroup.chatName || currentGroup.groupName || '';
+
+    try {
+      // Update recentChats entry directly to avoid overwriting lastMessage
+      if (chatId) {
+        setRecentChats(prev => Array.isArray(prev) ? prev.map(c => {
+          const id = c.chatId || c.id || c._id;
+          if (String(id) === String(chatId)) return { ...c, avatar, name };
+          return c;
+        }) : prev);
+      }
+    } catch (e) { console.warn('setRecentChats failed while syncing group avatar', e); }
+
+    try {
+      // Update contacts list so sidebar reflects new avatar
+      setContacts(prev => (Array.isArray(prev) ? prev.map(c => {
+        const id = c.chatId || c.id || c._id;
+        if (String(id) === String(chatId)) return { ...c, avatar, name };
+        return c;
+      }) : prev));
+    } catch (e) { /* ignore */ }
+
+    try {
+      // If currently open chat is this group, update header selectedContact
+      if (selectedContact && String(selectedContact.chatId || selectedContact.id || selectedContact._id) === String(chatId)) {
+        setSelectedContact(prev => ({ ...(prev||{}), avatar, name }));
+      }
+    } catch (e) { /* ignore */ }
+  }, [currentGroup]);
+
+const handleOpenGroupInfo = (group) => {
+  if (!group || (!group.isGroup && !group.isGroupChat)) return;
 
     // Fetch full group details with all members
     const token =
@@ -5038,59 +5204,61 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
       localStorage.getItem("chasmos_auth_token");
     if (!token) return;
 
-    const localeParam =
-      typeof navigator !== "undefined" &&
-      (navigator.language || navigator.userLanguage)
-        ? encodeURIComponent(navigator.language || navigator.userLanguage)
-        : "en-US";
-    fetch(
-      `${API_BASE_URL}/api/chat/group/${group.chatId || group.id}?locale=${localeParam}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
+  const localeParam = (typeof navigator !== 'undefined' && (navigator.language || navigator.userLanguage)) ? encodeURIComponent(navigator.language || navigator.userLanguage) : 'en-US';
+  fetch(`${API_BASE_URL}/api/chat/group/${group.chatId || group.id}?locale=${localeParam}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+    .then(res => res.json())
+    .then(fullGroupData => {
+      const normalized = {
+        ...fullGroupData,
+        name: fullGroupData.name || fullGroupData.chatName || (fullGroupData.groupSettings && fullGroupData.groupSettings.name) || group.name || group.chatName || 'Group'
+      };
+      // Ensure formatted date is available on the frontend object
+      if (!normalized.createdAtFormatted && (fullGroupData.createdAtFormatted || fullGroupData.createdAtIso || fullGroupData.createdAt)) {
+        normalized.createdAtFormatted = fullGroupData.createdAtFormatted || fullGroupData.createdAtIso || fullGroupData.createdAt;
       }
-    )
-      .then((res) => res.json())
-      .then((fullGroupData) => {
-        const normalized = {
-          ...fullGroupData,
-          name:
-            fullGroupData.name ||
-            fullGroupData.chatName ||
-            (fullGroupData.groupSettings && fullGroupData.groupSettings.name) ||
-            group.name ||
-            group.chatName ||
-            "Group",
-        };
-        // Ensure formatted date is available on the frontend object
-        if (
-          !normalized.createdAtFormatted &&
-          (fullGroupData.createdAtFormatted ||
-            fullGroupData.createdAtIso ||
-            fullGroupData.createdAt)
-        ) {
-          normalized.createdAtFormatted =
-            fullGroupData.createdAtFormatted ||
-            fullGroupData.createdAtIso ||
-            fullGroupData.createdAt;
+      setCurrentGroup(normalized);
+      setShowGroupInfoModal(true);
+    })
+    .catch(err => {
+      console.error('Failed to fetch group details:', err);
+      // Fallback: use the data we have
+      const fallback = { ...group, name: group.name || group.chatName || (group.groupSettings && group.groupSettings.name) || 'Group' };
+      setCurrentGroup(fallback);
+      setShowGroupInfoModal(true);
+    });
+};
+
+  // Listen for external requests to open a chat (e.g., from other modals)
+  useEffect(() => {
+    const handler = (ev) => {
+      try {
+        const detail = ev && ev.detail ? ev.detail : {};
+        const chat = detail.chat || (detail.chatId ? { chatId: detail.chatId } : null);
+        const tokenFromDetail = detail.token;
+        if (!chat) return;
+        // If a token was provided, persist it under chasmos_auth_token to be used by API calls
+        if (tokenFromDetail) {
+          try { localStorage.setItem('chasmos_auth_token', tokenFromDetail); } catch (e) {}
+        } else {
+          // Also ensure there's a fallback token available
+          const t = localStorage.getItem('token');
+          if (t && !localStorage.getItem('chasmos_auth_token')) {
+            try { localStorage.setItem('chasmos_auth_token', t); } catch (e) {}
+          }
         }
-        setCurrentGroup(normalized);
-        setShowGroupInfoModal(true);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch group details:", err);
-        // Fallback: use the data we have
-        const fallback = {
-          ...group,
-          name:
-            group.name ||
-            group.chatName ||
-            (group.groupSettings && group.groupSettings.name) ||
-            "Group",
-        };
-        setCurrentGroup(fallback);
-        setShowGroupInfoModal(true);
-      });
-  };
+
+        try { handleOpenChat(chat); } catch (e) { console.warn('open-chat handler failed', e); }
+        try { navigate('/chats'); } catch (e) {}
+      } catch (e) {
+        console.warn('chasmos:open-chat handler error', e);
+      }
+    };
+
+    window.addEventListener('chasmos:open-chat', handler);
+    return () => window.removeEventListener('chasmos:open-chat', handler);
+  }, [navigate]);
 
   const handleCloseGroupInfo = () => {
     setShowGroupInfoModal(false);
@@ -5326,6 +5494,11 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
               ? chat.unreadCount
               : chat.unreadCount?.[loggedInUserId] || 0;
 
+          // Preserve original users/participants arrays from backend for hasLeftGroup computation
+          const usersArray = chat.isGroupChat
+            ? chat.users || chat.participants || []
+            : null;
+
           return {
             id: chatIdValue,
             chatId: chatIdValue,
@@ -5346,28 +5519,105 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             chatName: chat.chatName || chat.name || null,
             isGroupChat:
               chat.isGroupChat === true || chat.isGroupChat === "true",
-            users: chat.isGroupChat
-              ? chat.users || chat.participants || []
-              : null,
+            users: usersArray,
+            participants: usersArray, // Also set participants for consistency
             admins: chat.isGroupChat ? chat.admins || [] : null,
             groupAdmin: chat.isGroupChat ? chat.groupAdmin || null : null,
             groupSettings: chat.isGroupChat ? chat.groupSettings || {} : null,
+            mentionCount: chat.mentionCount || 0,
           };
         })
         .filter(Boolean);
 
-      // Deduplicate by chatId
-      const seen = new Map();
-      formatted.forEach((chat) => {
-        const chatIdKey = String(chat.chatId);
-        if (
-          !seen.has(chatIdKey) ||
-          new Date(chat.timestamp) > new Date(seen.get(chatIdKey).timestamp)
-        ) {
-          seen.set(chatIdKey, chat);
+    // Deduplicate by chatId
+    // Before deduplication, check block status for each non-group chat so
+    // we can hide online presence when the other user has blocked you.
+    // Also compute hasLeftGroup for group chats BEFORE setting state.
+    const _local = JSON.parse(localStorage.getItem("chasmos_user_data") || "{}");
+    const currentUserIdLocal = _local._id || _local.id || _local.userId || null;
+    
+    const withBlockInfo = await Promise.all(formatted.map(async (chat) => {
+      try {
+        if (!chat.isGroupChat && chat.userId) {
+          const status = await blockService.checkBlockStatus(String(chat.userId));
+          chat.hasBlockedYou = Boolean(status?.hasBlockedYou);
+          if (chat.hasBlockedYou) chat.isOnline = false;
+        } else {
+          chat.hasBlockedYou = false;
         }
-      });
-      const deduplicated = Array.from(seen.values());
+        
+        // Compute hasLeftGroup for group chats by fetching authoritative Group model participants
+        if (chat.isGroupChat) {
+          try {
+            const groupId = chat.chatId || chat._id || chat.id;
+            if (groupId) {
+              const headers = token ? { Authorization: `Bearer ${token}` } : {};
+              const url = `${API_BASE_URL}/api/group/group/${encodeURIComponent(groupId)}`;
+              const groupRes = await fetch(url, { headers });
+              
+              if (groupRes.ok) {
+                const groupData = await groupRes.json();
+                const group = groupData && groupData.success ? groupData : (groupData.participants ? groupData : null);
+                
+                if (group && group.participants) {
+                  // Use authoritative Group.participants for membership check
+                  const isMember = (group.participants || []).some((m) => {
+                    const uid = m && (m._id || m.id || m.userId || m);
+                    return uid && String(uid) === String(currentUserIdLocal);
+                  });
+                  chat.hasLeftGroup = !isMember;
+                  // Update the chat's participants with authoritative data
+                  chat.participants = group.participants;
+                  chat.users = group.participants;
+                } else {
+                  // Fallback to chat.users if group fetch failed
+                  const members = chat.users || [];
+                  const isMember = (members || []).some((m) => {
+                    const uid = m && (m._id || m.id || m.userId || m);
+                    return uid && String(uid) === String(currentUserIdLocal);
+                  });
+                  chat.hasLeftGroup = !isMember;
+                }
+              } else {
+                // Fallback to chat.users if group fetch failed
+                const members = chat.users || [];
+                const isMember = (members || []).some((m) => {
+                  const uid = m && (m._id || m.id || m.userId || m);
+                  return uid && String(uid) === String(currentUserIdLocal);
+                });
+                chat.hasLeftGroup = !isMember;
+              }
+            } else {
+              chat.hasLeftGroup = false;
+            }
+          } catch (fetchError) {
+            // Fallback to chat.users if fetch fails
+            const members = chat.users || [];
+            const isMember = (members || []).some((m) => {
+              const uid = m && (m._id || m.id || m.userId || m);
+              return uid && String(uid) === String(currentUserIdLocal);
+            });
+            chat.hasLeftGroup = !isMember;
+          }
+        } else {
+          chat.hasLeftGroup = false;
+        }
+      } catch (e) {
+        // ignore errors and assume not blocked
+        chat.hasBlockedYou = false;
+        chat.hasLeftGroup = false;
+      }
+      return chat;
+    }));
+
+    const seen = new Map();
+    withBlockInfo.forEach(chat => {
+      const chatIdKey = String(chat.chatId);
+      if (!seen.has(chatIdKey) || new Date(chat.timestamp) > new Date(seen.get(chatIdKey).timestamp)) {
+        seen.set(chatIdKey, chat);
+      }
+    });
+    const deduplicated = Array.from(seen.values());
 
       // Filter out archived chats
       const filtered = deduplicated.filter(
@@ -5386,6 +5636,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             avatar: chat.avatar || existing?.avatar,
             unreadCount: chat.unreadCount ?? existing?.unreadCount ?? 0,
             isOnline: chat.isOnline ?? existing?.isOnline ?? false,
+            // hasLeftGroup and hasBlockedYou already computed above
           };
         });
 
@@ -5806,6 +6057,9 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
           ...(!isSystem && !metaIsFromMe && meta.userId ? { userId: meta.userId } : {}),
         });
 
+          // Compute hasLeftGroup for updated chat
+          updated.hasLeftGroup = computeHasLeftGroup(updated);
+
           return [
             updated,
             ...prev.filter(
@@ -5816,42 +6070,9 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
         }
 
         // New entry: show in list. For system-originated creation we still add the chat but avoid showing system preview text
-        return [
-          Object.assign(
-            {
-              id: chatId,
-              chatId,
-              // associate a userId for one-to-one chats when provided so presence/status works
-              userId: meta.userId || null,
-              // Prefer explicit meta.name/meta.avatar when provided (server or message payload),
-              // otherwise fall back to currently selected contact or a default.
-              name: meta.name || selectedContact?.name || "",
-              avatar:
-                meta.avatar || selectedContact?.avatar || "/default-avatar.png",
-              lastMessage: isSystem ? "" : preview,
-              hasAttachment: isSystem ? false : !!hasAttachment,
-              timestamp: isSystem ? useTs : useTs,
-              unreadCount: 0,
-            },
-            !isSystem && hasAttachment && meta.attachmentFileName
-              ? { attachmentFileName: meta.attachmentFileName }
-              : {},
-            !isSystem && hasAttachment && meta.attachmentMime
-              ? { attachmentMime: meta.attachmentMime }
-              : {}
-          ),
-          ...prev,
-        ];
-      });
-    },
-    [archivedChatIds, selectedContact]
-  );
-
-      // New entry: show in list. For system-originated creation we still add the chat but avoid showing system preview text
-      // For new entries, avoid using sender metadata when it's a system message or from current user
-      const metaIsFromMeNew = meta && (meta.userId && String(meta.userId) === String(currentUserId));
-      return [
-        Object.assign(
+        // For new entries, avoid using sender metadata when it's a system message or from current user
+        const metaIsFromMeNew = meta && (meta.userId && String(meta.userId) === String(currentUserId));
+        const newChat = Object.assign(
           {
             id: chatId,
             chatId,
@@ -5859,20 +6080,32 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             userId: !isSystem && !metaIsFromMeNew ? (meta.userId || null) : (selectedContact?.userId || null),
             // Prefer explicit meta.name/meta.avatar when provided (server or message payload),
             // otherwise fall back to currently selected contact or a default.
-            name: !isSystem && !metaIsFromMeNew ? (meta.name || selectedContact?.name || '') : (selectedContact?.name || ''),
-            avatar: !isSystem && !metaIsFromMeNew ? (meta.avatar || selectedContact?.avatar || '/default-avatar.png') : (selectedContact?.avatar || '/default-avatar.png'),
-            lastMessage: isSystem ? '' : preview,
+            name: !isSystem && !metaIsFromMeNew ? (meta.name || selectedContact?.name || "") : (selectedContact?.name || ""),
+            avatar: !isSystem && !metaIsFromMeNew ? (meta.avatar || selectedContact?.avatar || "/default-avatar.png") : (selectedContact?.avatar || "/default-avatar.png"),
+            lastMessage: isSystem ? "" : preview,
             hasAttachment: isSystem ? false : !!hasAttachment,
             timestamp: isSystem ? useTs : useTs,
             unreadCount: 0,
           },
-          (!isSystem && hasAttachment && meta.attachmentFileName) ? { attachmentFileName: meta.attachmentFileName } : {},
-          (!isSystem && hasAttachment && meta.attachmentMime) ? { attachmentMime: meta.attachmentMime } : {}
-        ),
-        ...prev,
-      ];
-    });
-  }, [archivedChatIds, selectedContact]);
+          !isSystem && hasAttachment && meta.attachmentFileName
+            ? { attachmentFileName: meta.attachmentFileName }
+            : {},
+          !isSystem && hasAttachment && meta.attachmentMime
+            ? { attachmentMime: meta.attachmentMime }
+            : {}
+        );
+        
+        // Compute hasLeftGroup for new chat
+        newChat.hasLeftGroup = computeHasLeftGroup(newChat);
+        
+        return [
+          newChat,
+          ...prev,
+        ];
+      });
+    },
+    [archivedChatIds, selectedContact, computeHasLeftGroup, currentUserId]
+  );
 
   const updateContactPreview = useCallback((chatId, preview, hasAttachment = false, meta = {}) => {
     const isSystem = meta && (meta.isSystem || meta.type === 'system' || meta.isSystemMessage);
@@ -7583,7 +7816,49 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
       }
     });
 
-    socket.on("message recieved", (newMessage) => {
+    // When group info (name/avatar) is updated, sync to all UI components
+    socket.on('group info updated', (payload) => {
+      try {
+        if (!payload) return;
+        const chatId = String(payload.chatId || payload.groupId || '').trim();
+        if (!chatId) return;
+        console.log('[SOCKET] group info updated event received', payload);
+
+        const { name, avatar } = payload;
+
+        // Update recentChats
+        setRecentChats(prev => (prev || []).map(c => {
+          const id = String(c.chatId || c.id || c._id);
+          if (id === chatId) {
+            return { ...c, name: name || c.name, avatar: avatar || c.avatar };
+          }
+          return c;
+        }));
+
+        // Update contacts
+        setContacts(prev => (prev || []).map(c => {
+          const id = String(c.chatId || c.id || c._id);
+          if (id === chatId) {
+            return { ...c, name: name || c.name, avatar: avatar || c.avatar };
+          }
+          return c;
+        }));
+
+        // Update selectedContact if it's the current chat
+        if (selectedContact && String(selectedContact.chatId || selectedContact.id || selectedContact._id) === chatId) {
+          setSelectedContact(prev => ({ ...(prev || {}), name: name || prev?.name, avatar: avatar || prev?.avatar }));
+        }
+
+        // Update currentGroup if modal is open for this group
+        if (currentGroup && String(currentGroup.chatId || currentGroup._id || currentGroup.id) === chatId) {
+          setCurrentGroup(prev => ({ ...(prev || {}), name: name || prev?.name, avatar: avatar || prev?.avatar }));
+        }
+      } catch (e) {
+        console.error('Error handling group info updated event', e);
+      }
+    });
+    
+    socket.on('message recieved', (newMessage) => {
       try {
         const chatId = newMessage.chat?._id || newMessage.chat;
         const senderId = newMessage.sender?._id || newMessage.sender;
@@ -7692,14 +7967,13 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
           selectedContactChatId: selectedContact?.chatId,
           messageKey: key,
           willShowNotification: !isCurrentChat,
+          isSystemMessage: newMessage.type === 'system'
         });
 
-        // Show notifications when chat is not currently open
-        if (!isCurrentChat) {
-          console.log(
-            "🧪 INSIDE !isCurrentChat block - notification code SHOULD run"
-          );
-
+        // Show notifications when chat is not currently open (skip system messages)
+        if (!isCurrentChat && newMessage.type !== 'system') {
+          console.log('🧪 INSIDE !isCurrentChat block - notification code SHOULD run');
+          
           // Check notification settings
           const notificationsEnabled = localStorage.getItem(
             "notificationsEnabled"
@@ -7981,30 +8255,19 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
           console.error("Error emitting message-delivered", e);
         }
 
-        // Only increment unread count if this chat is not currently open and the message is not from me
+        // Only increment unread count if this chat is not currently open and the message is not from me (skip system messages)
         if (!isCurrentChat) {
-          if (!isFromMe) {
-            setRecentChats((prev) =>
-              prev.map((c) => {
-                if (!(c.chatId === key || c.id === key)) return c;
-                const existing = c || {};
-                const newUnread = (existing.unreadCount || 0) + 1;
-                const providedMentionCount =
-                  (newMessage &&
-                    (newMessage.mentionCount || newMessage.mentionsCount)) ||
-                  null;
-                return {
-                  ...existing,
-                  unreadCount: newUnread,
-                  ...(providedMentionCount !== null
-                    ? { mentionCount: providedMentionCount }
-                    : {}),
-                };
-              })
-            );
+          if (!isFromMe && newMessage.type !== 'system') {
+            setRecentChats((prev) => prev.map((c) => {
+              if (!(c.chatId === key || c.id === key)) return c;
+              const existing = c || {};
+              const newUnread = (existing.unreadCount || 0) + 1;
+              const providedMentionCount = (newMessage && (newMessage.mentionCount || newMessage.mentionsCount)) || null;
+              return { ...existing, unreadCount: newUnread, ...(providedMentionCount !== null ? { mentionCount: providedMentionCount } : {}) };
+            }));
           }
         } else {
-          // If chat is currently open and this message is NOT from me, mark the message as read
+          // If chat is currently open and this message is NOT from me, emit message-read
           if (!isFromMe) {
             // emit message-read so server and sender are notified
             try {
@@ -8015,16 +8278,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             } catch (e) {
               console.error("Error emitting message-read", e);
             }
-
-            setMessages((prev) => {
-              const chatMessages = prev[appendKey] || [];
-              const updatedMessages = chatMessages.map((m) =>
-                String(m.id) === String(formatted.id)
-                  ? { ...m, status: "read" }
-                  : m
-              );
-              return { ...prev, [appendKey]: updatedMessages };
-            });
+            // Status will be updated when backend sends message-read socket event
           }
         }
         updateContactPreview(key, preview, hasAttachment, {
@@ -8467,10 +8721,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
           selectedContact.isGroupChat ||
           selectedContact.isgroupchat
       );
-      if (isGroupChatOpen) {
-        //try { console.log('[CHAT OPEN] Group chat opened — do not auto-mark read, show DB state only for', chatId); } catch(e){}
-        return;
-      }
+      
       // If we just sent a message very recently, don't mark previous messages as read
       try {
         const now = Date.now();
@@ -8478,30 +8729,19 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
           ? now - lastSentAtRef.current
           : null;
         if (lastSentAtRef.current && delta !== null && delta < 3000) {
-          //console.log('[CHAT OPEN] Skipping auto-mark-as-read due to recent local send for', chatId);
+          console.log('[CHAT OPEN] Skipping auto-mark-as-read due to recent local send for', chatId);
           return;
         }
       } catch (e) {}
       if (socketRef.current?.emit) {
         try {
-          //console.log('[SOCKET OUT] emit message-read on open', { chatId });
+          console.log('[SOCKET OUT] emit message-read on open', { chatId, isGroupChat: isGroupChatOpen });
           socketRef.current.emit("message-read", { chatId });
         } catch (e) {
           console.error("Error emitting message-read on open", e);
         }
       }
-      // Mark local messages in this chat as read (only messages sent by others)
-      setMessages((prev) => {
-        if (!prev) return prev;
-        const copy = { ...(prev || {}) };
-        const arr = copy[String(chatId)] || [];
-        copy[String(chatId)] = (arr || []).map((m) =>
-          String(m.sender) !== String(currentUserId)
-            ? { ...m, status: "read" }
-            : m
-        );
-        return copy;
-      });
+      // Status will be updated when backend sends message-read socket event
     } catch (e) {
       console.error("Error emitting message-read on open", e);
     }
@@ -8769,7 +9009,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
       selectedContact?.chatId || selectedContact?._id || selectedContact?.id,
     userId: currentUserId,
     onScreenshotDetected: handleScreenshotDetected,
-    enabled: !!selectedContact && !selectedContact.isDocument,
+    enabled: !selectedContact?.isDocument,
   });
 
   const handleReplaceOldestPin = useCallback(async () => {
@@ -9444,21 +9684,42 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
           }
         });
 
-        const deduplicated = Array.from(seen.values());
+      const deduplicated = Array.from(seen.values());
 
-        if (archivedChatIds && archivedChatIds.size > 0) {
-          setRecentChats(
-            deduplicated.filter((c) => !archivedChatIds.has(String(c.chatId)))
-          );
-        } else {
-          setRecentChats(deduplicated);
-        }
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+      // Check block status for each chat
+      const chatsWithBlockStatus = await Promise.all(
+        deduplicated.map(async (chat) => {
+          if (!chat.isGroupChat && chat.userId) {
+            try {
+              const status = await blockService.checkBlockStatus(String(chat.userId));
+              return {
+                ...chat,
+                hasBlockedYou: Boolean(status?.hasBlockedYou),
+                isOnline: status?.hasBlockedYou ? false : chat.isOnline,
+              };
+            } catch (e) {
+              return { ...chat, hasBlockedYou: false };
+            }
+          }
+          return { ...chat, hasBlockedYou: false };
+        })
+      );
+
+      if (archivedChatIds && archivedChatIds.size > 0) {
+        setRecentChats(
+          chatsWithBlockStatus.filter(
+            (c) => !archivedChatIds.has(String(c.chatId))
+          )
+        );
+      } else {
+        setRecentChats(chatsWithBlockStatus);
       }
-    };
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
     fetchRecentChats();
   }, []);
@@ -10866,96 +11127,88 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
                                 <MessageSquare className="w-5 h-5 text-white" />
                               </div>
 
-                              <span
-                                className={`font-semibold ${effectiveTheme.text}`}
-                              >
-                                New Chat
-                              </span>
-                            </motion.button>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      /* Regular Chats and Contacts */
-                      <>
-                        {/* Show filtered results when searching, otherwise show recent chats and contacts */}
-                        {searchTerm.trim() ? (
-                          <>
-                            {filteredContacts.length > 0 ? (
-                              <div className="flex flex-col gap-2">
-                                {filteredContacts.map((contact) => (
-                                  <ContactItem
-                                    key={contact.id}
-                                    contact={contact}
-                                    computedIsOnline={
-                                      typeof contact.__computedIsOnline !==
-                                      "undefined"
-                                        ? contact.__computedIsOnline
-                                        : contact.isOnline
-                                    }
-                                    effectiveTheme={effectiveTheme}
-                                    onSelect={(c) => handleOpenChat(c)}
-                                  />
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="text-center space-y-4 mt-10">
-                                <p
-                                  className={
-                                    effectiveTheme.mode === "dark"
-                                      ? "text-gray-400"
-                                      : "text-gray-500"
-                                  }
-                                >
-                                  No chats found matching "{searchTerm}"
-                                </p>
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            {/* Filtered Chats/Groups List */}
-                            {loading || !minLoadingComplete || !dataFetched ? (
-                              <div className="flex flex-col items-center justify-center py-10">
-                                <svg
-                                  className="animate-spin h-8 w-8 text-blue-500 mb-3"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <circle
-                                    className="opacity-25"
-                                    cx="12"
-                                    cy="12"
-                                    r="10"
-                                    stroke="currentColor"
-                                    strokeWidth="4"
-                                  ></circle>
-                                  <path
-                                    className="opacity-75"
-                                    fill="currentColor"
-                                    d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                                  ></path>
-                                </svg>
-                                <span
-                                  className={
-                                    effectiveTheme.mode === "dark"
-                                      ? "text-gray-400"
-                                      : "text-gray-500"
-                                  }
-                                >
-                                  Loading chats...
-                                </span>
-                              </div>
-                            ) : (
-                              (() => {
-                                // Ensure every chat has an avatar before filtering
-                                const chatsWithAvatar = recentChats.map(
-                                  (chat) => ({
-                                    ...chat,
-                                    avatar: chat.avatar,
-                                  })
-                                );
+        <span className={`font-semibold ${effectiveTheme.text}`}>
+          New Chat
+        </span>
+      </motion.button>
+    </div>
+  </div>
+</>
+
+
+
+
+  ) : (
+    /* Regular Chats and Contacts */
+    <>
+      {/* Show filtered results when searching, otherwise show recent chats and contacts */}
+      {searchTerm.trim() ? (
+        <>
+              {filteredContacts.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              {filteredContacts.map((contact) => (
+                    <ContactItem
+                      key={contact.id}
+                      contact={contact}
+                      computedIsOnline={(function() {
+                        const base = typeof contact.__computedIsOnline !== 'undefined' ? contact.__computedIsOnline : contact.isOnline;
+                        try {
+                          if (selectedContact && String(selectedContact.chatId || selectedContact.id || selectedContact._id) === String(contact.chatId || contact.id || contact._id) && hasBlockedYouState) {
+                            return false;
+                          }
+                        } catch (e) {}
+                        return base;
+                      })()}
+                      effectiveTheme={effectiveTheme}
+                      isSelected={String(selectedContact?.chatId || selectedContact?.id || selectedContact?._id) === String(contact.chatId || contact.id || contact._id)}
+                      onSelect={(c) => handleOpenChat(c)}
+                    />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center space-y-4 mt-10">
+              <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+                No chats found matching "{searchTerm}"
+              </p>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Filtered Chats/Groups List */}
+          {(loading || !minLoadingComplete || !dataFetched) ? (
+  <div className="flex flex-col items-center justify-center py-10">
+    <svg
+      className="animate-spin h-8 w-8 text-blue-500 mb-3"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      ></circle>
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+      ></path>
+    </svg>
+    <span className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+      Loading chats...
+    </span>
+  </div>
+) : (
+  (() => {
+    // Ensure every chat has an avatar before filtering
+    const chatsWithAvatar = recentChats.map(chat => ({
+      ...chat,
+      avatar: chat.avatar,
+    }));
 
                                 let filtered = [];
                                 if (activeNavItem === "chats") {
@@ -10980,57 +11233,46 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
                                         : "Recent Chats"}
                                     </h4>
 
-                                    {filtered.length > 0 ? (
-                                      filtered.map((chat) => (
-                                        <ContactItem
-                                          key={chat.chatId || chat.id}
-                                          contact={chat}
-                                          computedIsOnline={
-                                            typeof chat.__computedIsOnline !==
-                                            "undefined"
-                                              ? chat.__computedIsOnline
-                                              : chat.isOnline
-                                          }
-                                          effectiveTheme={effectiveTheme}
-                                          onSelect={(c) => handleOpenChat(c)}
-                                        />
-                                      ))
-                                    ) : !loading &&
-                                      minLoadingComplete &&
-                                      dataFetched ? (
-                                      activeNavItem === "groups" ? (
-                                        <div className="mt-2 text-sm">
-                                          <p
-                                            className={
-                                              effectiveTheme.mode === "dark"
-                                                ? "text-gray-400"
-                                                : "text-gray-500"
-                                            }
-                                          >
-                                            You're not in any group!
-                                          </p>
-                                        </div>
-                                      ) : (
-                                        <div className="mt-2 text-sm">
-                                          <p
-                                            className={
-                                              effectiveTheme.mode === "dark"
-                                                ? "text-gray-400"
-                                                : "text-gray-500"
-                                            }
-                                          >
-                                            You don't have any active chat going
-                                            on!
-                                          </p>
-                                        </div>
-                                      )
-                                    ) : null}
-                                  </div>
-                                );
-                              })()
-                            )}
-                          </>
-                        )}
+          {filtered.length > 0 ? (
+          filtered.map(chat => (
+            <ContactItem
+              key={chat.chatId || chat.id}
+              contact={chat}
+              computedIsOnline={(function() {
+                const base = typeof chat.__computedIsOnline !== 'undefined' ? chat.__computedIsOnline : chat.isOnline;
+                try {
+                  if (selectedContact && String(selectedContact.chatId || selectedContact.id || selectedContact._id) === String(chat.chatId || chat.id || chat._id) && hasBlockedYouState) {
+                    return false;
+                  }
+                } catch (e) {}
+                return base;
+              })()}
+              effectiveTheme={effectiveTheme}
+              isSelected={String(selectedContact?.chatId || selectedContact?.id || selectedContact?._id) === String(chat.chatId || chat.id || chat._id)}
+              onSelect={(c) => handleOpenChat(c)}
+            />
+          ))
+        ) : (!loading && minLoadingComplete && dataFetched) ? (
+          activeNavItem === 'groups' ? (
+            <div className="mt-2 text-sm">
+              <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+                You're not in any group!
+              </p>
+            </div>
+          ) : (
+            <div className="mt-2 text-sm">
+              <p className={effectiveTheme.mode === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+                You don't have any active chat going on!
+              </p>
+            </div>
+          )
+        ) : null}
+      </div>
+    );
+  })()
+)}
+        </>
+      )}
 
                         {/* Empty State: Only show if loading is false and there are no chats or contacts */}
                         {!loading &&
@@ -11355,58 +11597,41 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
             // CASE 3: Normal person/group chat
             <>
               {/* compute online status for selected contact */}
-              {(() => {
-                const isGroup =
-                  selectedContact.isGroup ||
-                  selectedContact.isGroupChat ||
-                  selectedContact.isgroupchat;
-                let __isOnline = false;
-                let __groupOnlineCount = 0;
-                if (isGroup) {
-                  const members =
-                    selectedContact.group?.participants ||
-                    selectedContact.group?.users ||
-                    selectedContact.users ||
-                    selectedContact.participants ||
-                    [];
-                  // Prefer server-provided group online count when available (fallback to local computation)
-                  const chatIdKey =
-                    selectedContact.chatId ||
-                    selectedContact._id ||
-                    selectedContact.id ||
-                    selectedContact.id;
-                  if (
-                    groupOnlineCounts &&
-                    groupOnlineCounts[String(chatIdKey)] != null
-                  ) {
-                    // server count includes this user's own connection — subtract 1
-                    const raw = Number(
-                      groupOnlineCounts[String(chatIdKey)] || 0
-                    );
-                    __groupOnlineCount = Math.max(0, raw - 1);
+              {
+                (() => {
+                  const isGroup = selectedContact.isGroup || selectedContact.isGroupChat || selectedContact.isgroupchat;
+                  let __isOnline = false;
+                  let __groupOnlineCount = 0;
+                  if (isGroup) {
+                    const members = selectedContact.group?.participants || selectedContact.group?.users || selectedContact.users || selectedContact.participants || [];
+                    // Prefer server-provided group online count when available (fallback to local computation)
+                    const chatIdKey = selectedContact.chatId || selectedContact._id || selectedContact.id || selectedContact.id;
+                    if (groupOnlineCounts && (groupOnlineCounts[String(chatIdKey)] != null)) {
+                      // server count includes this user's own connection — subtract 1
+                      const raw = Number(groupOnlineCounts[String(chatIdKey)] || 0);
+                      __groupOnlineCount = Math.max(0, raw - 1);
+                    } else {
+                      __groupOnlineCount = (members || []).filter(m => {
+                        const uid = m && (m._id || m.id || m);
+                        if (!uid) return false;
+                        if (String(uid) === String(currentUserId)) return false;
+                        return onlineUsers.has(String(uid));
+                      }).length;
+                    }
                   } else {
-                    __groupOnlineCount = (members || []).filter((m) => {
-                      const uid = m && (m._id || m.id || m);
-                      if (!uid) return false;
-                      if (String(uid) === String(currentUserId)) return false;
-                      return onlineUsers.has(String(uid));
-                    }).length;
+                    const contactUserId = selectedContact.userId || selectedContact._id || selectedContact.id || selectedContact.participantId;
+                    __isOnline = contactUserId ? onlineUsers.has(String(contactUserId)) : Boolean(selectedContact.isOnline);
                   }
-                } else {
-                  const contactUserId =
-                    selectedContact.userId ||
-                    selectedContact._id ||
-                    selectedContact.id ||
-                    selectedContact.participantId;
-                  __isOnline = contactUserId
-                    ? onlineUsers.has(String(contactUserId))
-                    : Boolean(selectedContact.isOnline);
-                }
-                // attach computed to object so we can pass through props
-                selectedContact.__computedIsOnline = __isOnline;
-                selectedContact.__computedGroupOnlineCount = __groupOnlineCount;
-                return null;
-              })()}
+                  // If the other user has blocked the current user, hide their online status
+                  if (hasBlockedYouState) {
+                    __isOnline = false;
+                  }
+                  // attach computed to object so we can pass through props
+                  selectedContact.__computedIsOnline = __isOnline;
+                  selectedContact.__computedGroupOnlineCount = __groupOnlineCount;
+                  return null;
+                })()
+              }
               <ChatHeader
                 selectedContact={selectedContact}
                 effectiveTheme={effectiveTheme}
@@ -11687,24 +11912,14 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
               )}
 
               {(() => {
+                // Use selectedHasLeftGroup state - don't recalculate here
                 const isGroupChatFlag =
                   selectedContact?.isGroup ||
                   selectedContact?.isGroupChat ||
                   false;
-                const participantsList =
-                  selectedContact?.participants ||
-                  selectedContact?.group?.participants ||
-                  selectedContact?.chat?.participants ||
-                  [];
-                const isGroupMember =
-                  !isGroupChatFlag ||
-                  (Array.isArray(participantsList) &&
-                    participantsList.some(
-                      (p) =>
-                        String((p && (p._id || p)) || p) ===
-                        String(currentUserId)
-                    ));
-                if (isGroupMember) {
+                const canSendMessages = !isGroupChatFlag || !selectedHasLeftGroup;
+                
+                if (canSendMessages) {
                   return (
                     <MessageInput
                       onSendMessage={(payload) => {
@@ -11952,17 +12167,6 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
                 }
               });
 
-              // Mark messages from others in this chat as read
-              setMessages((prev) => {
-                const chatMessages = prev[chatId] || [];
-                const updatedMessages = chatMessages.map((m) =>
-                  String(m.sender) !== String(currentUserId)
-                    ? { ...m, status: "read" }
-                    : m
-                );
-                return { ...prev, [chatId]: updatedMessages };
-              });
-
               // Notify server that this chat's messages are read (so other participants see read-for-all)
               try {
                 if (socketRef.current?.emit) {
@@ -11971,6 +12175,7 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
               } catch (e) {
                 console.warn("Emit message-read failed", e);
               }
+              // Status will be updated when backend sends message-read socket event
 
               toast.success("Reply sent!");
             }
@@ -11980,12 +12185,9 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
           }
         }}
         onOpen={async (notification) => {
-          // If this notification refers to a group, open the group chat then navigate to groups page
+          // If this notification refers to a group (only if isGroup is explicitly true), open the group chat then navigate to groups page
           try {
-            if (
-              notification &&
-              (notification.isGroup || notification.groupName)
-            ) {
+            if (notification && notification.isGroup === true) {
               // Try to find the chat entry in recentChats
               const chatEntry = recentChats.find(
                 (c) =>

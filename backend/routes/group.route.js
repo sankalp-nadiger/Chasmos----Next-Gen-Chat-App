@@ -13,6 +13,7 @@ import {
   getGroupByInviteLink
 } from "../controllers/group.controller.js";
 import { getGroupInfo } from "../controllers/group.controller.js";
+import { getCommonGroups } from "../controllers/group.controller.js";
 
 
 const router = express.Router();
@@ -27,6 +28,8 @@ router.post("/make-admin", protect, addAdmin);
 router.post("/update-settings", protect, updateGroupSettings);
 router.post("/exit-group", protect, exitGroup);
 router.get("/group/:groupId", protect, getGroupInfo);
+
+router.get('/common/:otherUserId', protect, getCommonGroups);
 
 router.post("/delete-group", protect, deleteGroup);
 

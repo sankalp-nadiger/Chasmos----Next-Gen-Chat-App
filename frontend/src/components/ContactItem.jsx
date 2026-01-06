@@ -28,7 +28,7 @@ const formatTimestamp = (timestamp) => {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
-const ContactItem = ({ contact, onSelect, effectiveTheme, computedIsOnline }) => {
+const ContactItem = ({ contact, onSelect, effectiveTheme, computedIsOnline, isSelected }) => {
   const cleanText = (text) => {
     if (!text) return '';
     const s = typeof text === 'string' ? text : (text.content || text.text || '');
@@ -87,9 +87,13 @@ const avatarFallbackText =
   contact?.username ||
   "U";
 
+  const selectedClass = isSelected ? (effectiveTheme.mode === 'dark' ? 'bg-white/5 border-l-4 border-blue-500' : 'bg-blue-50 border-l-4 border-blue-500') : '';
+
   return (
     <div
-      className={`flex items-center justify-between p-3 cursor-pointer border-b ${effectiveTheme.border || "border-gray-200"} hover:${effectiveTheme.hover || "bg-gray-100"} transition`}
+      role="button"
+      aria-current={isSelected ? 'true' : 'false'}
+      className={`flex items-center justify-between p-3 cursor-pointer border-b ${effectiveTheme.border || "border-gray-200"} hover:${effectiveTheme.hover || "bg-gray-100"} transition ${selectedClass}`}
       onClick={() => onSelect(contact)}
     >
       <div className="flex items-center space-x-3 flex-1 min-w-0">
@@ -106,7 +110,7 @@ const avatarFallbackText =
   </div>
 )}
 
-          {(typeof computedIsOnline !== 'undefined' ? computedIsOnline : contact.isOnline) && (
+          {(!contact?.hasBlockedYou && !contact?.hasLeftGroup && (typeof computedIsOnline !== 'undefined' ? computedIsOnline : contact.isOnline)) && (
             <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
           )}
         </div>

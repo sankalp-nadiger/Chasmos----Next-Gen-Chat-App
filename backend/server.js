@@ -1549,9 +1549,12 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
           if (!m.readBy) m.readBy = [];
           // Do not add the message's sender to its own readBy array
           const msgSenderId = m.sender ? String(m.sender) : null;
+          let wasReadByUpdated = false;
           if (String(userId) !== String(msgSenderId)) {
             if (!m.readBy.map(r => String(r)).includes(String(userId))) {
+              console.log(`[SOCKET] Adding user ${userId} to readBy for message ${String(m._id)}`);
               m.readBy.push(userId);
+              wasReadByUpdated = true;
             }
           }
 
@@ -1566,31 +1569,41 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
             expectedCount = Math.max(expectedCount - 1, 0);
           }
           const readCountForParticipants = otherParticipantIds.filter(d => uniqueReaders.includes(d)).length;
-          //console.log('[SOCKET] message-read check', { messageId: String(m._id), expectedCount, readCountForParticipants, otherParticipantIds, readBy: uniqueReaders });
+          console.log('[SOCKET] message-read check', { messageId: String(m._id), expectedCount, readCountForParticipants, otherParticipantIds, readBy: uniqueReaders, wasReadByUpdated });
 
           if (readCountForParticipants >= expectedCount) {
             m.status = 'read';
             await m.save();
+            console.log(`[SOCKET] Message ${String(m._id)} marked as fully read, status set to 'read'`);
             // Only include messages that reached full-read status (everyone except sender has read)
             updatedIds.push(m._id);
           } else {
             // persist the incremental readBy but do not include in updatedIds/emits until threshold met
-            try { await m.save(); } catch (e) { console.error('Error saving partial readBy', e); }
+            if (wasReadByUpdated) {
+              try { 
+                await m.save(); 
+                console.log(`[SOCKET] Saved partial readBy update for message ${String(m._id)}, readBy count: ${m.readBy.length}/${expectedCount}`);
+              } catch (e) { 
+                console.error(`[SOCKET] Error saving partial readBy for message ${String(m._id)}`, e); 
+              }
+            }
           }
         }
 
-        // notify participants so UI can show blue ticks where appropriate
+        // notify participants so UI can show blue ticks where appropriate (only for fully-read messages)
         try {
           const stringUpdatedIds = updatedIds.map(id => String(id));
           if (stringUpdatedIds.length > 0) {
+            console.log(`[SOCKET] Emitting message-read to chat room ${chatId} for ${stringUpdatedIds.length} fully-read messages`);
             socket.to(chatId).emit('message-read', { chatId: String(chatId), reader: String(userId), updatedIds: stringUpdatedIds });
           } else {
-            //console.log('[SOCKET] skipping chat-room message-read emit; no messages reached full-read for chat', chatId);
+            console.log('[SOCKET] No messages reached full-read status; skipping chat-room message-read emit');
           }
         } catch (e) { console.error('emit chat room message-read error', e); }
         try {
           const participantIds = (chat.participants && chat.participants.length) ? chat.participants.map(p => String(p)) : (chat.users || []).map(u => String(u));
           if ((updatedIds || []).length > 0) {
+            console.log(`[SOCKET] Emitting message-read to personal rooms for ${participantIds.length} participants`);
             participantIds.forEach(pid => {
               if (pid === String(userId)) return;
               try {
@@ -1598,7 +1611,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
               } catch (e) { console.error('Error emitting message-read to personal room', e); }
             });
           } else {
-            //console.log('[SOCKET] skipping personal-room message-read emits; no messages reached full-read for chat', chatId);
+            console.log('[SOCKET] No messages reached full-read status; skipping personal-room message-read emits');
           }
         } catch (e) {
           console.error('Error broadcasting message-read to personal rooms', e);
@@ -1611,9 +1624,12 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
           if (!m.readBy) m.readBy = [];
           // Do not add the message's sender to its own readBy array
           const msgSenderId = m.sender ? String(m.sender) : null;
+          let wasReadByUpdated = false;
           if (String(userId) !== String(msgSenderId)) {
             if (!m.readBy.map(r => String(r)).includes(String(userId))) {
+              console.log(`[SOCKET] (1:1) Adding user ${userId} to readBy for message ${String(m._id)}`);
               m.readBy.push(userId);
+              wasReadByUpdated = true;
             }
 
             // Build full participant list (strings) and compute other participants (exclude sender)
@@ -1627,14 +1643,22 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
               expectedCount = Math.max(expectedCount - 1, 0);
             }
             const readCountForParticipants = otherParticipantIds.filter(d => uniqueReaders.includes(d)).length;
-            //console.log('[SOCKET] message-read check (1:1)', { messageId: String(m._id), expectedCount, readCountForParticipants, otherParticipantIds, readBy: uniqueReaders });
+            console.log('[SOCKET] message-read check (1:1)', { messageId: String(m._id), expectedCount, readCountForParticipants, otherParticipantIds, readBy: uniqueReaders, wasReadByUpdated });
 
             if (readCountForParticipants >= expectedCount) {
               m.status = 'read';
               await m.save();
+              console.log(`[SOCKET] (1:1) Message ${String(m._id)} marked as fully read, status set to 'read'`);
               updatedIds.push(m._id);
             } else {
-              try { await m.save(); } catch (e) { console.error('Error saving partial readBy (1:1)', e); }
+              if (wasReadByUpdated) {
+                try { 
+                  await m.save(); 
+                  console.log(`[SOCKET] (1:1) Saved partial readBy update for message ${String(m._id)}, readBy count: ${m.readBy.length}/${expectedCount}`);
+                } catch (e) { 
+                  console.error(`[SOCKET] (1:1) Error saving partial readBy for message ${String(m._id)}`, e); 
+                }
+              }
             }
           }
         }
@@ -1643,14 +1667,16 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
         try {
           const stringUpdatedIds = updatedIds.map(id => String(id));
           if (stringUpdatedIds.length > 0) {
+            console.log(`[SOCKET] (1:1) Emitting message-read to chat room ${chatId} for ${stringUpdatedIds.length} fully-read messages`);
             socket.to(chatId).emit('message-read', { chatId: String(chatId), reader: String(userId), updatedIds: stringUpdatedIds });
           } else {
-            console.log('[SOCKET] skipping chat-room message-read emit (1:1); no messages reached full-read for chat', chatId);
+            console.log('[SOCKET] (1:1) No messages reached full-read status; skipping chat-room message-read emit');
           }
         } catch (e) { console.error('emit chat room message-read error (1:1)', e); }
         try {
           const participantIds = (chat.participants && chat.participants.length) ? chat.participants.map(p => String(p)) : (chat.users || []).map(u => String(u));
           if ((updatedIds || []).length > 0) {
+            console.log(`[SOCKET] (1:1) Emitting message-read to personal rooms for ${participantIds.length} participants`);
             participantIds.forEach(pid => {
               if (pid === String(userId)) return;
               try {
@@ -1658,7 +1684,7 @@ socket.on("admin-changed", ({ groupId, newAdminId }) => {
               } catch (e) { console.error('Error emitting message-read to personal room (1:1)', e); }
             });
           } else {
-            console.log('[SOCKET] skipping personal-room message-read emits (1:1); no messages reached full-read for chat', chatId);
+            console.log('[SOCKET] (1:1) No messages reached full-read status; skipping personal-room message-read emits');
           }
         } catch (e) {
           console.error('Error broadcasting message-read to personal rooms (1:1)', e);

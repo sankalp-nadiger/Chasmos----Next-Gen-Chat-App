@@ -3,6 +3,7 @@ import Chat from "../models/chat.model.js";
 import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
 import crypto from "crypto";
+import { uploadBase64ImageToSupabase } from "../utils/uploadToSupabase.js";
 
 // Helper response functions
 const ok = (res, data) => res.status(200).json({ success: true, ...data });
@@ -1105,7 +1106,7 @@ export const getGroupInfo = async (req, res) => {
 // ----------------------------
 export const updateGroupSettings = async (req, res) => {
   try {
-    const { groupId, inviteEnabled, inviteLink, permissions, features, promoteIds, removeIds } = req.body;
+    const { groupId, inviteEnabled, inviteLink, permissions, features, promoteIds, removeIds, avatarBase64, clearAvatar, name } = req.body;
     const userId = req.user._id;
 
     const group = await Group.findById(groupId);
@@ -1115,6 +1116,7 @@ export const updateGroupSettings = async (req, res) => {
     const isAdmin = (group.admin && group.admin.toString() === userId.toString()) || (Array.isArray(group.admins) && group.admins.map(a=>String(a)).includes(String(userId)));
     if (!isAdmin) return err(res, "Only admins can update group settings", 403);
 
+    if (name !== undefined && typeof name === 'string' && name.trim()) group.name = name.trim();
     if (inviteEnabled !== undefined) group.inviteEnabled = !!inviteEnabled;
     if (inviteLink !== undefined) group.inviteLink = inviteLink;
 
@@ -1131,6 +1133,24 @@ export const updateGroupSettings = async (req, res) => {
       if (features.gallery !== undefined) group.features.gallery = !!features.gallery;
       if (features.docs !== undefined) group.features.docs = !!features.docs;
       if (features.polls !== undefined) group.features.polls = !!features.polls;
+    }
+
+    // Handle avatar upload (base64) or clearing avatar
+    if (avatarBase64) {
+      try {
+        const uploadedUrl = await uploadBase64ImageToSupabase(avatarBase64, 'avatars', `groups`);
+        if (uploadedUrl) {
+          group.avatar = uploadedUrl;
+          group.icon = uploadedUrl;
+        }
+      } catch (e) {
+        console.error('updateGroupSettings: avatar upload failed', e && e.message);
+      }
+    }
+
+    if (clearAvatar) {
+      group.avatar = '';
+      group.icon = '';
     }
 
     // If promoteIds provided, add them to admins (only new ones)
@@ -1172,12 +1192,22 @@ export const updateGroupSettings = async (req, res) => {
       if (group.chat) {
         const setObj = {};
         const unsetObj = {};
+        if (group.name !== undefined) {
+          setObj['groupSettings.name'] = group.name;
+          setObj['chatName'] = group.name;
+          setObj['name'] = group.name;
+        }
         if (group.inviteLink !== undefined) {
           if (group.inviteLink) setObj['groupSettings.inviteLink'] = group.inviteLink;
           else unsetObj['groupSettings.inviteLink'] = "";
         }
         if (inviteEnabled !== undefined) setObj['groupSettings.allowInvites'] = !!inviteEnabled;
         if (group.features) setObj['groupSettings.features'] = group.features;
+        // sync avatar/icon changes to chat.groupSettings
+        if (typeof group.avatar !== 'undefined') {
+          if (group.avatar) setObj['groupSettings.avatar'] = group.avatar;
+          else unsetObj['groupSettings.avatar'] = "";
+        }
 
         const updateObj = {};
         if (Object.keys(setObj).length) updateObj.$set = setObj;
@@ -1311,6 +1341,30 @@ export const updateGroupSettings = async (req, res) => {
         });
         try { io.to(String(group.chat)).emit('group settings updated', payload); } catch (e) {}
       }
+
+      // Emit group info updated event with name and avatar for immediate UI sync
+      if (io && group.participants && Array.isArray(group.participants)) {
+        const updatePayload = {
+          groupId: String(group._id),
+          chatId: String(group.chat),
+          name: group.name,
+          avatar: group.avatar || group.icon || '',
+          updatedAt: new Date()
+        };
+        console.log('[SOCKET] Emitting group info updated to all members:', updatePayload);
+        console.log('[SOCKET] Participants:', group.participants.map(p => String(p)));
+        
+        // Emit to each participant's personal room (userId room)
+        group.participants.forEach(p => {
+          const participantId = String(p._id || p);
+          try { 
+            io.to(participantId).emit('group info updated', updatePayload);
+            console.log(`[SOCKET] Emitted to participant room: ${participantId}`);
+          } catch (e) {
+            console.error(`[SOCKET] Failed to emit to ${participantId}:`, e);
+          }
+        });
+      }
     } catch (e) {
       console.error('Failed to emit group settings update socket event:', e);
     }
@@ -1319,5 +1373,39 @@ export const updateGroupSettings = async (req, res) => {
   } catch (error) {
     console.error('Update group settings error:', error);
     err(res, error.message, 500);
+  }
+};
+
+// ----------------------------
+// GET GROUPS IN COMMON BETWEEN AUTH USER AND ANOTHER USER
+// ----------------------------
+export const getCommonGroups = async (req, res) => {
+  try {
+    const otherUserId = req.params.otherUserId || req.query.userId;
+    const me = req.user && req.user._id;
+    if (!me) return err(res, 'Unauthorized', 401);
+    if (!otherUserId) return err(res, 'otherUserId is required', 400);
+
+    // Find groups where both users are participants
+    const groups = await Group.find({ participants: { $all: [String(me), String(otherUserId)] } })
+      .limit(50)
+      .select('name description avatar participants admins admin chat inviteLink inviteEnabled')
+      .lean();
+
+    // add participants count and minimal participant info where possible
+    const out = groups.map(g => ({
+      _id: g._id,
+      name: g.name,
+      description: g.description || '',
+      avatar: g.avatar || g.icon || '',
+      participantsCount: Array.isArray(g.participants) ? g.participants.length : 0,
+      inviteEnabled: !!g.inviteEnabled,
+      chat: g.chat,
+    }));
+
+    return ok(res, { groups: out });
+  } catch (e) {
+    console.error('getCommonGroups failed', e);
+    return err(res, e.message, 500);
   }
 };

@@ -1,9 +1,10 @@
 import CosmosBackground from "./CosmosBg";
-import React, { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Search, X, Users, ChevronLeft } from "lucide-react";
+import { Search, X, ChevronLeft } from "lucide-react";
 import Logo from "./Logo";
 import SelectContact from "./SelectContact";
+import blockService from "../utils/blockService";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
@@ -20,6 +21,7 @@ const GroupCreation = ({
   const [contactsError, setContactsError] = useState(null);
 
   const [selectedContacts, setSelectedContacts] = useState([]);
+  const [unblockLoadingIds, setUnblockLoadingIds] = useState(new Set());
   const [searchTerm, setSearchTerm] = useState("");
   const [groupName, setGroupName] = useState("");
   const [groupDescription, setGroupDescription] = useState("");
@@ -93,7 +95,26 @@ const GroupCreation = ({
         const resApp = await fetch(`${API_BASE_URL}/api/user`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        const appContacts = resApp.ok ? await resApp.json() : [];
+        const appRaw = resApp.ok ? await resApp.json() : [];
+        const appContactsArray = Array.isArray(appRaw) ? appRaw : (appRaw.users || []);
+
+        // Exclude users who have blocked the current user
+        const appFiltered = await Promise.all(
+          appContactsArray.map(async (u) => {
+            try {
+              const uid = String(u._id || u.id || u.userId || "");
+              if (!uid) return u;
+              const status = await blockService.checkBlockStatus(uid);
+              // If the other user has blocked you, exclude them
+              if (status && status.hasBlockedYou) return null;
+              // Annotate whether current user has blocked them
+              return { ...u, isBlocked: Boolean(status?.isBlocked) };
+            } catch (e) {
+              return u; // on error, keep the user to avoid over-filtering
+            }
+          })
+        );
+        const appContacts = appFiltered.filter(Boolean);
 
         let googleContacts = [];
         const resGoogle = await fetch(
@@ -498,6 +519,29 @@ const GroupCreation = ({
                           selected={isSelected(c)}
                           onSelect={handleContactToggle}
                           effectiveTheme={effectiveTheme}
+                          onUnblock={async (id) => {
+                            try {
+                              setUnblockLoadingIds(prev => new Set(prev).add(String(id)));
+                              await blockService.unblockUser(String(id));
+                              // clear blocked flag in contacts
+                              setContacts(prev => (prev || []).map(p => {
+                                const matchId = getContactId(p);
+                                if (String(matchId) === String(id)) return { ...p, isBlocked: false };
+                                return p;
+                              }));
+                              // auto-select after unblocking
+                              handleContactToggle(id);
+                            } catch (err) {
+                              console.error('Unblock failed', err);
+                            } finally {
+                              setUnblockLoadingIds(prev => {
+                                const copy = new Set(prev);
+                                copy.delete(String(id));
+                                return copy;
+                              });
+                            }
+                          }}
+                          unblockLoading={unblockLoadingIds.has(String(cid))}
                         />
                       </div>
                     );

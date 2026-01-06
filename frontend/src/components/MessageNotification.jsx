@@ -94,7 +94,8 @@ const MessageNotification = ({ notification, onClose, onReply, onOpen }) => {
           };
 
           // If group message, navigate to /groups and close notification
-          if (notification && (notification.isGroup || notification.groupName)) {
+          // Only treat as group if isGroup is explicitly true
+          if (notification && notification.isGroup === true) {
             const displayName = notification.groupName || notification.senderName || 'Group';
             const cleanedAvatar = normalizeAvatar(notification.avatar);
             const payload = { ...notification, openedGroup: true, senderName: displayName, avatar: cleanedAvatar };

@@ -14,15 +14,16 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
   const lastCaptureTime = useRef(0);
 
   useEffect(() => {
-    if (!enabled || !chatId || !userId) {
-      console.log('Screenshot detection disabled:', { enabled, chatId, userId });
+    if (!enabled) {
+      console.log('Screenshot detection disabled by flag:', { enabled, chatId, userId });
       return;
     }
 
     const isOnChatsRoute = () => {
       try {
         const p = window.location.pathname || '';
-        return p === '/chats' || p.startsWith('/chats/');
+        // Accept paths that start with or contain /chats (covers mounted routers)
+        return p === '/chats' || p.startsWith('/chats/') || p.indexOf('/chats') !== -1;
       } catch (e) {
         return false;
       }
@@ -63,10 +64,7 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
       documentHidden: document.hidden,
     });
 
-    if (!isOnChatsRoute() || isNewChatOpen()) {
-      console.log('Screenshot detection not enabled - status:', debugStatus());
-      return;
-    }
+    // Always register listeners when enabled; handlers will verify route/modal state.
 
 
     // Removed visibilitychange screenshot detection to avoid false positives (e.g., Alt+Tab)
@@ -80,38 +78,37 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
         console.log('Screenshot key pressed but detection blocked - status:', debugStatus(), 'event:', { key: e.key, code: e.code });
         return;
       }
-      // Debug log for key events
-      console.log('Key event:', { key: e.key, code: e.code, keyCode: e.keyCode, ctrl: e.ctrlKey, shift: e.shiftKey, meta: e.metaKey });
-      // PrintScreen (Win/Linux/Windows+PrtScr)
-      if (e.key === 'PrintScreen' || e.keyCode === 44) {
-        console.log('Screenshot detected via PrintScreen key');
-        await captureAndUploadScreenshot();
-        return;
-      }
-      // Win+PrintScreen (metaKey + PrintScreen)
-      if ((e.key === 'PrintScreen' || e.keyCode === 44) && e.metaKey) {
-        console.log('Screenshot detected via Win+PrintScreen');
-        await captureAndUploadScreenshot();
-        return;
-      }
-      // Ctrl+Shift+S (common for Snipping Tool)
-      if ((e.key === 's' || e.key === 'S') && e.ctrlKey && e.shiftKey) {
-        console.log('Screenshot detected via Ctrl+Shift+S');
-        await captureAndUploadScreenshot();
-        return;
-      }
-      // Win+Shift+S (Snipping Tool)
-      if ((e.key === 's' || e.key === 'S') && e.shiftKey && e.metaKey) {
-        console.log('Screenshot detected via Win+Shift+S');
-        await captureAndUploadScreenshot();
-        return;
-      }
-      // Mac: Cmd+Shift+3 or Cmd+Shift+4
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === '3' || e.key === '4')) {
-        console.log('Screenshot detected via Mac shortcut');
-        await captureAndUploadScreenshot();
-        return;
-      }
+        // Debug log for key events
+        console.log('Key event:', { key: e.key, code: e.code, keyCode: e.keyCode, ctrl: e.ctrlKey, shift: e.shiftKey, meta: e.metaKey });
+
+        // Common PrintScreen detection (varies by browser/OS): check code and keyCode
+        if (e.key === 'PrintScreen' || e.code === 'PrintScreen' || e.keyCode === 44) {
+          console.log('Screenshot detected via PrintScreen key');
+          await captureAndUploadScreenshot();
+          return;
+        }
+
+        // Win+PrintScreen / Meta+PrintScreen combinations
+        if ((e.code === 'PrintScreen' || e.keyCode === 44) && (e.metaKey || e.ctrlKey)) {
+          console.log('Screenshot detected via PrintScreen + modifier');
+          await captureAndUploadScreenshot();
+          return;
+        }
+
+        // Snipping Tool shortcuts: Ctrl+Shift+S or Win+Shift+S (Meta represents Win on some browsers)
+        if ((e.key === 's' || e.key === 'S') && e.shiftKey && (e.ctrlKey || e.metaKey)) {
+          console.log('Screenshot detected via Snipping Tool shortcut');
+          await captureAndUploadScreenshot();
+          return;
+        }
+
+        // macOS: Cmd+Shift+3/4
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === '3' || e.key === '4')) {
+          console.log('Screenshot detected via Mac shortcut');
+          // Browser/OS may intercept the final key event; try reading clipboard shortly after
+          setTimeout(() => tryReadClipboardImage(), 500);
+          return;
+        }
     };
 
     // Detect screenshot via clipboard (when user pastes after screenshot)
@@ -138,6 +135,103 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
       }
     };
 
+    // Try to read images from the clipboard using the Async Clipboard API
+    // Returns true if an image was found and handled.
+    const tryReadClipboardImage = async () => {
+      if (!onScreenshotDetected) return false;
+      if (!navigator.clipboard || !navigator.clipboard.read) {
+        return false;
+      }
+
+      // Avoid duplicate captures within short window
+      const now = Date.now();
+      if (now - lastCaptureTime.current < 2000) return false;
+      if (isCapturing.current) return false;
+
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          for (const type of item.types) {
+            if (type.startsWith('image/')) {
+              const blob = await item.getType(type);
+              let dimensions = null;
+              try {
+                if (typeof createImageBitmap === 'function') {
+                  const bmp = await createImageBitmap(blob);
+                  dimensions = { width: bmp.width, height: bmp.height };
+                  try { bmp.close && bmp.close(); } catch (e) {}
+                }
+              } catch (e) {
+                // ignore
+              }
+
+              // mark last capture time to prevent duplicates
+              lastCaptureTime.current = Date.now();
+              await onScreenshotDetected({ blob, dimensions, timestamp: new Date().toISOString() });
+              return true;
+            }
+          }
+        }
+      } catch (err) {
+        console.log('clipboard.read() failed or not permitted:', err);
+
+        // On Windows Snip (Win+Shift+S) the OS may copy to clipboard while
+        // the document is not focused; clipboard.read() then throws
+        // NotAllowedError: Document is not focused. In that case, retry when
+        // the window regains focus (user returns to the browser).
+        try {
+          const isDocFocusError = err && (err.name === 'NotAllowedError' || /Document is not focused/i.test(err.message || ''));
+          if (isDocFocusError) {
+            const retryOnFocus = async () => {
+              // small delay to allow clipboard to be populated
+              setTimeout(async () => {
+                try {
+                  const secondTry = await tryReadClipboardImage();
+                  if (secondTry) {
+                    console.log('clipboard.read() succeeded after focus');
+                  }
+                } catch (e2) {
+                  // ignore
+                }
+              }, 300);
+            };
+
+            try {
+              window.addEventListener('focus', retryOnFocus, { once: true });
+              console.log('Registered focus listener to retry clipboard.read() when window regains focus');
+            } catch (ee) {
+              // ignore
+            }
+          }
+        } catch (ee) {
+          // ignore
+        }
+      }
+
+      return false;
+    };
+
+    // Keyup handler to catch PrintScreen on key release and try clipboard read when modifiers released
+    const handleScreenshotKeyUp = async (e) => {
+      if (document.hidden) return;
+      if (!isOnChatsRoute() || isNewChatOpen()) return;
+
+      // PrintScreen key on keyup
+      if (e.key === 'PrintScreen' || e.code === 'PrintScreen' || e.keyCode === 44) {
+        console.log('PrintScreen keyup detected');
+        const found = await tryReadClipboardImage();
+        if (!found) {
+          await captureAndUploadScreenshot();
+        }
+        return;
+      }
+
+      // When modifiers are released, try reading clipboard (some OSes copy on modifier+key)
+      if (e.key === 'Meta' || e.key === 'Shift' || e.key === 'Control') {
+        setTimeout(() => tryReadClipboardImage(), 400);
+      }
+    };
+
     const captureAndUploadScreenshot = async () => {
       if (isCapturing.current) return;
       
@@ -145,7 +239,7 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
         isCapturing.current = true;
 
         // Double-check we're still on /chats and NewChat modal isn't open before capturing
-        if (!(window.location && (window.location.pathname === '/chats' || window.location.pathname.startsWith('/chats/')))) {
+        if (!isOnChatsRoute()) {
           console.log('Skipping capture: not on /chats route');
           return;
         }
@@ -205,14 +299,16 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
 
     // Add event listeners
     // document.addEventListener('visibilitychange', handleVisibilityChange);
-    // Only listen for keydown on PrintScreen and screenshot shortcuts, not all keys
-    document.addEventListener('keyup', handleScreenshotKey, true);
+    // Use keydown because some browsers/platforms report PrintScreen on keydown
+    document.addEventListener('keydown', handleScreenshotKey, true);
+    document.addEventListener('keyup', handleScreenshotKeyUp, true);
     document.addEventListener('paste', handlePaste);
 
     // Cleanup
     return () => {
       // document.removeEventListener('visibilitychange', handleVisibilityChange);
-      document.removeEventListener('keyup', handleScreenshotKey, true);
+      document.removeEventListener('keydown', handleScreenshotKey, true);
+      document.removeEventListener('keyup', handleScreenshotKeyUp, true);
       document.removeEventListener('paste', handlePaste);
     };
   }, [chatId, userId, enabled, onScreenshotDetected]);

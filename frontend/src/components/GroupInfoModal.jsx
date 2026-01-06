@@ -1,5 +1,5 @@
 // GroupInfoModalWhatsApp.jsx
-import React, { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import CosmosBackground from "./CosmosBg";
 import ForwardMessageModal from "./ForwardMessageModal";
+import blockService from "../utils/blockService";
 
 const TabButton = ({ active, icon: Icon, label, onClick, color }) => {
   const themeModeLocal = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
@@ -31,18 +32,8 @@ const GroupInfoModalWhatsApp = ({
   currentUserId,
   onClose,
   onUpdateGroup,
-  onDeleteGroup,
 }) => {
   const [activeTab, setActiveTab] = useState("media");
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
-  // Helper to show toast messages (type: 'success' | 'error')
-  const showToast = (message, type = 'success', timeout = 2000) => {
-    setToast({ show: true, message: message || '', type });
-    try { window.clearTimeout(window._chasmos_toast_timeout); } catch (e) {}
-    window._chasmos_toast_timeout = setTimeout(() => {
-      setToast({ show: false, message: '', type: 'success' });
-    }, timeout);
-  };
   const [fetchedGroup, setFetchedGroup] = useState(null);
   const [inviteLinkLocal, setInviteLinkLocal] = useState("");
   const effectiveGroup = fetchedGroup || group;
@@ -51,11 +42,9 @@ const GroupInfoModalWhatsApp = ({
     inviteEnabled: effectiveGroup.inviteEnabled,
     inviteLink: effectiveGroup.inviteLink,
     permissions: effectiveGroup.permissions,
-    features: effectiveGroup.features
   });
 
-  const rawMembers = (effectiveGroup.members || effectiveGroup.participants || []).filter(m => m != null);
-  const [displayMembers, setDisplayMembers] = useState(rawMembers);
+  const derivedInviteLink = effectiveGroup.inviteLink || (effectiveGroup.group && effectiveGroup.group.inviteLink) || (effectiveGroup.groupSettings && effectiveGroup.groupSettings.inviteLink) || "";
   const settings = effectiveGroup.settings || {};
 
   // Derive invite/settings/permissions/features from various possible payload shapes
@@ -64,8 +53,6 @@ const GroupInfoModalWhatsApp = ({
     : (effectiveGroup.group && typeof effectiveGroup.group.inviteEnabled !== 'undefined')
       ? Boolean(effectiveGroup.group.inviteEnabled)
       : Boolean(effectiveGroup.groupSettings && effectiveGroup.groupSettings.allowInvites);
-
-  const derivedInviteLink = effectiveGroup.inviteLink || (effectiveGroup.group && effectiveGroup.group.inviteLink) || (effectiveGroup.groupSettings && effectiveGroup.groupSettings.inviteLink) || "";
 
   const derivedPermissionsRaw = effectiveGroup.permissions || (effectiveGroup.group && effectiveGroup.group.permissions) || {};
   const permissions = {
@@ -82,7 +69,7 @@ const GroupInfoModalWhatsApp = ({
     polls: derivedFeaturesRaw.polls !== false,
   };
 
-  console.log('📊 GroupInfoModal derived values:', { derivedInviteEnabled, derivedInviteLink, permissions, features });
+  console.log('📊 GroupInfoModal derived values:', { derivedInviteLink, permissions, features });
 
   // ✅ Determine creator ID
   const creatorId = effectiveGroup.admin?._id?.toString() || effectiveGroup.admin?.toString() || effectiveGroup.groupAdmin?._id?.toString() || effectiveGroup.groupAdmin?.toString();
@@ -93,69 +80,6 @@ const GroupInfoModalWhatsApp = ({
     const adminId = admin._id?.toString() || admin.toString();
     return adminId === currentUserId?.toString();
   });
-
-  const handleRemoveMember = async (memberId) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE_URL}/api/group/remove-member`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ groupId: effectiveGroup._id, memberId }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.message || 'Failed to remove member');
-      // Prefer backend-updated group when available
-      if (json.group) {
-        setFetchedGroup(json.group);
-        try { onUpdateGroup?.(json.group); } catch (e) { /* ignore */ }
-      } else {
-        // Backend didn't return full group: compute updated group and update local state + parent immediately
-        const base = fetchedGroup || group || {};
-        const existing = Array.isArray(base.members) ? base.members : (Array.isArray(base.participants) ? base.participants : []);
-        const filtered = existing.filter(m => String(m._id || m.id || m) !== String(memberId));
-        const updatedGroup = { ...base, members: filtered, participants: filtered };
-        setFetchedGroup(updatedGroup);
-        try { onUpdateGroup?.(updatedGroup); } catch (e) { /* ignore */ }
-      }
-
-      showToast(json.message || 'Member removed', 'success', 2000);
-
-      // Refetch fresh group info from server to ensure UI stays in sync
-      try {
-        const token2 = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
-        const headers2 = token2 ? { Authorization: `Bearer ${token2}` } : {};
-        const gid = (json.group && (json.group._id || json.group.id)) || effectiveGroup._id || effectiveGroup.chat || effectiveGroup.chatId;
-        if (gid) {
-          const resp = await fetch(`${API_BASE_URL}/api/group/group/${encodeURIComponent(gid)}`, { headers: headers2 });
-          if (resp.ok) {
-            const fresh = await resp.json();
-            if (fresh) {
-              setFetchedGroup(fresh);
-              try { onUpdateGroup?.(fresh); } catch (e) { /* ignore */ }
-            }
-          }
-        }
-      } catch (e) {
-        // non-fatal: keep optimistic update if refetch fails
-        console.warn('Refetch group after remove failed', e);
-      }
-    } catch (e) {
-      console.error('Failed to remove member', e);
-      showToast(e.message || 'Failed to remove member', 'error', 3000);
-    }
-  };
-
-  const handlePromoteToggle = (memberId) => {
-    onUpdateGroup?.({
-      ...effectiveGroup,
-      members: displayMembers.map((m) =>
-        (String(m.id) === String(memberId) || String(m._id) === String(memberId)) ? { ...m, isAdmin: !m.isAdmin } : m
-      ),
-    });
-  };
 
   const handleCopyInvite = async () => {
     const link = inviteLinkLocal || effectiveGroup.inviteLink || settings.inviteLink || "";
@@ -261,53 +185,58 @@ const GroupInfoModalWhatsApp = ({
     setFeaturesState(next);
   };
 
-  const makeAdminOnServer = async (newAdminId) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE_URL}/api/group/make-admin`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ groupId: effectiveGroup._id, newAdminId }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.message || 'Failed to promote');
-      // Prefer backend-updated group when available
-      if (json.group) {
-        setFetchedGroup(json.group);
-        try { onUpdateGroup?.(json.group); } catch (e) { /* ignore */ }
-      } else {
-        // Backend didn't return full group — optimistically update local group state
-        setFetchedGroup(prev => {
-          const base = prev || group || {};
-          const existing = Array.isArray(base.members) ? base.members : (Array.isArray(base.participants) ? base.participants : []);
-          const updated = existing.map(m => {
-            const id = String(m._id || m.id || m);
-            if (id === String(newAdminId)) {
-              return { ...(typeof m === 'object' ? m : {}), isAdmin: true };
-            }
-            return m;
-          });
-          // ensure admins list contains the new admin id
-          const admins = Array.isArray(base.admins) ? Array.from(new Set([...base.admins, newAdminId])) : [newAdminId];
-          return { ...base, members: updated, participants: updated, admins };
-        });
-        try { onUpdateGroup?.({ ...(fetchedGroup || group || {}), admins: [ ...((fetchedGroup || group || {}).admins || []), newAdminId ] }); } catch (e) { /* ignore */ }
-      }
-      showToast(json.message || 'Member promoted', 'success', 2000);
-      return json;
-    } catch (e) {
-      console.error('Failed to promote member', e);
-      showToast(e.message || 'Failed to promote', 'error', 3000);
-      return null;
-    }
-  };
-
   const [savingSettings, setSavingSettings] = useState(false);
   
   const [editingEnabled, setEditingEnabled] = useState(false);
+  const [groupAvatarLocal, setGroupAvatarLocal] = useState("");
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  const [removedGroupAvatar, setRemovedGroupAvatar] = useState(false);
+  const fileInputRef = useRef(null);
+  const [groupNameLocal, setGroupNameLocal] = useState(effectiveGroup?.name || "");
+
+  const openFilePicker = () => {
+    if (!editingEnabled) return;
+    try { fileInputRef.current?.click(); } catch (e) { }
+  };
+
+  const handleFileChange = (e) => {
+    const file = e?.target?.files && e.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { showToast('Image must be less than 2MB', 'error'); return; }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setGroupAvatarLocal(reader.result);
+      setRemovedGroupAvatar(false);
+      setAvatarLoadFailed(false);
+    };
+    reader.readAsDataURL(file);
+    try { e.target.value = ''; } catch (e) { }
+  };
+
+  const handleRemoveAvatar = () => {
+    setGroupAvatarLocal("");
+    setRemovedGroupAvatar(true);
+    setAvatarLoadFailed(false);
+  };
+  
+  const rawMembers = (effectiveGroup.members || effectiveGroup.participants || []).filter(m => m != null);
+  const [displayMembers, setDisplayMembers] = useState(rawMembers);
+  const [unblockLoadingMemberIds, setUnblockLoadingMemberIds] = useState(new Set());
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+   // Helper to show toast messages (type: 'success' | 'error')
+  const showToast = (message, type = 'success', timeout = 2000) => {
+    setToast({ show: true, message: message || '', type });
+    try { window.clearTimeout(window._chasmos_toast_timeout); } catch (e) {}
+    window._chasmos_toast_timeout = setTimeout(() => {
+      setToast({ show: false, message: '', type: 'success' });
+    }, timeout);
+  };
+
+  useEffect(() => {
+    return () => {
+      try { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); } catch (e) {}
+    };
+  }, []);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [availableUsers, setAvailableUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -317,6 +246,7 @@ const GroupInfoModalWhatsApp = ({
   const [addSearch, setAddSearch] = useState('');
   const [addPage, setAddPage] = useState(1);
   const PAGE_SIZE = 20;
+  const [unblockLoadingAvailableIds, setUnblockLoadingAvailableIds] = useState(new Set());
   // Selected members to be promoted when Save is clicked
   const [selectedPromoteIds, setSelectedPromoteIds] = useState([]);
   // Selected members to be removed when Save is clicked
@@ -346,12 +276,30 @@ const GroupInfoModalWhatsApp = ({
         features: featuresState,
         promoteIds: Array.isArray(selectedPromoteIds) ? selectedPromoteIds : [],
         removeIds: Array.isArray(selectedRemoveIds) ? selectedRemoveIds : [],
+        ...(groupAvatarLocal && String(groupAvatarLocal).startsWith('data:image') ? { avatarBase64: groupAvatarLocal } : {}),
+        ...(removedGroupAvatar ? { clearAvatar: true } : {}),
+        ...(typeof groupNameLocal === 'string' ? { name: groupNameLocal } : {}),
       });
       if (res) {
         // clear selections after successful save
         setSelectedPromoteIds([]);
         setSelectedRemoveIds([]);
+        // Exit editing mode only after successful save
         setEditingEnabled(false);
+
+        // Notify parent with updated group data. Prefer server response if provided.
+        let updatedGroup = null;
+        if (res.group) updatedGroup = res.group;
+        else if (res.updatedGroup) updatedGroup = res.updatedGroup;
+        else if (res.data && (res.data.group || res.data.updatedGroup)) updatedGroup = res.data.group || res.data.updatedGroup;
+        else {
+          updatedGroup = {
+            ...(effectiveGroup || {}),
+            name: groupNameLocal || effectiveGroup?.name,
+            avatar: removedGroupAvatar ? '' : (groupAvatarLocal || effectiveGroup?.avatar),
+          };
+        }
+        try { onUpdateGroup?.(updatedGroup); } catch (e) { console.warn('onUpdateGroup failed', e); }
       }
       // toast handled by updateSettingsOnServer; ensure visible if not
       showToast('Settings saved', 'success', 2000);
@@ -380,9 +328,29 @@ const GroupInfoModalWhatsApp = ({
       });
       setSelectedPromoteIds([]);
       setSelectedRemoveIds([]);
+      // Reset local avatar/name edits on cancel
+      try { setGroupAvatarLocal(effectiveGroup?.avatar || ''); } catch (e) {}
+      try { setRemovedGroupAvatar(false); } catch (e) {}
+      try { setGroupNameLocal(effectiveGroup?.name || ''); } catch (e) {}
     }
     setEditingEnabled(!editingEnabled);
   };
+
+  // Sync local avatar when modal opens or group changes
+  useEffect(() => {
+    try {
+      const src = effectiveGroup?.avatar || effectiveGroup?.icon || effectiveGroup?.groupSettings?.avatar || "";
+      setGroupAvatarLocal(src || "");
+      setRemovedGroupAvatar(!Boolean(src));
+    } catch (e) {
+      setGroupAvatarLocal("");
+      setRemovedGroupAvatar(false);
+    }
+    // sync name local copy
+    try {
+      setGroupNameLocal(effectiveGroup?.name || effectiveGroup?.chatName || effectiveGroup?.groupName || "");
+    } catch (e) {}
+  }, [open, effectiveGroup?.avatar, effectiveGroup?.icon, effectiveGroup?.groupSettings]);
 
   // Load available users from backend and filter out current participants
   const loadAvailableUsers = async () => {
@@ -395,7 +363,56 @@ const GroupInfoModalWhatsApp = ({
       const json = await res.json();
       const all = Array.isArray(json) ? json : (json.users || []);
       const participantIds = new Set((displayMembers || []).map(m => String(m._id || m.id || m)));
-      const filtered = all.filter(u => !participantIds.has(String(u._id || u.id || u)));
+      // Exclude current participants first
+      let candidates = all.filter(u => !participantIds.has(String(u._id || u.id || u)));
+
+      // Also try to fetch google contacts to annotate candidates (so we can show the Google tag)
+      try {
+        const resGoogle = await fetch(`${API_BASE_URL}/api/sync/google-contacts`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (resGoogle.ok) {
+          const jsonGoogle = await resGoogle.json();
+          const googleContacts = Array.isArray(jsonGoogle.data) ? jsonGoogle.data : [];
+          const googleEmails = new Set();
+          const googlePhones = new Set();
+          (googleContacts || []).forEach((g) => {
+            if (g.email) googleEmails.add(String(g.email).toLowerCase().trim());
+            const gp = String(g.phone || g.mobile || g.mobileNumber || "").replace(/\D/g, "");
+            if (gp) googlePhones.add(gp.length > 10 ? gp.slice(-10) : gp);
+          });
+
+          // Annotate candidates with isGoogleContact
+          candidates = candidates.map(u => {
+            const email = String(u.email || u.username || "").toLowerCase();
+            const phone = String(u.phoneNumber || u.phone || u.mobile || "").replace(/\D/g, "");
+            const phoneNorm = phone ? (phone.length > 10 ? phone.slice(-10) : phone) : "";
+            return {
+              ...u,
+              isGoogleContact: (email && googleEmails.has(email)) || (phoneNorm && googlePhones.has(phoneNorm)),
+            };
+          });
+        }
+      } catch (e) {
+        // ignore google contacts errors; proceed without annotation
+      }
+
+      // Check block status for each candidate: exclude those who have blocked you,
+      // but preserve those you have blocked (annotate with isBlocked) so user can unblock them.
+      const checks = await Promise.all(
+        candidates.map(async (u) => {
+          try {
+            const uid = String(u._id || u.id || u);
+            const status = await blockService.checkBlockStatus(uid);
+            return { user: u, hasBlockedYou: !!(status && status.hasBlockedYou), isBlocked: !!(status && status.isBlocked) };
+          } catch (e) {
+            // On error assume not blocked to avoid over-filtering
+            return { user: u, hasBlockedYou: false, isBlocked: false };
+          }
+        })
+      );
+
+      const filtered = checks.filter(c => !c.hasBlockedYou).map(c => ({ ...c.user, isBlocked: c.isBlocked }));
       setAvailableUsers(filtered);
         setSelectedAddIds([]);
         setShowAddMemberModal(true);
@@ -437,6 +454,29 @@ const GroupInfoModalWhatsApp = ({
     const start = (Math.max(1, addPage) - 1) * PAGE_SIZE;
     return (filteredAvailableUsers || []).slice(start, start + PAGE_SIZE);
   }, [filteredAvailableUsers, addPage]);
+
+  const handleUnblockAvailableUser = async (userId) => {
+    try {
+      setUnblockLoadingAvailableIds(prev => new Set(prev).add(String(userId)));
+      await blockService.unblockUser(String(userId));
+      // Update the availableUsers list to remove isBlocked flag
+      setAvailableUsers(prev => (prev || []).map(u => {
+        const uid = u._id || u.id || u.userId || '';
+        if (String(uid) === String(userId)) return { ...u, isBlocked: false };
+        return u;
+      }));
+      showToast('User unblocked successfully', 'success', 2000);
+    } catch (err) {
+      console.error('Unblock failed', err);
+      showToast('Failed to unblock user', 'error', 3000);
+    } finally {
+      setUnblockLoadingAvailableIds(prev => {
+        const copy = new Set(prev);
+        copy.delete(String(userId));
+        return copy;
+      });
+    }
+  };
 
   const handleAddSelected = async (ids) => {
     const toAdd = Array.isArray(ids) ? ids : Array.from(selectedAddIds || []);
@@ -548,26 +588,90 @@ const GroupInfoModalWhatsApp = ({
     let cancelled = false;
     const current = (effectiveGroup.members || effectiveGroup.participants || []).filter(m => m != null);
     const needFetch = current.some(m => !(m && (m.name || m.username || m.email)));
-    if (!needFetch) {
-      setDisplayMembers(current.map(m => ({ _id: m._id || m.id || m, ...(typeof m === 'object' ? m : {}) })));
-      return () => { cancelled = true; };
-    }
 
     (async () => {
       try {
+        let normalized;
+        
+        // Fetch user data if needed
+        if (needFetch) {
+          const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const res = await fetch(`${API_BASE_URL}/api/user`, { headers });
+          const json = await res.json();
+          const all = Array.isArray(json) ? json : (json.users || []);
+          const usersById = new Map(all.map(u => [String(u._id || u.id), u]));
+          normalized = current.map(m => {
+            if (m && (m.name || m.username || m.email)) return { _id: m._id || m.id || null, ...(typeof m === 'object' ? m : {}) };
+            const id = String(m._id || m.id || m || '');
+            const found = usersById.get(id);
+            if (found) return { _id: found._id || found.id, ...found };
+            return { _id: id, name: undefined, username: '', email: '', avatar: '' };
+          });
+        } else {
+          // Members already have basic info, just normalize the structure
+          normalized = current.map(m => ({ _id: m._id || m.id || m, ...(typeof m === 'object' ? m : {}) }));
+        }
+
         const token = localStorage.getItem('token') || localStorage.getItem('chasmos_auth_token');
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
-        const res = await fetch(`${API_BASE_URL}/api/user`, { headers });
-        const json = await res.json();
-        const all = Array.isArray(json) ? json : (json.users || []);
-        const usersById = new Map(all.map(u => [String(u._id || u.id), u]));
-        const normalized = current.map(m => {
-          if (m && (m.name || m.username || m.email)) return { _id: m._id || m.id || null, ...(typeof m === 'object' ? m : {}) };
-          const id = String(m._id || m.id || m || '');
-          const found = usersById.get(id);
-          if (found) return { _id: found._id || found.id, ...found };
-          return { _id: id, name: undefined, username: '', email: '', avatar: '' };
-        });
+
+        // Fetch Google contacts to annotate members
+        try {
+          const resGoogle = await fetch(`${API_BASE_URL}/api/sync/google-contacts`, { headers });
+          if (resGoogle.ok) {
+            const jsonGoogle = await resGoogle.json();
+            const googleContacts = Array.isArray(jsonGoogle.data) ? jsonGoogle.data : [];
+            const googleEmails = new Set();
+            const googlePhones = new Set();
+            (googleContacts || []).forEach((g) => {
+              if (g.email) googleEmails.add(String(g.email).toLowerCase().trim());
+              const gp = String(g.phone || g.mobile || g.mobileNumber || "").replace(/\D/g, "");
+              if (gp) googlePhones.add(gp.length > 10 ? gp.slice(-10) : gp);
+            });
+
+            // Annotate normalized members with isGoogleContact
+            normalized = normalized.map(u => {
+              const email = String(u.email || u.username || "").toLowerCase();
+              const phone = String(u.phoneNumber || u.phone || u.mobile || "").replace(/\D/g, "");
+              const phoneNorm = phone ? (phone.length > 10 ? phone.slice(-10) : phone) : "";
+              return {
+                ...u,
+                isGoogleContact: (email && googleEmails.has(email)) || (phoneNorm && googlePhones.has(phoneNorm)),
+              };
+            });
+          }
+        } catch (e) {
+          // ignore google contacts errors
+        }
+
+        // Check block status for members (same pattern as GroupCreation)
+        try {
+          const checks = await Promise.all(
+            normalized.map(async (u) => {
+              try {
+                const uid = String(u._id || u.id || u);
+                if (!uid) return { ...u, isBlocked: false };
+                const status = await blockService.checkBlockStatus(uid);
+                console.log(`🔍 Block check for ${uid}:`, status);
+                // Annotate whether current user has blocked them
+                const result = { ...u, isBlocked: Boolean(status?.isBlocked) };
+                console.log(`✅ Annotated member:`, result);
+                return result;
+              } catch (e) {
+                console.error(`❌ Block check error for ${u._id || u.id}:`, e);
+                // On error, keep the user without isBlocked flag
+                return { ...u, isBlocked: false };
+              }
+            })
+          );
+          normalized = checks;
+          console.log(`📊 All normalized members with block status:`, normalized);
+        } catch (e) {
+          console.error('❌ Block status batch error:', e);
+          // ignore block status errors
+        }
+
         if (!cancelled) setDisplayMembers(normalized);
       } catch (e) {
         console.warn('Failed to normalize group members', e);
@@ -612,6 +716,7 @@ const GroupInfoModalWhatsApp = ({
   const [forwardOpen, setForwardOpen] = useState(false);
   const [forwardMessage, setForwardMessage] = useState(null);
   const [recentChats, setRecentChats] = useState([]);
+  const [unblockLoadingIds, setUnblockLoadingIds] = useState(new Set());
 
   const [inviteEnabledState, setInviteEnabledState] = useState(Boolean(group?.inviteEnabled));
   const [permissionsState, setPermissionsState] = useState({
@@ -865,20 +970,63 @@ const GroupInfoModalWhatsApp = ({
           {/* ================= HEADER ================= */}
           <div className={`relative z-10 flex items-center justify-between px-5 py-4 border-b ${themeMode === 'dark' ? 'border-gray-800' : 'border-gray-200'}`}>
             {/* Left: avatar + members count (left aligned) */}
-            <div className="flex items-center gap-4">
-              <div className={`w-14 h-14 rounded-lg ${styles.avatarBg} flex items-center justify-center overflow-hidden`}>
+            <div className="flex items-center gap-4 group">
+              <div className={`w-14 h-14 rounded-lg ${styles.avatarBg} flex items-center justify-center overflow-visible relative`}>
                 {(() => {
-                  const avatarSrc = effectiveGroup?.avatar || effectiveGroup?.icon || effectiveGroup?.groupSettings?.avatar || effectiveGroup?.groupSettings?.icon || effectiveGroup?.groupSettings?.avatarUrl || "";
-                  if (avatarSrc) {
-                    return (
-                      <img src={avatarSrc} alt={displayName} className="w-full h-full object-cover" />
-                    );
-                  }
-                  return <span className={`${styles.titleText} text-xl font-bold`}>{String(displayName || "G").charAt(0)}</span>;
+                  const avatarSrc = (!removedGroupAvatar)
+                    ? (groupAvatarLocal || effectiveGroup?.avatar || effectiveGroup?.icon || effectiveGroup?.groupSettings?.avatar || effectiveGroup?.groupSettings?.icon || effectiveGroup?.groupSettings?.avatarUrl || "")
+                    : "";
+                  const initial = String(displayName || "G").charAt(0);
+                  return (
+                    <div className="w-full h-full relative">
+                      {avatarSrc ? (
+                        <img src={avatarSrc} alt={displayName} className="w-full h-full object-cover rounded-lg" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <span className={`${styles.titleText} text-xl font-bold`}>{initial}</span>
+                        </div>
+                      )}
+
+                      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+
+                      {editingEnabled && (
+                        <div className="absolute left-full top-1/2 transform -translate-y-1/2 ml-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition">
+                          <div className="flex flex-col gap-1">
+                            {avatarSrc ? (
+                              <>
+                                <button
+                                  onClick={handleRemoveAvatar}
+                                  title="Remove picture"
+                                  className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center shadow-md"
+                                >
+                                  <Trash className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={openFilePicker}
+                                  title="Change picture"
+                                  className={`w-8 h-8 rounded-full flex items-center justify-center shadow-md ${themeMode === 'dark' ? 'bg-white/6 text-white border border-white/10' : 'bg-gray-200 text-gray-700 border border-gray-300'}`}
+                                >
+                                  ✎
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={openFilePicker}
+                                title="Add picture"
+                                className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center shadow-md"
+                              >
+                                +
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
                 })()}
               </div>
 
-              <div className="flex flex-col">
+              <div className={`flex flex-col transition-all ${editingEnabled ? 'group-hover:ml-10' : ''}`}>
                 <p className={`${styles.subText} text-sm`}>{displayMembers.length} members</p>
                 {formatCreatedAt(effectiveGroup) && (
                   <p className={`${styles.subText} text-xs mt-1`}>{`Created ${formatCreatedAt(effectiveGroup)}`}</p>
@@ -888,7 +1036,19 @@ const GroupInfoModalWhatsApp = ({
 
             {/* Center: group name (centered between avatar and close button) */}
             <div className="absolute left-1/2 transform -translate-x-1/2 text-center z-20 pointer-events-none">
-              <h2 className={`${styles.titleText} font-semibold text-lg`}>{effectiveGroup.name}</h2>
+              {editingEnabled ? (
+                <input
+                  type="text"
+                  value={groupNameLocal}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setGroupNameLocal(v);
+                  }}
+                  className={`pointer-events-auto text-center font-semibold text-lg px-3 py-1 rounded ${themeMode === 'dark' ? 'bg-gray-800 text-white' : 'bg-white text-gray-900 border border-gray-200'}`}
+                />
+              ) : (
+                <h2 className={`${styles.titleText} font-semibold text-lg`}>{effectiveGroup.name}</h2>
+              )}
             </div>
 
             {/* Right: save + close buttons (edit controls only visible to admins) */}
@@ -1020,40 +1180,81 @@ const GroupInfoModalWhatsApp = ({
 
                           {isMemberCreator && Badge("Creator", "purple")}
                           {isMemberAdmin && !isMemberCreator && Badge("Admin", "blue")}
+                          {member.isGoogleContact && (
+                            <span className="ml-1 text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 rounded-full">
+                              Google
+                            </span>
+                          )}
                         </div>
 
                         <p className={`text-xs ${styles.subText} mt-0.5`}>{member.username || member.email || (me ? (JSON.parse(localStorage.getItem('chasmos_user_data')||'{}').email || 'Member') : 'Member')}</p>
                       </div>
                     </div>
 
-                    {!isMemberCreator && !me && isAdmin && (
+                    {!isMemberCreator && !me && (
                       <div className="flex gap-2 items-center">
-                        {permissionsState.allowOthersAdmin ? (
-                          isMemberAdmin ? null : (
+                        {member.isBlocked ? (
+                          <div className="flex items-center gap-2">
+                            <div className={`text-xs ${styles.subText} mr-2`}>You've blocked this user</div>
                             <button
                               type="button"
-                              onClick={() => { if (editingEnabled) toggleSelectPromote(String(memberId)); }}
-                              disabled={!editingEnabled}
-                              aria-pressed={selectedPromoteIds.includes(String(memberId))}
-                              title={selectedPromoteIds.includes(String(memberId)) ? 'Selected for promotion' : (editingEnabled ? 'Promote as admin' : 'Enable Edit to promote')}
-                              aria-label={selectedPromoteIds.includes(String(memberId)) ? 'Selected for promotion' : 'Promote as admin'}
-                              className={`w-8 h-8 rounded-full flex items-center justify-center border transition ${!editingEnabled ? 'opacity-50 cursor-not-allowed' : ''} ${selectedPromoteIds.includes(String(memberId)) ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-gray-300 text-gray-600'}`}
+                              onClick={async () => {
+                                try {
+                                  setUnblockLoadingMemberIds(prev => new Set(prev).add(String(memberId)));
+                                  await blockService.unblockUser(String(memberId));
+                                  setDisplayMembers(prev => (prev || []).map(m => {
+                                    const mId = String(m._id || m.id || m);
+                                    if (mId === String(memberId)) return { ...m, isBlocked: false };
+                                    return m;
+                                  }));
+                                  showToast('User unblocked', 'success', 2000);
+                                } catch (err) {
+                                  console.error('Unblock failed', err);
+                                  showToast('Failed to unblock', 'error', 3000);
+                                } finally {
+                                  setUnblockLoadingMemberIds(prev => {
+                                    const copy = new Set(prev);
+                                    copy.delete(String(memberId));
+                                    return copy;
+                                  });
+                                }
+                              }}
+                              disabled={unblockLoadingMemberIds.has(String(memberId))}
+                              className={`text-xs px-2 py-1 rounded ${themeMode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800'} disabled:opacity-50 disabled:cursor-not-allowed transition`}
                             >
-                              {selectedPromoteIds.includes(String(memberId)) ? '✓' : '+'}
+                              {unblockLoadingMemberIds.has(String(memberId)) ? 'Unblocking...' : 'Unblock'}
                             </button>
-                          )
-                        ) : null}
+                          </div>
+                        ) : isAdmin ? (
+                          <>
+                            {permissionsState.allowOthersAdmin ? (
+                              isMemberAdmin ? null : (
+                                <button
+                                  type="button"
+                                  onClick={() => { if (editingEnabled) toggleSelectPromote(String(memberId)); }}
+                                  disabled={!editingEnabled}
+                                  aria-pressed={selectedPromoteIds.includes(String(memberId))}
+                                  title={selectedPromoteIds.includes(String(memberId)) ? 'Selected for promotion' : (editingEnabled ? 'Promote as admin' : 'Enable Edit to promote')}
+                                  aria-label={selectedPromoteIds.includes(String(memberId)) ? 'Selected for promotion' : 'Promote as admin'}
+                                  className={`w-8 h-8 rounded-full flex items-center justify-center border transition ${!editingEnabled ? 'opacity-50 cursor-not-allowed' : ''} ${selectedPromoteIds.includes(String(memberId)) ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-gray-300 text-gray-600'}`}
+                                >
+                                  {selectedPromoteIds.includes(String(memberId)) ? '✓' : '+'}
+                                </button>
+                              )
+                            ) : null}
 
-                        <button
-                          type="button"
-                          onClick={() => toggleSelectRemove(String(memberId))}
-                          disabled={!editingEnabled}
-                          aria-pressed={selectedRemoveIds.includes(String(memberId))}
-                          title={selectedRemoveIds.includes(String(memberId)) ? 'Marked for removal' : (editingEnabled ? (isAdmin ? 'Mark for removal' : 'You are not an admin') : 'Enable Edit to remove')}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition ${!editingEnabled ? 'opacity-50 cursor-not-allowed bg-gray-200 text-gray-400' : ''} ${selectedRemoveIds.includes(String(memberId)) ? 'bg-red-600 text-white' : (isAdmin ? 'bg-yellow-400 text-yellow-800' : 'bg-yellow-400 text-white')}`}
-                        >
-                          <Trash className={`${selectedRemoveIds.includes(String(memberId)) ? 'w-4 h-4 text-white' : 'w-4 h-4 text-yellow-800'}`} />
-                        </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleSelectRemove(String(memberId))}
+                              disabled={!editingEnabled}
+                              aria-pressed={selectedRemoveIds.includes(String(memberId))}
+                              title={selectedRemoveIds.includes(String(memberId)) ? 'Marked for removal' : (editingEnabled ? (isAdmin ? 'Mark for removal' : 'You are not an admin') : 'Enable Edit to remove')}
+                              className={`w-9 h-9 rounded-full flex items-center justify-center transition ${!editingEnabled ? 'opacity-50 cursor-not-allowed bg-gray-200 text-gray-400' : ''} ${selectedRemoveIds.includes(String(memberId)) ? 'bg-red-600 text-white' : (isAdmin ? 'bg-yellow-400 text-yellow-800' : 'bg-yellow-400 text-white')}`}
+                            >
+                              <Trash className={`${selectedRemoveIds.includes(String(memberId)) ? 'w-4 h-4 text-white' : 'w-4 h-4 text-yellow-800'}`} />
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -1377,7 +1578,6 @@ const GroupInfoModalWhatsApp = ({
 
             {/* ================= ACTIONS ================= */}
             <Section title="Actions">
-
     <>
       <ActionButton 
         icon={LogOut} 
@@ -1530,35 +1730,56 @@ const GroupInfoModalWhatsApp = ({
 
                       {!loadingUsers && paginatedAvailable.map((u) => {
                         const uid = u._id || u.id || u.userId || '';
-                        const isGoogle = Boolean(u.googleId || String(u._id || u.id || '').startsWith('google-'));
+                        const isUserBlocked = u.isBlocked === true;
+                        const isUnblocking = unblockLoadingAvailableIds.has(String(uid));
                         return (
-                          <div key={uid} className={`flex items-center justify-between p-2 rounded transition ${themeMode === 'dark' ? 'hover:bg-gray-800 bg-transparent' : 'hover:bg-gray-50 bg-white'}`}>
-                            <div className="flex items-center gap-3">
-                              <div className={`w-10 h-10 rounded-full ${styles.avatarBg} flex items-center justify-center overflow-hidden`}>
-                                {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover rounded-full" /> : <span className={`${styles.titleText}`}>{String(u.name || u.username || 'U').charAt(0)}</span>}
+                          <div
+                            key={uid}
+                            onClick={() => { if (!isUserBlocked) toggleSelectAvailable(uid); }}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => { if (!isUserBlocked && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleSelectAvailable(uid); } }}
+                            className={`flex items-center justify-between p-2 rounded transition ${isUserBlocked ? '' : 'cursor-pointer'} ${themeMode === 'dark' ? 'hover:bg-gray-800 bg-transparent' : 'hover:bg-gray-50 bg-white'}`}
+                          >
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <div className={`w-10 h-10 rounded-full ${styles.avatarBg} flex items-center justify-center overflow-hidden flex-shrink-0`}>
+                                {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover rounded-full" alt={u.name || u.username} /> : <span className={`${styles.titleText}`}>{String(u.name || u.username || 'U').charAt(0)}</span>}
                               </div>
-                              <div>
+                              <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
-                                  <div className={`${styles.titleText} text-sm font-medium`}>{u.name || u.username || uid}</div>
-                                  {isGoogle && (
-                                    <div className="ml-1">
-                                      {Badge('Google', 'gray')}
-                                    </div>
+                                  <div className={`${styles.titleText} text-sm font-medium truncate`}>{u.name || u.username || uid}</div>
+                                  {u.isGoogleContact && (
+                                    <span className="ml-1 text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 rounded-full flex-shrink-0">
+                                      Google
+                                    </span>
                                   )}
                                 </div>
-                                <div className={`text-xs ${styles.subText}`}>{u.email || u.phone || ''}</div>
+                                <div className={`text-xs ${styles.subText} truncate`}>{u.email || u.phone || ''}</div>
                               </div>
                             </div>
 
-                            <div>
-                              <label className="inline-flex items-center cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedAddIds.includes(String(uid))}
-                                  onChange={() => toggleSelectAvailable(uid)}
-                                  className={`h-4 w-4 mr-2 ${themeMode === 'dark' ? 'accent-white' : ''}`}
-                                />
-                              </label>
+                            <div className="ml-3 flex-shrink-0">
+                              {isUserBlocked ? (
+                                <div className="flex items-center gap-2">
+                                  <div className={`text-xs ${styles.subText} mr-2`}>You've blocked this user</div>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleUnblockAvailableUser(uid); }}
+                                    disabled={isUnblocking}
+                                    className={`text-xs px-2 py-1 rounded ${themeMode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800'} ${isUnblocking ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                  >
+                                    {isUnblocking ? 'Unblocking...' : 'Unblock'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <label className="inline-flex items-center cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedAddIds.includes(String(uid))}
+                                    onChange={(e) => { e.stopPropagation(); toggleSelectAvailable(uid); }}
+                                    className={`h-4 w-4 mr-2 ${themeMode === 'dark' ? 'accent-white' : ''}`}
+                                  />
+                                </label>
+                              )}
                             </div>
                           </div>
                         );
@@ -1599,7 +1820,6 @@ const GroupInfoModalWhatsApp = ({
 }
 
 /* ================= REUSABLE COMPONENTS ================= */
-
 const Section = ({ title, children }) => {
   const themeModeLocal = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
   const titleClass = themeModeLocal === 'dark' ? 'text-white' : 'text-gray-800';
@@ -1624,47 +1844,6 @@ const StatusBadge = ({ enabled }) => (
     {enabled ? "Enabled" : "Disabled"}
   </span>
 );
-
-const PermissionRow = ({ label, description, enabled }) => {
-  const themeModeLocal = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
-  const bg = themeModeLocal === 'dark' ? 'bg-gray-900 hover:bg-gray-800' : 'bg-white hover:bg-gray-50 border border-gray-200';
-  const titleClass = themeModeLocal === 'dark' ? 'text-white' : 'text-gray-900';
-  const descClass = themeModeLocal === 'dark' ? 'text-gray-400' : 'text-gray-600';
-  return (
-    <div className={`flex justify-between items-center ${bg} rounded-xl p-4 transition`}>
-      <div className="flex-1">
-        <span className={`${titleClass} text-sm font-medium block`}>{label}</span>
-        {description && (
-          <span className={`${descClass} text-xs mt-1 block`}>{description}</span>
-        )}
-      </div>
-      <StatusBadge enabled={enabled} />
-    </div>
-  );
-};
-
-const FeatureRow = ({ icon: Icon, label, description, enabled, color }) => {
-  const themeModeLocal = (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) ? 'dark' : 'light';
-  const bg = themeModeLocal === 'dark' ? 'bg-gray-900 hover:bg-gray-800' : 'bg-white hover:bg-gray-50 border border-gray-200';
-  const titleClass = themeModeLocal === 'dark' ? 'text-white' : 'text-gray-900';
-  const descClass = themeModeLocal === 'dark' ? 'text-gray-400' : 'text-gray-600';
-  return (
-    <div className={`flex items-center justify-between ${bg} rounded-xl p-4 transition`}>
-      <div className="flex items-center gap-3 flex-1">
-        <div className={`w-10 h-10 rounded-lg bg-${color}-500/10 flex items-center justify-center`}>
-          <Icon className={`w-5 h-5 text-${color}-400`} />
-        </div>
-        <div>
-          <span className={`${titleClass} text-sm font-medium block`}>{label}</span>
-          {description && (
-            <span className={`${descClass} text-xs mt-1 block`}>{description}</span>
-          )}
-        </div>
-      </div>
-      <StatusBadge enabled={enabled} />
-    </div>
-  );
-};
 
 const Badge = (text, color) => {
   const colorClasses = {

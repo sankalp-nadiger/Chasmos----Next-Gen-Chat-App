@@ -13,7 +13,7 @@ const formatTimestamp = (timestamp) => {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
-const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
+const SelectContact = ({ contact, onSelect, selected, effectiveTheme, onUnblock, unblockLoading }) => {
   const cleanText = (text) => {
     if (!text || typeof text !== "string") return "";
     return text.replace(/📎/g, "").replace(/🔗/g, "").trim();
@@ -37,8 +37,8 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
 
   return (
     <div
-      onClick={() => onSelect(contactId)}
-      className={`flex items-center justify-between p-3 cursor-pointer border-b ${effectiveTheme.border} transition rounded-lg 
+      onClick={() => { if (!contact.isBlocked) onSelect(contactId); }}
+      className={`flex items-center justify-between p-3 ${contact.isBlocked ? '' : 'cursor-pointer'} border-b ${effectiveTheme.border} transition rounded-lg 
         ${selected ? "bg-cyan-100 dark:bg-gradient-to-r dark:from-purple-900/40 dark:to-blue-900/40" : "hover:bg-gray-500/20"}`}
     >
       <div className="flex items-center space-x-3 flex-1 min-w-0">
@@ -102,24 +102,37 @@ const SelectContact = ({ contact, onSelect, selected, effectiveTheme }) => {
         </div>
       </div>
 
-      {/* WhatsApp-style selection bubble */}
+      {/* Right-side: either unblock UI or selection bubble */}
       <div className="ml-3 flex-shrink-0">
-        <div
-          className={`w-6 h-6 rounded-full border-2 flex items-center justify-center
-            ${selected ? "bg-cyan-500 border-cyan-600 text-white" : "border-gray-400 "}`}
-        >
-          {selected && <Check className="w-4 h-4" />}
-        </div>
-      </div>
-
-      {/* Unread bubble */}
-      {contact.unreadCount > 0 && (
-        <div className="flex-shrink-0 ml-3">
-          <div className="w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center font-semibold">
-            {contact.unreadCount > 9 ? "9+" : contact.unreadCount}
+        {contact.isBlocked ? (
+          <div className="flex items-center gap-2">
+            <div className={`text-xs ${effectiveTheme.textSecondary} mr-2`}>You've blocked this contact</div>
+            <button
+              onClick={(e) => { e.stopPropagation(); if (onUnblock) onUnblock(contactId); }}
+              className={`text-xs px-2 py-1 rounded ${effectiveTheme.mode === 'dark' ? 'bg-white/6 text-white' : 'bg-white border border-gray-200 text-gray-800'}`}
+              disabled={unblockLoading}
+            >
+              {unblockLoading ? 'Unblocking...' : 'Unblock'}
+            </button>
           </div>
-        </div>
-      )}
+        ) : (
+          <div
+            className={`w-6 h-6 rounded-full border-2 flex items-center justify-center
+              ${selected ? "bg-cyan-500 border-cyan-600 text-white" : "border-gray-400 "}`}
+          >
+            {selected && <Check className="w-4 h-4" />}
+          </div>
+        )}
+
+        {/* Unread bubble */}
+        {contact.unreadCount > 0 && (
+          <div className="flex-shrink-0 ml-3">
+            <div className="w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center font-semibold">
+              {contact.unreadCount > 9 ? "9+" : contact.unreadCount}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

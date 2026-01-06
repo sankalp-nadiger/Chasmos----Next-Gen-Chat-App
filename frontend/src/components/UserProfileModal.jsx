@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import CosmosBg from './CosmosBg';
+import { useNavigate } from 'react-router-dom';
 
 const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateToMessage }) => {
   const [userDetails, setUserDetails] = useState(null);
@@ -23,11 +24,33 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
   const [links, setLinks] = useState([]);
   const [activeTab, setActiveTab] = useState('media');
   const [loading, setLoading] = useState(false);
+  const [commonGroups, setCommonGroups] = useState([]);
+  const [loadingCommonGroups, setLoadingCommonGroups] = useState(false);
+  const navigate = useNavigate();
+
+  const tryOpenGroup = (g) => {
+    try {
+      const id = g.chat || g._id || g.id;
+      if (!id) return;
+      const token = localStorage.getItem('token');
+      if (token && !localStorage.getItem('chasmos_auth_token')) {
+        try { localStorage.setItem('chasmos_auth_token', token); } catch (e) {}
+      }
+
+      const detail = { chatId: id, chat: { chatId: id, _id: id, name: g.name }, token };
+      try { window.dispatchEvent(new CustomEvent('chasmos:open-chat', { detail })); } catch (e) { /* fallback */ }
+      try { navigate('/chats'); } catch (e) {}
+      if (onClose) onClose();
+    } catch (e) {
+      console.warn('Failed to open group', e);
+    }
+  };
 
   useEffect(() => {
     if (isOpen && userId) {
       fetchUserDetails();
       fetchMediaAndDocs();
+      fetchCommonGroups();
     }
   }, [isOpen, userId]);
 
@@ -175,6 +198,25 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
       setMediaFiles([]);
       setDocuments([]);
       setLinks([]);
+    }
+  };
+
+  const fetchCommonGroups = async () => {
+    try {
+      if (!userId) return;
+      setLoadingCommonGroups(true);
+      const token = localStorage.getItem('token');
+      const base = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+      const res = await axios.get(`${base}/api/group/common/${encodeURIComponent(userId)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).catch(() => ({ data: { groups: [] } }));
+      const groups = (res && res.data && res.data.groups) ? res.data.groups : [];
+      setCommonGroups(groups || []);
+    } catch (e) {
+      console.error('Failed to fetch common groups', e);
+      setCommonGroups([]);
+    } finally {
+      setLoadingCommonGroups(false);
     }
   };
 
@@ -681,6 +723,50 @@ const UserProfileModal = ({ isOpen, onClose, userId, effectiveTheme, onNavigateT
                         </div>
                       </motion.div>
                     )}
+                  </motion.div>
+
+                  {/* Groups in common */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.9 }}
+                    className="mt-4 px-4"
+                    style={{ marginLeft: '3rem' }}
+                  >
+                    <h4 className={`font-semibold mb-2 ${effectiveTheme.text}`}>Groups in common</h4>
+                    <div className="space-y-2">
+                      {loadingCommonGroups ? (
+                        <div className={`text-sm ${effectiveTheme.textSecondary}`}>Loading groups...</div>
+                      ) : (commonGroups && commonGroups.length > 0) ? (
+                        commonGroups.map((g, idx) => (
+                          <motion.div
+                            key={g._id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => tryOpenGroup(g)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tryOpenGroup(g); } }}
+                            initial={{ x: -24, opacity: 0 }}
+                            animate={{ x: 0, opacity: 1 }}
+                            transition={{ delay: 0.8 + (idx * 0.06), type: 'spring', stiffness: 260, damping: 24 }}
+                            style={{ marginLeft: `${Math.max(0.75, 3 - idx * 0.18)}rem`, marginRight: '0' }}
+                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer ${effectiveTheme.mode === 'dark' ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-50'} transition`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
+                                {g.avatar ? <img src={g.avatar} alt={g.name} className="w-full h-full object-cover" /> : <span className="font-semibold">{(g.name||'G').charAt(0)}</span>}
+                              </div>
+                              <div>
+                                <div className={`font-medium ${effectiveTheme.text}`}>{g.name}</div>
+                                <div className={`text-xs ${effectiveTheme.textSecondary}`}>{g.participantsCount || 0} members</div>
+                              </div>
+                            </div>
+                            <div />
+                          </motion.div>
+                        ))
+                      ) : (
+                        <div className={`text-sm ${effectiveTheme.textSecondary}`}>No groups in common</div>
+                      )}
+                    </div>
                   </motion.div>
 
                   {/* Media, Docs, Links Section - Expands Last */}

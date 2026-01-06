@@ -762,17 +762,12 @@ export const getRecentChats = async (req, res) => {
         mentionCount = 0;
       }
 
-      // preserve existing mapping logic but inject unread
+      // preserve existing mapping logic
        const otherUser =
         (Array.isArray(chat.participants) &&
           chat.participants.find((p) => String(p._id) !== String(userId))) ||
         (Array.isArray(chat.participants) ? chat.participants[0] : null);
 
-      if (typeof chat.unreadCount === "number") {
-        unread = chat.unreadCount;
-      } else if (chat.unreadCount && typeof chat.unreadCount === "object") {
-        unread = chat.unreadCount[String(userId)] || chat.unreadCount[userId] || 0;
-      }
       // Determine a timestamp for this chat preview. Prefer lastMessage's scheduledFor
       // when the last message was a scheduled message that has been sent.
       let previewTimestamp = chat.updatedAt || chat.timestamp;
@@ -948,6 +943,7 @@ export const getRecentChats = async (req, res) => {
       if (chat.isGroupChat) {
         // Group chat: include all members, admins, and group admin
         chatData.users = chat.users || chat.participants || [];
+        chatData.participants = chat.participants || chat.users || [];
         chatData.admins = chat.admins || [];
         chatData.groupAdmin = chat.groupAdmin || null;
         chatData.groupSettings = chat.groupSettings || {};
