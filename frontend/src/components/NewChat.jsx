@@ -1334,6 +1334,10 @@ const ContactItem = ({
   const isBusiness = contact.type === "business";
   const myEmailLower = currentUserEmail?.toLowerCase() || "";
 
+const avatarSrc =
+  contact.avatar ||
+  "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg";
+
   // Fetch chat status (SKIP for business)
   useEffect(() => {
     if (isBusiness) {
@@ -1457,64 +1461,101 @@ const ContactItem = ({
         hover:${effectiveTheme.hover || "bg-gray-100"}`}
       >
         {/* LEFT */}
-        <div className="flex-1 min-w-0">
-            {/* Name with custom category next to it for "Other" view */}
-            <div className="flex items-center gap-5 flex-wrap">
-              <h3 className={`font-semibold truncate ${effectiveTheme.text || "text-gray-900"}`}>
-                {contact.name}
-                {isSelf && (
-                  <span className="text-xs text-blue-500 ml-1">(You)</span>
-                )}
-              </h3>
-              
-              {/* Show custom category next to name for "Other" category view */}
-              {showCustomCategory && contact.businessCategory && (
-                <div className="flex items-center space-x-2 px-2 py-0.5 rounded-full bg-gray-200/50">
-                  <Briefcase
-                    className={`w-3 h-3 ${effectiveTheme.textSecondary || "text-gray-500"}`}
-                  />
-                  <span
-                    className={`text-xs font-medium ${effectiveTheme.textSecondary || "text-gray-500"}`}
-                  >
-                    {contact.businessCategory}
-                  </span>
-                </div>
-              )}
-            </div>
+<div className="flex items-center gap-4 flex-1 min-w-0">
+  {/* PROFILE PHOTO */}
+  <div className="relative flex-shrink-0">
+    <img
+      src={avatarSrc}
+      alt={contact.name}
+      className="w-12 h-12 rounded-full object-cover border border-gray-300"
+      loading="lazy"
+      onError={(e) => {
+        e.currentTarget.src =
+          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg";
+      }}
+    />
 
-            {/* Bio for Business Users */}
-            {isBusiness && (
-              <>
-                {contact.bio ? (
-                  <p
-                    className={`text-sm ${effectiveTheme.textSecondary || "text-gray-600"} mt-1`}
-                    style={{
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      lineHeight: '1.4em',
-                      maxHeight: '2.8em',
-                    }}
-                  >
-                    {contact.bio}
-                  </p>
-                ) : !showCustomCategory && contact.businessCategory ? (
-                  <div className="flex items-center space-x-1 mt-1">
-                    <Briefcase
-                      className={`w-3 h-3 ${effectiveTheme.textSecondary || "text-gray-500"}`}
-                    />
-                    <span
-                      className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"}`}
-                    >
-                      {contact.businessCategory}
-                    </span>
-                  </div>
-                ) : null}
-              </>
-            )}
-            </div>
+    {/* Online indicator */}
+    {contact.online && (
+      <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full" />
+    )}
+  </div>
+
+  {/* TEXT CONTENT */}
+  <div className="flex-1 min-w-0">
+    {/* Name + Category */}
+    <div className="flex items-center gap-4 flex-wrap">
+      <h3
+        className={`font-semibold truncate ${
+          effectiveTheme.text || "text-gray-900"
+        }`}
+      >
+        {contact.name}
+        {isSelf && (
+          <span className="text-xs text-blue-500 ml-1">(You)</span>
+        )}
+      </h3>
+
+      {/* Show custom category next to name for "Other" view */}
+      {showCustomCategory && contact.businessCategory && (
+        <div className="flex items-center space-x-1 px-2 py-0.5 rounded-full bg-gray-200/50">
+          <Briefcase
+            className={`w-3 h-3 ${
+              effectiveTheme.textSecondary || "text-gray-500"
+            }`}
+          />
+          <span
+            className={`text-xs font-medium ${
+              effectiveTheme.textSecondary || "text-gray-500"
+            }`}
+          >
+            {contact.businessCategory}
+          </span>
+        </div>
+      )}
+    </div>
+
+    {/* Bio for Business Users */}
+    {isBusiness && (
+      <>
+        {contact.bio ? (
+          <p
+            className={`text-sm mt-1 ${
+              effectiveTheme.textSecondary || "text-gray-600"
+            }`}
+            style={{
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              lineHeight: "1.4em",
+              maxHeight: "2.8em",
+            }}
+          >
+            {contact.bio}
+          </p>
+        ) : !showCustomCategory && contact.businessCategory ? (
+          <div className="flex items-center space-x-1 mt-1">
+            <Briefcase
+              className={`w-3 h-3 ${
+                effectiveTheme.textSecondary || "text-gray-500"
+              }`}
+            />
+            <span
+              className={`text-xs ${
+                effectiveTheme.textSecondary || "text-gray-500"
+              }`}
+            >
+              {contact.businessCategory}
+            </span>
+          </div>
+        ) : null}
+      </>
+    )}
+  </div>
+</div>
+
 
         {/* LEFT ACTION (for contacts list) */}
         {leftActionType && (
