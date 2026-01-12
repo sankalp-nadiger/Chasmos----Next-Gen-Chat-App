@@ -198,7 +198,7 @@ export const checkBlockStatus = asyncHandler(async (req, res) => {
   const otherUser = await User.findById(userId).select("blockedUsers");
   
   if (!otherUser) {
-    console.error(`[checkBlockStatus] Other user not found: ${userId}`);
+    //console.error(`[checkBlockStatus] Other user not found: ${userId}`);
     res.status(404);
     throw new Error("User not found");
   }

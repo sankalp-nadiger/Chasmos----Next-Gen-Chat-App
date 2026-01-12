@@ -376,22 +376,28 @@ const NewChat = ({
         });
         const bizData = await bizRes.json();
 
-        const mappedBusinesses = bizData.businesses.map((b) => ({
-          id: b._id,
-          name: b.name,
-          email: b.email,
-          avatar: b.avatar,
-          title: b.title,
-          business: b.businessName,
-          location: b.location,
-           bio: b.bio || "",
-          businessCategory: b.businessCategory,
-          isOnline: b.isOnline,
-          type: "business",
-          acceptedChatRequests: b.acceptedChatRequests || [],
-          sentChatRequests: b.sentChatRequests || [],
-          receivedChatRequests: b.receivedChatRequests || [],
-        }));
+        const mappedBusinesses = bizData.businesses.map((b) => {
+          const mapped = {
+            id: b._id,
+            _id: b._id,
+            name: b.name,
+            email: b.email,
+            avatar: b.avatar,
+            title: b.title,
+            business: b.businessName,
+            location: b.location,
+            bio: b.bio || "",
+            businessCategory: b.businessCategory,
+            isOnline: b.isOnline,
+            type: "business",
+            isBusiness: true,
+            acceptedChatRequests: b.acceptedChatRequests || [],
+            sentChatRequests: b.sentChatRequests || [],
+            receivedChatRequests: b.receivedChatRequests || [],
+          };
+          console.log('Business user mapped:', { name: mapped.name, id: mapped.id, _id: mapped._id, email: mapped.email });
+          return mapped;
+        });
 
         setBusinessUsers(mappedBusinesses);
         setBusinessCategoryCounts(bizData.categoryCounts || {});
@@ -796,18 +802,71 @@ const NewChat = ({
   // =========================
   // CHAT START
   // =========================
-  const handleStartChat = (contact) => {
+  const handleStartChat = async (contact) => {
     const userId =
       contact.userId || contact._id || contact.id || contact.participantId || contact.email;
 
-    const isExistingChat =
-      contact.chatId || (contact.id && String(contact.id).length === 24);
+    // Only consider it an existing chat if explicitly marked or has a chatId
+    const isExistingChat = Boolean(contact.chatId) || contact.isPendingChat === false;
 
-    onStartChat({
+    // Check if this is a business account and fetch auto message settings
+    let autoMessage = null;
+    const isBusinessContact = contact.isBusiness || contact.type === 'business';
+    console.log('NewChat.handleStartChat -> contact:', { userId, isBusinessContact, isBusiness: contact.isBusiness, type: contact.type, isExistingChat, chatId: contact.chatId, isPendingChat: contact.isPendingChat });
+    if (isBusinessContact && !isExistingChat) {
+      console.log('NewChat.handleStartChat -> Condition passed! Fetching auto message for business user');
+      try {
+        const token = localStorage.getItem("token");
+        const fetchUrl = `${API_BASE_URL}/api/user/${userId}`;
+        console.log('NewChat.handleStartChat -> Fetching from URL:', fetchUrl);
+        const response = await fetch(fetchUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        console.log("NewChat.handleStartChat -> fetched /api/user/" + userId + " status=", response.status);
+        if (response.ok) {
+          const userData = await response.json();
+          console.log("NewChat.handleStartChat -> userData", userData);
+          if (userData.autoMessageEnabled && userData.autoMessageText) {
+            autoMessage = {
+              enabled: true,
+              text: userData.autoMessageText,
+              businessUserName: contact.name || contact.chatName,
+              businessUserId: userId,
+            };
+          }
+        } else {
+          const text = await response.text().catch(() => null);
+          console.warn("NewChat.handleStartChat -> failed to fetch user data", response.status, text);
+        }
+      } catch (error) {
+        console.error("Error fetching business auto message:", error);
+      }
+    }
+
+    // Build payload and ensure pending chats have an `id` so ChattingPage can key messages correctly
+    const contactPayload = {
       ...contact,
       userId,
+      id: isExistingChat ? contact.id : userId,
       isPendingChat: !isExistingChat,
+      autoMessage,
+    };
+
+    console.log("NewChat.handleStartChat -> invoking onStartChat", {
+      userId,
+      isExistingChat,
+      autoMessage,
+      contactPayloadPreview: {
+        id: contactPayload.id,
+        name: contactPayload.name,
+        isPendingChat: contactPayload.isPendingChat,
+        autoMessage: !!contactPayload.autoMessage,
+      },
     });
+
+    onStartChat(contactPayload);
 
     onClose();
   };
@@ -815,12 +874,25 @@ const NewChat = ({
   const openOneToOneChat = async (contact) => {
     try {
       const userId = contact.id || contact._id || contact.email;
+      console.log('NewChat.openOneToOneChat -> called with:', { 
+        contactName: contact.name, 
+        contactId: contact.id, 
+        contact_id: contact._id, 
+        contactEmail: contact.email,
+        resolvedUserId: userId,
+        contactType: contact.type,
+        isBusiness: contact.isBusiness,
+        chatId: contact.chatId
+      });
 
-      if (contact.chatId || (contact.id && String(contact.id).length === 24)) {
+      // Only treat as existing chat if there's an actual chatId
+      if (contact.chatId) {
+        console.log('NewChat.openOneToOneChat -> has chatId, treating as existing chat');
         handleStartChat({ ...contact, isPendingChat: false, userId });
         return;
       }
 
+      console.log('NewChat.openOneToOneChat -> no chatId, treating as new chat');
       handleStartChat({ ...contact, isPendingChat: true, userId });
     } catch (err) {
       console.error("openOneToOneChat error:", err);
@@ -1035,7 +1107,14 @@ const NewChat = ({
                   </div>
               </div>
 
-              {filteredAllContacts.length === 0 ? (
+              {loading ? (
+                <div className="flex flex-col items-center justify-center p-8">
+                  <Loader2 className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4 animate-spin`} />
+                  <p className={`${effectiveTheme.text || "text-gray-900"} text-center`}>
+                    Loading contacts...
+                  </p>
+                </div>
+              ) : filteredAllContacts.length === 0 ? (
                 <div className="flex flex-col items-center justify-center p-8">
                   <MessageCircle
                     className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4`}
@@ -1075,7 +1154,14 @@ const NewChat = ({
                 </h3>
               </div>
 
-              {filteredRegisteredUsers.length === 0 ? (
+              {loading ? (
+                <div className="flex flex-col items-center justify-center p-8">
+                  <Loader2 className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4 animate-spin`} />
+                  <p className={`${effectiveTheme.text || "text-gray-900"} text-center`}>
+                    Loading users...
+                  </p>
+                </div>
+              ) : filteredRegisteredUsers.length === 0 ? (
                 <div className="flex flex-col items-center justify-center p-8">
                   <MessageCircle
                     className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4`}
@@ -1178,7 +1264,14 @@ const NewChat = ({
                   </h3>
                 </div>
 
-                {filteredBusinessContacts.length === 0 ? (
+                {loading ? (
+                  <div className="flex flex-col items-center justify-center p-8">
+                    <Loader2 className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4 animate-spin`} />
+                    <p className={`${effectiveTheme.text || "text-gray-900"} text-center`}>
+                      Loading business users...
+                    </p>
+                  </div>
+                ) : filteredBusinessContacts.length === 0 ? (
                   <div className="flex flex-col items-center justify-center p-8">
                     <MessageCircle
                       className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4`}

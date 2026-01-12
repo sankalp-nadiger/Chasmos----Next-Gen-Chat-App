@@ -32,6 +32,9 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
   const [googleContactsSyncEnabled, setGoogleContactsSyncEnabled] = useState(false);
   const [language, setLanguage] = useState("English");
   const [isLoading, setIsLoading] = useState(false);
+  const [isBusiness, setIsBusiness] = useState(false);
+  const [autoMessageEnabled, setAutoMessageEnabled] = useState(false);
+  const [autoMessageText, setAutoMessageText] = useState("");
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
@@ -52,6 +55,15 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
           setSoundEnabled(data.sound);
           if (data.googleContactsSyncEnabled !== undefined) {
             setGoogleContactsSyncEnabled(data.googleContactsSyncEnabled);
+          }
+          if (data.isBusiness !== undefined) {
+            setIsBusiness(data.isBusiness);
+          }
+          if (data.autoMessageEnabled !== undefined) {
+            setAutoMessageEnabled(data.autoMessageEnabled);
+          }
+          if (data.autoMessageText !== undefined) {
+            setAutoMessageText(data.autoMessageText);
           }
         }
       } catch (error) {
@@ -106,6 +118,20 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
   const handleGoogleContactsSyncChange = (value) => {
     setGoogleContactsSyncEnabled(value);
     updateSettings('googleContactsSyncEnabled', value);
+  };
+
+  const handleAutoMessageEnabledChange = (value) => {
+    setAutoMessageEnabled(value);
+    updateSettings('autoMessageEnabled', value);
+  };
+
+  const handleAutoMessageTextChange = (e) => {
+    const value = e.target.value;
+    setAutoMessageText(value);
+  };
+
+  const handleAutoMessageTextBlur = () => {
+    updateSettings('autoMessageText', autoMessageText);
   };
 
 
@@ -248,6 +274,68 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
             </div>
           </div>
 
+          {/* Business Auto Message Settings - Only for business accounts */}
+          {isBusiness && (
+            <div className="mb-6">
+              <h3 className={`text-sm font-semibold ${effectiveTheme.textSecondary} uppercase tracking-wide mb-3`}>
+                Business Auto Message
+              </h3>
+              <div className={`${effectiveTheme.secondary} rounded-lg border ${effectiveTheme.border} overflow-hidden`}>
+                {/* Auto Message Toggle */}
+                <div className={`flex items-center justify-between p-4 border-b ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors`}>
+                  <div className="flex items-center space-x-3">
+                    <div className={`w-10 h-10 rounded-lg ${effectiveTheme.accent} flex items-center justify-center`}>
+                      <Bell className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h4 className={`font-medium ${effectiveTheme.text}`}>
+                        Auto Message
+                      </h4>
+                      <p className={`text-sm ${effectiveTheme.textSecondary}`}>
+                        Send automatic initial message to new chats
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center">
+                    <button
+                      onClick={() => handleAutoMessageEnabledChange(!autoMessageEnabled)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        autoMessageEnabled ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          autoMessageEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Auto Message Text - Show only if enabled */}
+                {autoMessageEnabled && (
+                  <div className="p-4">
+                    <label className={`block text-sm font-medium ${effectiveTheme.text} mb-2`}>
+                      Auto Message Text
+                    </label>
+                    <textarea
+                      value={autoMessageText}
+                      onChange={handleAutoMessageTextChange}
+                      onBlur={handleAutoMessageTextBlur}
+                      placeholder="Enter your automatic message..."
+                      className={`w-full px-3 py-2 rounded-lg border ${effectiveTheme.border} ${effectiveTheme.secondary} ${effectiveTheme.text} focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none`}
+                      rows={3}
+                      maxLength={500}
+                    />
+                    <p className={`text-xs ${effectiveTheme.textSecondary} mt-1`}>
+                      {autoMessageText.length}/500 characters
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
 
           {/* App Information */}

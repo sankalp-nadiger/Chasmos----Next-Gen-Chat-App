@@ -1017,6 +1017,19 @@ const AuthPage = ({ onAuthenticated }) => {
           perspective: 1000px;
           transform-style: preserve-3d;
         }
+        /* Hide browser's native password reveal button (Edge, IE) */
+        input[type="password"]::-ms-reveal,
+        input[type="password"]::-ms-clear {
+          display: none;
+        }
+        /* Hide password reveal in other browsers */
+        input[type="password"]::-webkit-credentials-auto-fill-button,
+        input[type="password"]::-webkit-contacts-auto-fill-button {
+          visibility: hidden;
+          pointer-events: none;
+          position: absolute;
+          right: 0;
+        }
         `}
       </style>
       

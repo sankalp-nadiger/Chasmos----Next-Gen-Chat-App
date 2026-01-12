@@ -2722,6 +2722,12 @@ const ChattingPage = ({ onLogout, activeSection = "chats" }) => {
   const [activeNavItem, setActiveNavItem] = useState(activeSection); // 'chats', 'groups', 'documents', 'community', 'profile', 'settings'
   const [selectedContact, setSelectedContact] = useState(null);
 
+  // Keep a ref to the latest selectedContact to avoid stale closures
+  const selectedContactRef = useRef(selectedContact);
+  useEffect(() => {
+    selectedContactRef.current = selectedContact;
+  }, [selectedContact]);
+
   // Forward message state (supports multiple messages)
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [messagesToForward, setMessagesToForward] = useState([]);
@@ -6078,26 +6084,49 @@ const handleOpenGroupInfo = (group) => {
 
   // Remove useMemo and calculate messages directly in render
   const getMessagesForContact = (contactId, searchTerm = "") => {
-    if (!contactId) return [];
+    if (!contactId && !selectedContact) return [];
 
-    // Get messages for the contact, default to empty array
-    const contactMessages = messages[contactId] || [];
+    // Build candidate keys to look up messages under different shapes
+    const keys = new Set();
+    if (contactId) keys.add(String(contactId));
+    if (selectedContact) {
+      if (selectedContact.id) keys.add(String(selectedContact.id));
+      if (selectedContact.chatId) keys.add(String(selectedContact.chatId));
+      if (selectedContact._id) keys.add(String(selectedContact._id));
+    }
 
-    // If no search term, return all messages sorted by timestamp
+    // Collect messages from all candidate buckets
+    const collected = [];
+    for (const k of Array.from(keys)) {
+      if (messages && messages[k] && Array.isArray(messages[k])) {
+        collected.push(...messages[k]);
+      }
+    }
+
+    // Deduplicate by id/_id preserving order
+    const seen = new Set();
+    const deduped = [];
+    for (const m of collected) {
+      const mid = String(m && (m.id || m._id || ""));
+      if (!mid) continue;
+      if (seen.has(mid)) continue;
+      seen.add(mid);
+      deduped.push(m);
+    }
+
+    // If no search term, sort by timestamp and return
     if (!searchTerm.trim()) {
-      const sorted = [...contactMessages].sort(
-        (a, b) => a.timestamp - b.timestamp
-      );
+      const sorted = [...deduped].sort((a, b) => a.timestamp - b.timestamp);
       return filterDuplicateSystemMessages(sorted);
     }
 
-    // Filter messages by search term (case-insensitive)
-    const filtered = contactMessages
+    // Otherwise filter by search term and sort
+    const filtered = deduped
       .filter((message) => {
         const text = message.text || message.content || "";
         return text.toLowerCase().includes(searchTerm.toLowerCase());
       })
-      .sort((a, b) => a.timestamp - b.timestamp); // Optional: sort filtered messages too
+      .sort((a, b) => a.timestamp - b.timestamp);
 
     return filterDuplicateSystemMessages(filtered);
   };
@@ -6218,15 +6247,25 @@ const handleOpenGroupInfo = (group) => {
     );
   }, []);
 
-  // Handle sending message from the MessageInput component-Updated
-  // Updated handleSendMessageFromInput function
+  // Handle sending message from the MessageInput component
   const handleSendMessageFromInput = useCallback(
     (payload) => {
       if (!payload || !selectedContact) return;
 
-      // If this is a pending chat (opened from accepted request or chat icon), do not use id as chatId until chat is created
+      // If the currently opened contact has blocked the user, do not send or update recent chat
+      try {
+        if (selectedContact?.hasBlockedYou) {
+          console.log("[SEND] aborted: selected contact has blocked current user", selectedContact);
+          // Optionally show UI feedback here (toast) — avoid updating recentChats/messages
+          return;
+        }
+      } catch (e) {}
+
+      // If this is a pending chat (opened from accepted request or chat icon),
+      // or a business contact with automated messages enabled and no chat yet,
+      // do not use id as chatId until chat is created
       const getChatId = (payload) => {
-        if (selectedContact?.isPendingChat && !selectedContact.chatId) {
+        if ((selectedContact?.isPendingChat && !selectedContact.chatId) || ((selectedContact?.automessageenabled || selectedContact?.autoMessageEnabled) && !selectedContact.chatId)) {
           return null;
         }
         return (
@@ -6239,10 +6278,48 @@ const handleOpenGroupInfo = (group) => {
       };
 
       const appendMessage = (chatId, message) => {
-        setMessages((prev) => ({
-          ...prev,
-          [chatId]: [...(prev[chatId] || []), message],
-        }));
+        setMessages((prev) => {
+          const copy = { ...prev };
+
+          // Build candidate keys where the UI might look for messages
+          const candidates = new Set();
+          if (chatId !== null && chatId !== undefined && chatId !== "") candidates.add(String(chatId));
+          const sel = selectedContactRef.current;
+          if (sel && sel.chatId) candidates.add(String(sel.chatId));
+          if (sel && sel.id) candidates.add(String(sel.id));
+          if (sel && sel._id) candidates.add(String(sel._id));
+
+          // Ensure at least one key (fall back to provided chatId or a safe string)
+          if (candidates.size === 0) {
+            const fallback = chatId || (sel && (sel.id || sel.chatId)) || "unknown";
+            candidates.add(String(fallback));
+          }
+
+          candidates.forEach((key) => {
+            if (!copy[key]) copy[key] = [];
+            // Prevent immediate duplicates by id
+            const exists = copy[key].some(
+              (m) => String(m?._id || m?.id) === String(message?._id || message?.id)
+            );
+            if (!exists) copy[key] = [...copy[key], message];
+          });
+
+          try {
+            const wroteKeys = Array.from(candidates).join(",");
+            console.log("[APPEND] wrote message -> id:", String(message?._id || message?.id), "keys:", wroteKeys, "selectedContact:", selectedContactRef.current && (selectedContactRef.current.id || selectedContactRef.current.chatId));
+            console.trace("appendMessage trace");
+          } catch (e) {}
+
+          return copy;
+        });
+      };
+
+      // Wrapper to ensure we log when attempting to append from send flow
+      const writeAppend = (chatId, message, src = "send") => {
+        try {
+          console.log("[APPEND.OUT]", src, "->", String(message?._id || message?.id), "chatId:", String(chatId), "selected:", selectedContactRef.current && (selectedContactRef.current.id || selectedContactRef.current.chatId));
+        } catch (e) {}
+        appendMessage(chatId, message);
       };
 
       // Case 1: Server message object (already sent from backend)
@@ -6273,7 +6350,7 @@ const handleOpenGroupInfo = (group) => {
             repliedTo: payload.repliedTo || [],
           };
 
-          appendMessage(chatId, formatted);
+            writeAppend(chatId, formatted, "send-text-resp");
 
           if (socketRef.current?.emit) {
             lastSentAtRef.current = Date.now();
@@ -6355,7 +6432,13 @@ const handleOpenGroupInfo = (group) => {
             localStorage.getItem("token") ||
             localStorage.getItem("chasmos_auth_token");
           let chatId = getChatId(payload);
-          let userId = payload.userId;
+          let userId =
+            payload.userId ||
+            selectedContact?.userId ||
+            selectedContact?._id ||
+            selectedContact?.id ||
+            selectedContact?.email ||
+            null;
 
           const localMessage = {
             id: Date.now(),
@@ -6365,16 +6448,20 @@ const handleOpenGroupInfo = (group) => {
             timestamp: Date.now(),
             status: "sent",
           };
+          
+          // Append only after server confirms; keep local fallback below
 
           if (!token) {
-            appendMessage(chatId, localMessage);
+            writeAppend(chatId, localMessage, "local-fallback");
             return;
           }
 
-          // If this is a pending/accepted chat without a chatId, create the chat first
+          // If this is a pending/accepted chat without a chatId, or a business contact
+          // with automessage enabled and no chat yet, create the chat first
           if (
             (selectedContact?.isPendingChat ||
-              selectedContact?.isAcceptedRequest) &&
+              selectedContact?.isAcceptedRequest ||
+              (selectedContact?.automessageenabled || selectedContact?.autoMessageEnabled)) &&
             !chatId &&
             userId
           ) {
@@ -6391,6 +6478,20 @@ const handleOpenGroupInfo = (group) => {
               if (createChatRes.ok) {
                 const chatObj = await createChatRes.json();
                 chatId = String(chatObj._id || chatObj.id);
+                
+                // Move messages from old key (userId) to new key (chatId)
+                const oldKey = selectedContact?.id || selectedContact?.userId || userId;
+                if (oldKey && messages[oldKey] && oldKey !== chatId) {
+                  console.log("Moving messages from old key to new chatId", { oldKey, chatId, messageCount: messages[oldKey].length });
+                  setMessages((prev) => {
+                    const copy = { ...prev };
+                    if (!copy[chatId]) copy[chatId] = [];
+                    copy[chatId] = [...copy[oldKey], ...copy[chatId]];
+                    delete copy[oldKey];
+                    return copy;
+                  });
+                }
+                
                 setSelectedContact((prev) => ({
                   ...prev,
                   chatId: chatId,
@@ -6413,11 +6514,16 @@ const handleOpenGroupInfo = (group) => {
           }
 
           if (!chatId) {
-            appendMessage(chatId, localMessage);
+            writeAppend(chatId, localMessage, "local-create-chat");
             return;
           }
 
           try {
+            // Check if we need to send auto message first
+            const currentMessages = messages[chatId] || [];
+            const hasAutoMessage = currentMessages.some(m => m.isAutoMessage);
+            const autoMessageToSend = hasAutoMessage ? currentMessages.find(m => m.isAutoMessage) : null;
+
             const bodyObj = {
               content: payload.content,
               chatId,
@@ -6436,6 +6542,7 @@ const handleOpenGroupInfo = (group) => {
               if (payload.scheduledFor)
                 bodyObj.scheduledFor = payload.scheduledFor;
             }
+            
             const res = await fetch(`${API_BASE_URL}/api/message`, {
               method: "POST",
               headers: {
@@ -6487,6 +6594,34 @@ const handleOpenGroupInfo = (group) => {
                     delete copy[k];
                   }
                 });
+                
+                // Ensure chatId array exists
+                if (!copy[chatId]) copy[chatId] = [];
+                
+                // Only append messages locally when unauthenticated/offline.
+                const localToken =
+                  localStorage.getItem("token") ||
+                  localStorage.getItem("chasmos_auth_token");
+                if (!localToken) {
+                  // Add the main user message
+                  const formattedUserMsg = {
+                    id: sent._id || sent.id || Date.now(),
+                    type: "text",
+                    content: sent.content || sent.text || payload.content,
+                    sender: sent.sender?._id || sent.sender || "me",
+                    timestamp: new Date(
+                      sent.timestamp ||
+                        sent.scheduledFor ||
+                        sent.createdAt ||
+                        Date.now()
+                    ).getTime(),
+                    status: sent.status || (sent.isRead ? "read" : "sent"),
+                    repliedTo:
+                      sent.repliedTo || selectedReplies || payload.repliedTo || [],
+                  };
+                  copy[chatId].push(formattedUserMsg);
+                }
+                
                 return copy;
               });
 
@@ -6503,6 +6638,27 @@ const handleOpenGroupInfo = (group) => {
                   return c;
                 })
               );
+              
+              // Messages already added above, emit socket event and update UI
+              onClearReplySelection && onClearReplySelection();
+              if (socketRef.current?.emit) {
+                try {
+                  console.log("[SOCKET OUT] emit new message", {
+                    chatId,
+                    messageId: sent._id || sent.id,
+                  });
+                  lastSentAtRef.current = Date.now();
+                  socketRef.current.emit("new message", sent);
+                  if (autoMessageReceived) {
+                    socketRef.current.emit("new message", autoMessageReceived);
+                  }
+                } catch (e) {
+                  console.error("Error emitting new message", e);
+                }
+              }
+              updateRecentChat(chatId, payload.content, false);
+              updateContactPreview(chatId, payload.content, false);
+              return; // Early return since messages were already added
             }
 
             // If this message is scheduled, do not append it to the UI now;
@@ -6530,8 +6686,116 @@ const handleOpenGroupInfo = (group) => {
               repliedTo:
                 sent.repliedTo || selectedReplies || payload.repliedTo || [],
             };
+            // If backend created an auto-message, append it first so it appears before the user's message
+            if (autoMessageReceived) {
+              const formattedAutoMsg = {
+                id: autoMessageReceived._id || autoMessageReceived.id,
+                type: "text",
+                content: autoMessageReceived.content,
+                sender:
+                  (autoMessageReceived.sender && autoMessageReceived.sender._id) ||
+                  autoMessageReceived.sender ||
+                  "system",
+                timestamp: new Date(
+                  autoMessageReceived.timestamp ||
+                    autoMessageReceived.scheduledFor ||
+                    autoMessageReceived.createdAt ||
+                    Date.now()
+                ).getTime(),
+                status: autoMessageReceived.status || "sent",
+                attachments: autoMessageReceived.attachments || [],
+                isAutoMessage: true,
+              };
+              writeAppend(chatId, formattedAutoMsg, "send-auto-msg");
 
-            appendMessage(chatId, formatted);
+              // Also ensure the UI key `selectedContact.id` contains the auto message
+              try {
+                const sel = selectedContactRef.current;
+                const selKey = String((sel && (sel.id || sel.chatId)) || "");
+                if (selKey) {
+                  setMessages((prev) => {
+                    const copy = { ...prev };
+                    if (!copy[selKey]) copy[selKey] = [];
+                    const exists = copy[selKey].some((m) => String(m?._id || m?.id) === String(formattedAutoMsg.id));
+                    if (!exists) copy[selKey] = [...copy[selKey], formattedAutoMsg];
+                    return copy;
+                  });
+                }
+              } catch (e) {
+                /* ignore */
+              }
+            }
+
+            // Upgrade any optimistic temporary messages in-place to the confirmed server message
+            try {
+              setMessages((prev) => {
+                const copy = { ...(prev || {}) };
+                const keys = new Set();
+                if (chatId) keys.add(String(chatId));
+                const sc = selectedContactRef.current;
+                if (sc && sc.id) keys.add(String(sc.id));
+                if (sc && sc.chatId) keys.add(String(sc.chatId));
+                let upgraded = false;
+                for (const k of Array.from(keys)) {
+                  if (!copy[k] || !Array.isArray(copy[k])) continue;
+                  copy[k] = copy[k].map((m) => {
+                    try {
+                      if (!(m && m.isTemp && String(m.sender) === "me")) return m;
+                      const mContent = (m.content || "").toString().trim();
+                      const fContent = (formatted.content || "").toString().trim();
+                      let matched = false;
+                      if (mContent && fContent && mContent === fContent) matched = true;
+                      // attachments match by filename or mime
+                      const ma = Array.isArray(m.attachments) ? m.attachments : [];
+                      const fa = Array.isArray(formatted.attachments) ? formatted.attachments : [];
+                      if (!matched && ma.length && fa.length) {
+                        const mfn = ma[0].fileName || ma[0].file || "";
+                        const ffn = fa[0].fileName || fa[0].file || "";
+                        if (mfn && ffn && String(mfn) === String(ffn)) matched = true;
+                        const mm = ma[0].mimeType || ma[0].type || "";
+                        const fm = fa[0].mimeType || fa[0].type || "";
+                        if (!matched && mm && fm && String(mm) === String(fm)) matched = true;
+                      }
+                      // timestamp proximity as last resort
+                      if (!matched) {
+                        const mt = Number(m.timestamp || m.ts || m.id || 0);
+                        const ft = Number(formatted.timestamp || formatted.ts || 0);
+                        if (mt && ft && Math.abs(mt - ft) < 5000) matched = true;
+                      }
+                      if (matched) {
+                        upgraded = true;
+                        return { ...m, ...formatted, id: formatted.id, _id: formatted.id, isTemp: false };
+                      }
+                    } catch (e) {}
+                    return m;
+                  });
+                }
+                if (!upgraded) {
+                  // No temp to upgrade: fall back to appending
+                  const target = String(chatId || (selectedContactRef.current && (selectedContactRef.current.id || selectedContactRef.current.chatId)) || "");
+                  if (!copy[target]) copy[target] = [];
+                  copy[target] = [...copy[target], formatted];
+                }
+                return copy;
+              });
+            } catch (e) {}
+
+            // Also ensure the UI key `selectedContact.id` contains the user's message
+            try {
+              const sel = selectedContactRef.current;
+              const selKey = String((sel && (sel.id || sel.chatId)) || "");
+              if (selKey) {
+                setMessages((prev) => {
+                  const copy = { ...prev };
+                  if (!copy[selKey]) copy[selKey] = [];
+                  const exists = copy[selKey].some((m) => String(m?._id || m?.id) === String(formatted.id));
+                  if (!exists) copy[selKey] = [...copy[selKey], formatted];
+                  return copy;
+                });
+              }
+            } catch (e) {
+              /* ignore */
+            }
             onClearReplySelection && onClearReplySelection();
             if (socketRef.current?.emit) {
               try {
@@ -6574,9 +6838,11 @@ const handleOpenGroupInfo = (group) => {
             attachments: payload.attachments,
           };
 
+          // Append only after server confirms; keep local fallback below
+
           // Local fallback
           if (!token) {
-            appendMessage(chatId, localMessage);
+            writeAppend(chatId, localMessage, "local-attachment-fallback");
             updateRecentChat(
               chatId,
               localMessage.content || "Attachment",
@@ -6595,8 +6861,9 @@ const handleOpenGroupInfo = (group) => {
             return;
           }
 
-          // If this is a pending chat (opened from accepted request or chat icon), create the chat first
-          if (selectedContact?.isPendingChat && !chatId) {
+          // If this is a pending chat (opened from accepted request or chat icon),
+          // or a business contact with automessage enabled and no chat, create the chat first
+          if ((selectedContact?.isPendingChat || (selectedContact?.automessageenabled || selectedContact?.autoMessageEnabled)) && !chatId) {
             try {
               const userId =
                 selectedContact.userId ||
@@ -6634,7 +6901,7 @@ const handleOpenGroupInfo = (group) => {
           }
 
           if (!chatId) {
-            appendMessage(chatId, localMessage);
+            writeAppend(chatId, localMessage, "local-attachment-createchat");
             updateRecentChat(
               chatId,
               localMessage.content || "Attachment",
@@ -6687,6 +6954,7 @@ const handleOpenGroupInfo = (group) => {
 
             const resJson = await res.json();
             const sent = resJson && resJson.message ? resJson.message : resJson;
+            const autoMessageReceived = resJson && resJson.autoMessage ? resJson.autoMessage : null;
 
             if (resJson && resJson.chat) {
               const newChat = resJson.chat;
@@ -6757,7 +7025,81 @@ const handleOpenGroupInfo = (group) => {
                 sent.repliedTo || selectedReplies || payload.repliedTo || [],
             };
 
-            appendMessage(chatId, formatted);
+            // If backend created an auto-message, append it first so it appears before the user's message
+            if (autoMessageReceived) {
+              const formattedAutoMsg = {
+                id: autoMessageReceived._id || autoMessageReceived.id,
+                type: "text",
+                content: autoMessageReceived.content,
+                sender:
+                  (autoMessageReceived.sender && autoMessageReceived.sender._id) ||
+                  autoMessageReceived.sender ||
+                  "system",
+                timestamp: new Date(
+                  autoMessageReceived.timestamp ||
+                    autoMessageReceived.scheduledFor ||
+                    autoMessageReceived.createdAt ||
+                    Date.now()
+                ).getTime(),
+                status: autoMessageReceived.status || "sent",
+                attachments: autoMessageReceived.attachments || [],
+                isAutoMessage: true,
+              };
+              writeAppend(chatId, formattedAutoMsg, "send-attachment-auto");
+            }
+
+            // Upgrade any optimistic temporary attachments in-place to the confirmed server message
+            try {
+              setMessages((prev) => {
+                const copy = { ...(prev || {}) };
+                const keys = new Set();
+                if (chatId) keys.add(String(chatId));
+                const sc = selectedContactRef.current;
+                if (sc && sc.id) keys.add(String(sc.id));
+                if (sc && sc.chatId) keys.add(String(sc.chatId));
+                let upgraded = false;
+                for (const k of Array.from(keys)) {
+                  if (!copy[k] || !Array.isArray(copy[k])) continue;
+                  copy[k] = copy[k].map((m) => {
+                    try {
+                      if (!(m && m.isTemp && String(m.sender) === "me")) return m;
+                      const mContent = (m.content || "").toString().trim();
+                      const fContent = (formatted.content || "").toString().trim();
+                      let matched = false;
+                      if (mContent && fContent && mContent === fContent) matched = true;
+                      // attachments match by filename or mime
+                      const ma = Array.isArray(m.attachments) ? m.attachments : [];
+                      const fa = Array.isArray(formatted.attachments) ? formatted.attachments : [];
+                      if (!matched && ma.length && fa.length) {
+                        const mfn = ma[0].fileName || ma[0].file || "";
+                        const ffn = fa[0].fileName || fa[0].file || "";
+                        if (mfn && ffn && String(mfn) === String(ffn)) matched = true;
+                        const mm = ma[0].mimeType || ma[0].type || "";
+                        const fm = fa[0].mimeType || fa[0].type || "";
+                        if (!matched && mm && fm && String(mm) === String(fm)) matched = true;
+                      }
+                      // timestamp proximity as last resort
+                      if (!matched) {
+                        const mt = Number(m.timestamp || m.ts || m.id || 0);
+                        const ft = Number(formatted.timestamp || formatted.ts || 0);
+                        if (mt && ft && Math.abs(mt - ft) < 5000) matched = true;
+                      }
+                      if (matched) {
+                        upgraded = true;
+                        return { ...m, ...formatted, id: formatted.id, _id: formatted.id, isTemp: false };
+                      }
+                    } catch (e) {}
+                    return m;
+                  });
+                }
+                if (!upgraded) {
+                  const target = String(chatId || (selectedContactRef.current && (selectedContactRef.current.id || selectedContactRef.current.chatId)) || "");
+                  if (!copy[target]) copy[target] = [];
+                  copy[target] = [...copy[target], formatted];
+                }
+                return copy;
+              });
+            } catch (e) {}
             onClearReplySelection && onClearReplySelection();
 
             if (socketRef.current?.emit) {
@@ -6828,13 +7170,16 @@ const handleOpenGroupInfo = (group) => {
             status: "sent",
           };
 
+          // Append only after server confirms; keep local fallback below
+
           if (!token) {
-            appendMessage(chatId, localMessage);
+            writeAppend(chatId, localMessage, "local-poll-fallback");
             return;
           }
 
-          // If this is an accepted request without a chat, create the chat first
-          if (selectedContact?.isAcceptedRequest && !chatId) {
+          // If this is an accepted request without a chat, or a business contact with
+          // automessage enabled and no chat, create the chat first
+          if ((selectedContact?.isAcceptedRequest || (selectedContact?.automessageenabled || selectedContact?.autoMessageEnabled)) && !chatId) {
             try {
               const userId =
                 selectedContact.userId ||
@@ -6874,7 +7219,7 @@ const handleOpenGroupInfo = (group) => {
           }
 
           if (!chatId) {
-            appendMessage(chatId, localMessage);
+            writeAppend(chatId, localMessage, "local-poll-createchat");
             return;
           }
 
@@ -6954,7 +7299,56 @@ const handleOpenGroupInfo = (group) => {
               repliedTo: sent.repliedTo || selectedReplies || [],
             };
 
-            appendMessage(chatId, formatted);
+            // Upgrade any optimistic temporary poll messages in-place to the confirmed server message
+            try {
+              setMessages((prev) => {
+                const copy = { ...(prev || {}) };
+                const keys = new Set();
+                if (chatId) keys.add(String(chatId));
+                const sc = selectedContactRef.current;
+                if (sc && sc.id) keys.add(String(sc.id));
+                if (sc && sc.chatId) keys.add(String(sc.chatId));
+                let upgraded = false;
+                for (const k of Array.from(keys)) {
+                  if (!copy[k] || !Array.isArray(copy[k])) continue;
+                  copy[k] = copy[k].map((m) => {
+                    try {
+                      if (!(m && m.isTemp && String(m.sender) === "me")) return m;
+                      const mContent = (m.content || "").toString().trim();
+                      const fContent = (formatted.content || "").toString().trim();
+                      let matched = false;
+                      if (mContent && fContent && mContent === fContent) matched = true;
+                      const ma = Array.isArray(m.attachments) ? m.attachments : [];
+                      const fa = Array.isArray(formatted.attachments) ? formatted.attachments : [];
+                      if (!matched && ma.length && fa.length) {
+                        const mfn = ma[0].fileName || ma[0].file || "";
+                        const ffn = fa[0].fileName || fa[0].file || "";
+                        if (mfn && ffn && String(mfn) === String(ffn)) matched = true;
+                        const mm = ma[0].mimeType || ma[0].type || "";
+                        const fm = fa[0].mimeType || fa[0].type || "";
+                        if (!matched && mm && fm && String(mm) === String(fm)) matched = true;
+                      }
+                      if (!matched) {
+                        const mt = Number(m.timestamp || m.ts || m.id || 0);
+                        const ft = Number(formatted.timestamp || formatted.ts || 0);
+                        if (mt && ft && Math.abs(mt - ft) < 5000) matched = true;
+                      }
+                      if (matched) {
+                        upgraded = true;
+                        return { ...m, ...formatted, id: formatted.id, _id: formatted.id, isTemp: false };
+                      }
+                    } catch (e) {}
+                    return m;
+                  });
+                }
+                if (!upgraded) {
+                  const target = String(chatId || (selectedContactRef.current && (selectedContactRef.current.id || selectedContactRef.current.chatId)) || "");
+                  if (!copy[target]) copy[target] = [];
+                  copy[target] = [...copy[target], formatted];
+                }
+                return copy;
+              });
+            } catch (e) {}
             onClearReplySelection && onClearReplySelection();
             if (socketRef.current?.emit) {
               lastSentAtRef.current = Date.now();
@@ -7120,7 +7514,7 @@ const handleOpenGroupInfo = (group) => {
 
     socket.on("connected", (payload) => {
       try {
-        console.log("[SOCKET IN] connected ack payload:", payload);
+        //console.log("[SOCKET IN] connected ack payload:", payload);
       } catch (e) {}
       setSocketConnected(true);
     });
@@ -7290,17 +7684,9 @@ const handleOpenGroupInfo = (group) => {
       }
     });
 
-    // General debug: log any incoming socket events (helps diagnose missing listeners)
-    if (socket.onAny) {
-      socket.onAny((event, payload) => {
-        console.log("[SOCKET ANY]", event, payload);
-      });
-    }
-
     // Listen for delivery/read updates from server
     socket.on("message-delivered", (payload) => {
       try {
-        console.log("[SOCKET IN] message-delivered", payload);
         // Ignore delivery events that arrive immediately after we sent a message
         try {
           const now = Date.now();
@@ -7309,10 +7695,10 @@ const handleOpenGroupInfo = (group) => {
             : null;
           // Only suppress very short-lived echoes from the server — reduce window
           if (lastSentAtRef.current && delta !== null && delta < 300) {
-            console.log(
-              "[SOCKET IN] Ignoring message-delivered due to very recent local send (delta ms):",
-              delta
-            );
+            //console.log(
+            //  "[SOCKET IN] Ignoring message-delivered due to very recent local send (delta ms):",
+            //  delta
+            //);
             return;
           }
         } catch (e) {
@@ -7384,25 +7770,25 @@ const handleOpenGroupInfo = (group) => {
         if (Array.isArray(payload.delivered) && payload.delivered.length) {
           payload.delivered.forEach(handleMark);
           try {
-            console.log(
-              "[SOCKET IN] message-delivered applied delivered array count:",
-              payload.delivered.length
-            );
+            //console.log(
+            //  "[SOCKET IN] message-delivered applied delivered array count:",
+            //  payload.delivered.length
+            //);
           } catch (e) {}
         } else if (payload.messageId) {
           handleMark(payload);
           try {
-            console.log(
-              "[SOCKET IN] message-delivered applied single messageId:",
-              payload.messageId || payload.message_id
-            );
+            //console.log(
+            //  "[SOCKET IN] message-delivered applied single messageId:",
+            //  payload.messageId || payload.message_id
+            //);
           } catch (e) {}
         } else {
           try {
-            console.log(
-              "[SOCKET IN] message-delivered received unknown payload shape:",
-              payload
-            );
+            //console.log(
+            //  "[SOCKET IN] message-delivered received unknown payload shape:",
+            //  payload
+            //);
           } catch (e) {}
         }
       } catch (e) {
@@ -7412,7 +7798,7 @@ const handleOpenGroupInfo = (group) => {
 
     socket.on("message-read", (payload) => {
       try {
-        console.log("[SOCKET IN] message-read", payload);
+        //console.log("[SOCKET IN] message-read", payload);
         // Ignore message-read events that arrive immediately after we sent a message
         // This avoids server echoes that incorrectly mark local messages as read.
         try {
@@ -7429,10 +7815,10 @@ const handleOpenGroupInfo = (group) => {
           // Ignore message-read events that arrive very shortly after we sent a message
           // Only suppress very short-lived echoes from the server — reduce window
           if (lastSentAtRef.current && delta !== null && delta < 300) {
-            console.log(
-              "[SOCKET IN] Ignoring message-read due to very recent local send (delta ms):",
-              delta
-            );
+            //console.log(
+            //  "[SOCKET IN] Ignoring message-read due to very recent local send (delta ms):",
+            //  delta
+            //);
             return;
           }
         } catch (e) {
@@ -7482,10 +7868,10 @@ const handleOpenGroupInfo = (group) => {
               }
             });
             try {
-              console.log(
-                "[SOCKET IN] message-read applied reader update for chat",
-                key
-              );
+              //console.log(
+              //  "[SOCKET IN] message-read applied reader update for chat",
+              //  key
+              //);
             } catch (e) {}
           } else {
             // Unknown payload shape: do not change messages
@@ -7494,14 +7880,14 @@ const handleOpenGroupInfo = (group) => {
           return copy;
         });
         try {
-          console.log(
-            "[SOCKET IN] message-read processed for chat",
-            key,
-            "updatedIds:",
-            Array.isArray(updatedIds) ? updatedIds.length : "n/a",
-            "reader:",
-            Boolean(reader)
-          );
+          //console.log(
+          //  "[SOCKET IN] message-read processed for chat",
+          //  key,
+          //  "updatedIds:",
+          //  Array.isArray(updatedIds) ? updatedIds.length : "n/a",
+          //  "reader:",
+          //  Boolean(reader)
+          //);
         } catch (e) {}
 
         // If server indicates some messages reached full-read (updatedIds) or a reader is present,
@@ -8251,19 +8637,94 @@ const handleOpenGroupInfo = (group) => {
           }
 
           setMessages((prev) => {
-            const existing = prev?.[appendKey] || [];
-            const alreadyHas = existing.some(
-              (m) => String(m.id || m._id) === String(formatted.id)
-            );
-            if (alreadyHas) {
-              return prev;
+            const idStr = String(formatted.id);
+            const copy = { ...(prev || {}) };
+
+            // If message already exists in any chat bucket, merge/update it and avoid appending
+            for (const k of Object.keys(copy)) {
+              const arr = copy[k] || [];
+              const idx = arr.findIndex(
+                (m) => String(m.id || m._id) === idStr
+              );
+              if (idx !== -1) {
+                // Merge server-provided fields into existing message to keep data fresh
+                try {
+                  arr[idx] = { ...arr[idx], ...formatted };
+                } catch (e) {}
+                copy[k] = arr;
+                return copy;
+              }
             }
+
+            // Not found anywhere — choose the best target key to append the message to.
+            const candidates = [];
+            if (appendKey) candidates.push(String(appendKey));
+            if (chatId) candidates.push(String(chatId));
+            if (newMessage && newMessage.chat)
+              candidates.push(String(newMessage.chat._id || newMessage.chat.id || ""));
+            if (senderId) candidates.push(String(senderId));
+            if (selectedContact)
+              candidates.push(
+                String(
+                  selectedContact.chatId || selectedContact.id || selectedContact._id || ""
+                )
+              );
+
+            // dedupe and remove falsy
+            const uniqCandidates = Array.from(new Set((candidates || []).filter(Boolean)));
+
+            // Prefer an existing bucket in prev, otherwise fall back to appendKey or first candidate
+            let targetKey = null;
+            for (const c of uniqCandidates) {
+              if (prev && Object.prototype.hasOwnProperty.call(prev, c)) {
+                targetKey = c;
+                break;
+              }
+            }
+            if (!targetKey) targetKey = String(appendKey || uniqCandidates[0] || chatId || senderId || "");
+
+            const existing = prev?.[targetKey] || [];
             const updatedMessages = [...existing, formatted];
             const filtered = filterDuplicateSystemMessages(updatedMessages);
-            return {
-              ...prev,
-              [appendKey]: filtered,
-            };
+            let out = { ...prev, [targetKey]: filtered };
+
+            // Ensure the appended message is available under all candidate keys and selectedContact variants
+            try {
+              // Propagate to candidate keys (chatId, senderId, appendKey, newMessage.chat)
+              for (const c of uniqCandidates) {
+                if (!c) continue;
+                if (c === targetKey) continue;
+                const arr = out[c] && Array.isArray(out[c]) ? out[c].slice() : [];
+                const exists = arr.some((m) => String(m.id || m._id) === String(formatted.id));
+                if (!exists) {
+                  arr.push(formatted);
+                  out[c] = filterDuplicateSystemMessages(arr);
+                }
+              }
+
+              // Also mirror to selectedContact keys if present
+              const scKeys = [];
+              if (selectedContact) {
+                if (selectedContact.id) scKeys.push(String(selectedContact.id));
+                if (selectedContact.chatId) scKeys.push(String(selectedContact.chatId));
+                if (selectedContact._id) scKeys.push(String(selectedContact._id));
+              }
+              const uniqScKeys = Array.from(new Set(scKeys.filter(Boolean)));
+              for (const k of uniqScKeys) {
+                if (!k) continue;
+                const arr = out[k] && Array.isArray(out[k]) ? out[k].slice() : [];
+                const exists = arr.some((m) => String(m.id || m._id) === String(formatted.id));
+                if (!exists) {
+                  arr.push(formatted);
+                  out[k] = filterDuplicateSystemMessages(arr);
+                }
+              }
+            } catch (e) {}
+
+            try {
+              console.log("[SOCKET] appended message -> key:", targetKey, "id:", formatted.id, "propagatedKeys:", uniqCandidates);
+            } catch (e) {}
+            return out;
           });
         })();
         // end async population
@@ -9098,6 +9559,7 @@ const handleOpenGroupInfo = (group) => {
     userId: currentUserId,
     onScreenshotDetected: handleScreenshotDetected,
     enabled: !selectedContact?.isDocument,
+    isPendingChat: selectedContact?.isPendingChat || (!selectedContact?.chatId && !!selectedContact?.id),
   });
 
   const handleReplaceOldestPin = useCallback(async () => {
@@ -9411,12 +9873,21 @@ const handleOpenGroupInfo = (group) => {
 
   const handleStartNewChat = useCallback(
     async (contact) => {
+      console.log("ChattingPage.handleStartNewChat -> received contact", {
+        id: contact?.id,
+        userId: contact?.userId,
+        chatId: contact?.chatId,
+        name: contact?.name,
+        hasAutoMessage: !!contact?.autoMessage,
+      });
       setSelectedContact(normalizeContact(contact));
       setShowNewChat(false);
 
-      // If contact has a chatId or id (existing chat), fetch messages
+      // If contact has a real chatId (existing chat with messages), fetch them
       const chatId = contact.chatId || contact.id;
-      if (chatId && String(chatId).length === 24) {
+      const isExistingChat = Boolean(contact.chatId) || contact.isPendingChat === false;
+      
+      if (isExistingChat && chatId && String(chatId).length === 24) {
         // Only fetch if not already loaded
         if (!messages[chatId] || messages[chatId].length === 0) {
           try {
@@ -9460,13 +9931,41 @@ const handleOpenGroupInfo = (group) => {
           }
         }
       } else {
-        // For new/pending chats, just initialize empty messages
-        if (!messages[contact.id]) {
-          setMessages((prev) => ({
-            ...prev,
-            [contact.id]: [],
-          }));
+        // For new/pending chats, initialize with auto message if available
+        const initialMessages = [];
+        
+        // Check if business account has auto message enabled
+        if (contact.autoMessage && contact.autoMessage.enabled) {
+          console.log("ChattingPage.handleStartNewChat -> Business has auto message, will display immediately", { 
+            contactId: contact.id, 
+            userId: contact.userId, 
+            textSnippet: (contact.autoMessage.text || '').slice(0,40) 
+          });
+          
+          // Add auto message to display immediately
+          initialMessages.push({
+            id: `auto-msg-${Date.now()}`,
+            type: "text",
+            content: contact.autoMessage.text,
+            sender: {
+              _id: contact.autoMessage.businessUserId,
+              name: contact.autoMessage.businessUserName,
+              avatar: contact.avatar,
+            },
+            timestamp: Date.now(),
+            status: "sent",
+            attachments: [],
+            isSystemMessage: false,
+            isAutoMessage: true, // Flag to identify this as an auto message
+          });
         }
+        
+        // Always set messages for new/pending chats
+        console.log("ChattingPage.handleStartNewChat -> setting messages for contact key", { key: contact.id, initialCount: initialMessages.length });
+        setMessages((prev) => ({
+          ...prev,
+          [contact.id]: initialMessages,
+        }));
       }
     },
     [messages]

@@ -61,6 +61,46 @@ export const accessChat = asyncHandler(async (req, res) => {
 
     try {
       const createdChat = await Chat.create(chatData);
+      console.log('[accessChat] ✅ New chat created:', createdChat._id);
+      
+      // Check if the other user (userId) has auto message enabled
+      try {
+        const otherUser = await User.findById(userId).select('autoMessageEnabled autoMessageText name avatar');
+        console.log('[accessChat] Other user auto message check:', {
+          userId,
+          autoMessageEnabled: otherUser?.autoMessageEnabled,
+          hasAutoMessageText: !!otherUser?.autoMessageText
+        });
+        
+        if (otherUser && otherUser.autoMessageEnabled && otherUser.autoMessageText) {
+          console.log('[accessChat] Creating auto message for new chat...');
+          
+          // Create auto message immediately
+          const autoMsg = await Message.create({
+            sender: userId,
+            content: otherUser.autoMessageText,
+            chat: createdChat._id,
+            type: "text",
+            attachments: [],
+            repliedTo: [],
+            mentions: [],
+            isScheduled: false,
+            scheduledFor: null,
+            scheduledSent: false,
+            poll: null,
+          });
+          
+          console.log('[accessChat] ✅ Auto message created and saved:', autoMsg._id);
+          
+          // Populate the auto message
+          await autoMsg.populate("sender", "name avatar");
+          await autoMsg.populate("chat");
+        }
+      } catch (autoMsgErr) {
+        console.error('[accessChat] ❌ Failed to create auto message:', autoMsgErr.message);
+        // Don't fail the chat creation if auto message fails
+      }
+      
       const FullChat = await Chat.findOne({ _id: createdChat._id }).populate(
         "users",
         "-password"
