@@ -828,10 +828,11 @@ const NewChat = ({
         if (response.ok) {
           const userData = await response.json();
           console.log("NewChat.handleStartChat -> userData", userData);
-          if (userData.autoMessageEnabled && userData.autoMessageText) {
+          if (userData.autoMessageEnabled && (userData.autoMessageText || userData.autoMessageImage)) {
             autoMessage = {
               enabled: true,
-              text: userData.autoMessageText,
+              text: userData.autoMessageText || "",
+              image: userData.autoMessageImage || "",
               businessUserName: contact.name || contact.chatName,
               businessUserId: userId,
             };
@@ -890,6 +891,34 @@ const NewChat = ({
         console.log('NewChat.openOneToOneChat -> has chatId, treating as existing chat');
         handleStartChat({ ...contact, isPendingChat: false, userId });
         return;
+      }
+
+      // For all users without chatId, check if a chat already exists
+      if (userId) {
+        try {
+          const token = localStorage.getItem("token");
+          console.log('NewChat.openOneToOneChat -> Checking for existing chat with user');
+          const response = await fetch(`${API_BASE_URL}/api/chat`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ userId }),
+          });
+
+          if (response.ok) {
+            const chatData = await response.json();
+            const existingChatId = chatData._id || chatData.id;
+            console.log('NewChat.openOneToOneChat -> Found existing chat:', existingChatId);
+            // Chat exists, treat as existing (no auto message for business, load messages for all)
+            handleStartChat({ ...contact, chatId: existingChatId, isPendingChat: false, userId });
+            return;
+          }
+        } catch (err) {
+          console.error('NewChat.openOneToOneChat -> Error checking for existing chat:', err);
+          // Continue to treat as new chat if check fails
+        }
       }
 
       console.log('NewChat.openOneToOneChat -> no chatId, treating as new chat');
@@ -1005,7 +1034,7 @@ const NewChat = ({
                 ? (selectedBusinessCategory
                     ? `${selectedBusinessCategory.name} - ${filteredBusinessContacts.length} users`
                     : `${businessUsers.length} users across all business categories`)
-                : `${filteredAllContacts.length + filteredRegisteredUsers.length} users available`}
+                : `${filteredAllContacts.length + filteredRegisteredUsers.length} contacts available`}
             </p>
           </div>
         </div>
@@ -1591,7 +1620,8 @@ const avatarSrc =
         {/* RIGHT ICONS */}
         {!hideRightActions && (
           <div className="flex items-center space-x-2 flex-shrink-0">
-            {isBusiness || chatStatus === "accepted" || isMyEmailAcceptedByContact ? (
+            {/* Don't show chat icon for self */}
+            {isSelf ? null : (isBusiness || chatStatus === "accepted" || isMyEmailAcceptedByContact ? (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1638,7 +1668,7 @@ const avatarSrc =
               >
                 <Send className="w-5 h-5 text-blue-500" />
               </button>
-            )}
+            ))}
           </div>
         )}
       </motion.div>
@@ -1665,9 +1695,9 @@ const avatarSrc =
           >
             <div className="flex justify-between mb-4">
               <div>
-                <h2 className={`font-semibold text-lg ${effectiveTheme.text || 'text-gray-100'}`}>{contact.name}</h2>
+                <h2 className={`font-semibold text-lg ${effectiveTheme.text || 'text-gray-900'}`}>{contact.name}</h2>
                 {contact.bio && (
-                  <p className={`text-sm mt-1 truncate ${effectiveTheme.textSecondary || 'text-gray-300'}`}>
+                  <p className={`text-sm mt-1 truncate ${effectiveTheme.textSecondary || 'text-gray-600'}`}>
                     {contact.bio}
                   </p>
                 )}
@@ -1682,8 +1712,8 @@ const avatarSrc =
 
             {inviteStatus === "sent" && (
               <div className={`p-4 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'bg-yellow-900/20 border-yellow-700' : 'bg-yellow-500/10 border-yellow-300'}`}>
-                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-100'}`}>Invite pending</p>
-                <p className={`text-xs ${effectiveTheme.textSecondary || 'text-gray-300'}`}>
+                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-900'}`}>Invite pending</p>
+                <p className={`text-xs ${effectiveTheme.textSecondary || 'text-gray-600'}`}>
                   Waiting for {contact.name} to accept
                 </p>
               </div>
@@ -1691,7 +1721,7 @@ const avatarSrc =
 
             {inviteStatus === "incoming" && (
               <div className={`p-4 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'bg-orange-900/20 border-orange-700' : 'bg-orange-500/10 border-orange-300'}`}>
-                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-100'}`}>Incoming request</p>
+                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-900'}`}>Incoming request</p>
                 <div className="flex justify-end mt-4">
                   <button
                     onClick={handleAcceptInvite}
@@ -1727,7 +1757,7 @@ const avatarSrc =
                 <>
                   <button
                     onClick={() => setShowInviteModal(false)}
-                    className={`px-4 py-2 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'border-gray-700 text-gray-200' : ''}`}
+                    className={`px-4 py-2 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'border-gray-700 text-gray-200' : 'border-gray-300 text-gray-900'}`}
                   >
                     Cancel
                   </button>

@@ -146,6 +146,10 @@ const userSchema = new mongoose.Schema(
     autoMessageText: {
       type: String,
       default: ""
+    },
+    autoMessageImage: {
+      type: String,
+      default: ""
     }
   },
   

@@ -363,13 +363,13 @@ export const getUserById = asyncHandler(async (req, res) => {
   if (userId.includes('@')) {
     // Search by email
     user = await User.findOne({ email: userId.toLowerCase() }).select(
-      "name email avatar bio isBusiness businessCategory autoMessageEnabled autoMessageText"
+      "name email avatar bio isBusiness businessCategory autoMessageEnabled autoMessageText autoMessageImage"
     );
   } else {
     // Search by ObjectId
     try {
       user = await User.findById(userId).select(
-        "name email avatar bio isBusiness businessCategory autoMessageEnabled autoMessageText"
+        "name email avatar bio isBusiness businessCategory autoMessageEnabled autoMessageText autoMessageImage"
       );
     } catch (error) {
       console.error('getUserById -> Invalid ObjectId format:', userId, error);
@@ -386,7 +386,7 @@ export const getUserById = asyncHandler(async (req, res) => {
 
 // Get user settings
 export const getUserSettings = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id).select("settings googleContactsSyncEnabled isBusiness autoMessageEnabled autoMessageText");
+  const user = await User.findById(req.user._id).select("settings googleContactsSyncEnabled isBusiness autoMessageEnabled autoMessageText autoMessageImage");
 
   if (user) {
     res.status(200).json({
@@ -396,6 +396,7 @@ export const getUserSettings = asyncHandler(async (req, res) => {
       isBusiness: user.isBusiness ?? false,
       autoMessageEnabled: user.autoMessageEnabled ?? false,
       autoMessageText: user.autoMessageText ?? "",
+      autoMessageImage: user.autoMessageImage ?? "",
     });
   } else {
     res.status(404);
@@ -431,6 +432,28 @@ export const updateUserSettings = asyncHandler(async (req, res) => {
     if (req.body.autoMessageText !== undefined) {
       user.autoMessageText = req.body.autoMessageText;
     }
+    // Handle auto message image upload
+    if (req.body.autoMessageImage !== undefined) {
+      // If it's a base64 image, upload to Supabase
+      if (req.body.autoMessageImage && req.body.autoMessageImage.startsWith('data:image/')) {
+        try {
+          const { uploadBase64ImageToSupabase } = await import("../utils/uploadToSupabase.js");
+          const imageUrl = await uploadBase64ImageToSupabase(
+            req.body.autoMessageImage,
+            "avatars",
+            "auto-messages"
+          );
+          user.autoMessageImage = imageUrl;
+        } catch (err) {
+          console.error("Auto message image upload failed:", err);
+          // Continue without failing the entire request
+          user.autoMessageImage = "";
+        }
+      } else {
+        // If it's empty string or URL, use it directly
+        user.autoMessageImage = req.body.autoMessageImage;
+      }
+    }
 
     const updatedUser = await user.save();
 
@@ -440,6 +463,7 @@ export const updateUserSettings = asyncHandler(async (req, res) => {
       googleContactsSyncEnabled: updatedUser.googleContactsSyncEnabled ?? false,
       autoMessageEnabled: updatedUser.autoMessageEnabled ?? false,
       autoMessageText: updatedUser.autoMessageText ?? "",
+      autoMessageImage: updatedUser.autoMessageImage ?? "",
     });
   } else {
     res.status(404);

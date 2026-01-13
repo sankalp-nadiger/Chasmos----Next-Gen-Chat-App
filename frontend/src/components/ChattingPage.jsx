@@ -9939,14 +9939,27 @@ const handleOpenGroupInfo = (group) => {
           console.log("ChattingPage.handleStartNewChat -> Business has auto message, will display immediately", { 
             contactId: contact.id, 
             userId: contact.userId, 
-            textSnippet: (contact.autoMessage.text || '').slice(0,40) 
+            textSnippet: (contact.autoMessage.text || '').slice(0,40),
+            hasImage: !!contact.autoMessage.image
           });
+          
+          // Prepare attachments array if image exists
+          const autoMessageAttachments = [];
+          if (contact.autoMessage.image) {
+            autoMessageAttachments.push({
+              _id: `auto-msg-img-${Date.now()}`,
+              url: contact.autoMessage.image,
+              fileType: 'image',
+              mimeType: 'image/jpeg',
+              fileName: 'auto-message-image.jpg'
+            });
+          }
           
           // Add auto message to display immediately
           initialMessages.push({
             id: `auto-msg-${Date.now()}`,
-            type: "text",
-            content: contact.autoMessage.text,
+            type: contact.autoMessage.image ? "attachment" : "text",
+            content: contact.autoMessage.text || "",
             sender: {
               _id: contact.autoMessage.businessUserId,
               name: contact.autoMessage.businessUserName,
@@ -9954,7 +9967,7 @@ const handleOpenGroupInfo = (group) => {
             },
             timestamp: Date.now(),
             status: "sent",
-            attachments: [],
+            attachments: autoMessageAttachments,
             isSystemMessage: false,
             isAutoMessage: true, // Flag to identify this as an auto message
           });
