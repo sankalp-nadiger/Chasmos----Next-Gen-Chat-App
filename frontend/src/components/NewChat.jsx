@@ -376,22 +376,28 @@ const NewChat = ({
         });
         const bizData = await bizRes.json();
 
-        const mappedBusinesses = bizData.businesses.map((b) => ({
-          id: b._id,
-          name: b.name,
-          email: b.email,
-          avatar: b.avatar,
-          title: b.title,
-          business: b.businessName,
-          location: b.location,
-           bio: b.bio || "",
-          businessCategory: b.businessCategory,
-          isOnline: b.isOnline,
-          type: "business",
-          acceptedChatRequests: b.acceptedChatRequests || [],
-          sentChatRequests: b.sentChatRequests || [],
-          receivedChatRequests: b.receivedChatRequests || [],
-        }));
+        const mappedBusinesses = bizData.businesses.map((b) => {
+          const mapped = {
+            id: b._id,
+            _id: b._id,
+            name: b.name,
+            email: b.email,
+            avatar: b.avatar,
+            title: b.title,
+            business: b.businessName,
+            location: b.location,
+            bio: b.bio || "",
+            businessCategory: b.businessCategory,
+            isOnline: b.isOnline,
+            type: "business",
+            isBusiness: true,
+            acceptedChatRequests: b.acceptedChatRequests || [],
+            sentChatRequests: b.sentChatRequests || [],
+            receivedChatRequests: b.receivedChatRequests || [],
+          };
+          console.log('Business user mapped:', { name: mapped.name, id: mapped.id, _id: mapped._id, email: mapped.email });
+          return mapped;
+        });
 
         setBusinessUsers(mappedBusinesses);
         setBusinessCategoryCounts(bizData.categoryCounts || {});
@@ -796,18 +802,72 @@ const NewChat = ({
   // =========================
   // CHAT START
   // =========================
-  const handleStartChat = (contact) => {
+  const handleStartChat = async (contact) => {
     const userId =
       contact.userId || contact._id || contact.id || contact.participantId || contact.email;
 
-    const isExistingChat =
-      contact.chatId || (contact.id && String(contact.id).length === 24);
+    // Only consider it an existing chat if explicitly marked or has a chatId
+    const isExistingChat = Boolean(contact.chatId) || contact.isPendingChat === false;
 
-    onStartChat({
+    // Check if this is a business account and fetch auto message settings
+    let autoMessage = null;
+    const isBusinessContact = contact.isBusiness || contact.type === 'business';
+    console.log('NewChat.handleStartChat -> contact:', { userId, isBusinessContact, isBusiness: contact.isBusiness, type: contact.type, isExistingChat, chatId: contact.chatId, isPendingChat: contact.isPendingChat });
+    if (isBusinessContact && !isExistingChat) {
+      console.log('NewChat.handleStartChat -> Condition passed! Fetching auto message for business user');
+      try {
+        const token = localStorage.getItem("token");
+        const fetchUrl = `${API_BASE_URL}/api/user/${userId}`;
+        console.log('NewChat.handleStartChat -> Fetching from URL:', fetchUrl);
+        const response = await fetch(fetchUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        console.log("NewChat.handleStartChat -> fetched /api/user/" + userId + " status=", response.status);
+        if (response.ok) {
+          const userData = await response.json();
+          console.log("NewChat.handleStartChat -> userData", userData);
+          if (userData.autoMessageEnabled && (userData.autoMessageText || userData.autoMessageImage)) {
+            autoMessage = {
+              enabled: true,
+              text: userData.autoMessageText || "",
+              image: userData.autoMessageImage || "",
+              businessUserName: contact.name || contact.chatName,
+              businessUserId: userId,
+            };
+          }
+        } else {
+          const text = await response.text().catch(() => null);
+          console.warn("NewChat.handleStartChat -> failed to fetch user data", response.status, text);
+        }
+      } catch (error) {
+        console.error("Error fetching business auto message:", error);
+      }
+    }
+
+    // Build payload and ensure pending chats have an `id` so ChattingPage can key messages correctly
+    const contactPayload = {
       ...contact,
       userId,
+      id: isExistingChat ? contact.id : userId,
       isPendingChat: !isExistingChat,
+      autoMessage,
+    };
+
+    console.log("NewChat.handleStartChat -> invoking onStartChat", {
+      userId,
+      isExistingChat,
+      autoMessage,
+      contactPayloadPreview: {
+        id: contactPayload.id,
+        name: contactPayload.name,
+        isPendingChat: contactPayload.isPendingChat,
+        autoMessage: !!contactPayload.autoMessage,
+      },
     });
+
+    onStartChat(contactPayload);
 
     onClose();
   };
@@ -815,12 +875,53 @@ const NewChat = ({
   const openOneToOneChat = async (contact) => {
     try {
       const userId = contact.id || contact._id || contact.email;
+      console.log('NewChat.openOneToOneChat -> called with:', { 
+        contactName: contact.name, 
+        contactId: contact.id, 
+        contact_id: contact._id, 
+        contactEmail: contact.email,
+        resolvedUserId: userId,
+        contactType: contact.type,
+        isBusiness: contact.isBusiness,
+        chatId: contact.chatId
+      });
 
-      if (contact.chatId || (contact.id && String(contact.id).length === 24)) {
+      // Only treat as existing chat if there's an actual chatId
+      if (contact.chatId) {
+        console.log('NewChat.openOneToOneChat -> has chatId, treating as existing chat');
         handleStartChat({ ...contact, isPendingChat: false, userId });
         return;
       }
 
+      // For all users without chatId, check if a chat already exists
+      if (userId) {
+        try {
+          const token = localStorage.getItem("token");
+          console.log('NewChat.openOneToOneChat -> Checking for existing chat with user');
+          const response = await fetch(`${API_BASE_URL}/api/chat`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ userId }),
+          });
+
+          if (response.ok) {
+            const chatData = await response.json();
+            const existingChatId = chatData._id || chatData.id;
+            console.log('NewChat.openOneToOneChat -> Found existing chat:', existingChatId);
+            // Chat exists, treat as existing (no auto message for business, load messages for all)
+            handleStartChat({ ...contact, chatId: existingChatId, isPendingChat: false, userId });
+            return;
+          }
+        } catch (err) {
+          console.error('NewChat.openOneToOneChat -> Error checking for existing chat:', err);
+          // Continue to treat as new chat if check fails
+        }
+      }
+
+      console.log('NewChat.openOneToOneChat -> no chatId, treating as new chat');
       handleStartChat({ ...contact, isPendingChat: true, userId });
     } catch (err) {
       console.error("openOneToOneChat error:", err);
@@ -933,7 +1034,7 @@ const NewChat = ({
                 ? (selectedBusinessCategory
                     ? `${selectedBusinessCategory.name} - ${filteredBusinessContacts.length} users`
                     : `${businessUsers.length} users across all business categories`)
-                : `${filteredAllContacts.length + filteredRegisteredUsers.length} users available`}
+                : `${filteredAllContacts.length + filteredRegisteredUsers.length} contacts available`}
             </p>
           </div>
         </div>
@@ -1035,7 +1136,14 @@ const NewChat = ({
                   </div>
               </div>
 
-              {filteredAllContacts.length === 0 ? (
+              {loading ? (
+                <div className="flex flex-col items-center justify-center p-8">
+                  <Loader2 className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4 animate-spin`} />
+                  <p className={`${effectiveTheme.text || "text-gray-900"} text-center`}>
+                    Loading contacts...
+                  </p>
+                </div>
+              ) : filteredAllContacts.length === 0 ? (
                 <div className="flex flex-col items-center justify-center p-8">
                   <MessageCircle
                     className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4`}
@@ -1075,7 +1183,14 @@ const NewChat = ({
                 </h3>
               </div>
 
-              {filteredRegisteredUsers.length === 0 ? (
+              {loading ? (
+                <div className="flex flex-col items-center justify-center p-8">
+                  <Loader2 className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4 animate-spin`} />
+                  <p className={`${effectiveTheme.text || "text-gray-900"} text-center`}>
+                    Loading users...
+                  </p>
+                </div>
+              ) : filteredRegisteredUsers.length === 0 ? (
                 <div className="flex flex-col items-center justify-center p-8">
                   <MessageCircle
                     className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4`}
@@ -1178,7 +1293,14 @@ const NewChat = ({
                   </h3>
                 </div>
 
-                {filteredBusinessContacts.length === 0 ? (
+                {loading ? (
+                  <div className="flex flex-col items-center justify-center p-8">
+                    <Loader2 className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4 animate-spin`} />
+                    <p className={`${effectiveTheme.text || "text-gray-900"} text-center`}>
+                      Loading business users...
+                    </p>
+                  </div>
+                ) : filteredBusinessContacts.length === 0 ? (
                   <div className="flex flex-col items-center justify-center p-8">
                     <MessageCircle
                       className={`w-16 h-16 ${effectiveTheme.textSecondary || "text-gray-400"} mb-4`}
@@ -1240,6 +1362,10 @@ const ContactItem = ({
 
   const isBusiness = contact.type === "business";
   const myEmailLower = currentUserEmail?.toLowerCase() || "";
+
+const avatarSrc =
+  contact.avatar ||
+  "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg";
 
   // Fetch chat status (SKIP for business)
   useEffect(() => {
@@ -1364,64 +1490,101 @@ const ContactItem = ({
         hover:${effectiveTheme.hover || "bg-gray-100"}`}
       >
         {/* LEFT */}
-        <div className="flex-1 min-w-0">
-            {/* Name with custom category next to it for "Other" view */}
-            <div className="flex items-center gap-5 flex-wrap">
-              <h3 className={`font-semibold truncate ${effectiveTheme.text || "text-gray-900"}`}>
-                {contact.name}
-                {isSelf && (
-                  <span className="text-xs text-blue-500 ml-1">(You)</span>
-                )}
-              </h3>
-              
-              {/* Show custom category next to name for "Other" category view */}
-              {showCustomCategory && contact.businessCategory && (
-                <div className="flex items-center space-x-2 px-2 py-0.5 rounded-full bg-gray-200/50">
-                  <Briefcase
-                    className={`w-3 h-3 ${effectiveTheme.textSecondary || "text-gray-500"}`}
-                  />
-                  <span
-                    className={`text-xs font-medium ${effectiveTheme.textSecondary || "text-gray-500"}`}
-                  >
-                    {contact.businessCategory}
-                  </span>
-                </div>
-              )}
-            </div>
+<div className="flex items-center gap-4 flex-1 min-w-0">
+  {/* PROFILE PHOTO */}
+  <div className="relative flex-shrink-0">
+    <img
+      src={avatarSrc}
+      alt={contact.name}
+      className="w-12 h-12 rounded-full object-cover border border-gray-300"
+      loading="lazy"
+      onError={(e) => {
+        e.currentTarget.src =
+          "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg";
+      }}
+    />
 
-            {/* Bio for Business Users */}
-            {isBusiness && (
-              <>
-                {contact.bio ? (
-                  <p
-                    className={`text-sm ${effectiveTheme.textSecondary || "text-gray-600"} mt-1`}
-                    style={{
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      lineHeight: '1.4em',
-                      maxHeight: '2.8em',
-                    }}
-                  >
-                    {contact.bio}
-                  </p>
-                ) : !showCustomCategory && contact.businessCategory ? (
-                  <div className="flex items-center space-x-1 mt-1">
-                    <Briefcase
-                      className={`w-3 h-3 ${effectiveTheme.textSecondary || "text-gray-500"}`}
-                    />
-                    <span
-                      className={`text-xs ${effectiveTheme.textSecondary || "text-gray-500"}`}
-                    >
-                      {contact.businessCategory}
-                    </span>
-                  </div>
-                ) : null}
-              </>
-            )}
-            </div>
+    {/* Online indicator */}
+    {contact.online && (
+      <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full" />
+    )}
+  </div>
+
+  {/* TEXT CONTENT */}
+  <div className="flex-1 min-w-0">
+    {/* Name + Category */}
+    <div className="flex items-center gap-4 flex-wrap">
+      <h3
+        className={`font-semibold truncate ${
+          effectiveTheme.text || "text-gray-900"
+        }`}
+      >
+        {contact.name}
+        {isSelf && (
+          <span className="text-xs text-blue-500 ml-1">(You)</span>
+        )}
+      </h3>
+
+      {/* Show custom category next to name for "Other" view */}
+      {showCustomCategory && contact.businessCategory && (
+        <div className="flex items-center space-x-1 px-2 py-0.5 rounded-full bg-gray-200/50">
+          <Briefcase
+            className={`w-3 h-3 ${
+              effectiveTheme.textSecondary || "text-gray-500"
+            }`}
+          />
+          <span
+            className={`text-xs font-medium ${
+              effectiveTheme.textSecondary || "text-gray-500"
+            }`}
+          >
+            {contact.businessCategory}
+          </span>
+        </div>
+      )}
+    </div>
+
+    {/* Bio for Business Users */}
+    {isBusiness && (
+      <>
+        {contact.bio ? (
+          <p
+            className={`text-sm mt-1 ${
+              effectiveTheme.textSecondary || "text-gray-600"
+            }`}
+            style={{
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              lineHeight: "1.4em",
+              maxHeight: "2.8em",
+            }}
+          >
+            {contact.bio}
+          </p>
+        ) : !showCustomCategory && contact.businessCategory ? (
+          <div className="flex items-center space-x-1 mt-1">
+            <Briefcase
+              className={`w-3 h-3 ${
+                effectiveTheme.textSecondary || "text-gray-500"
+              }`}
+            />
+            <span
+              className={`text-xs ${
+                effectiveTheme.textSecondary || "text-gray-500"
+              }`}
+            >
+              {contact.businessCategory}
+            </span>
+          </div>
+        ) : null}
+      </>
+    )}
+  </div>
+</div>
+
 
         {/* LEFT ACTION (for contacts list) */}
         {leftActionType && (
@@ -1457,7 +1620,8 @@ const ContactItem = ({
         {/* RIGHT ICONS */}
         {!hideRightActions && (
           <div className="flex items-center space-x-2 flex-shrink-0">
-            {isBusiness || chatStatus === "accepted" || isMyEmailAcceptedByContact ? (
+            {/* Don't show chat icon for self */}
+            {isSelf ? null : (isBusiness || chatStatus === "accepted" || isMyEmailAcceptedByContact ? (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1504,7 +1668,7 @@ const ContactItem = ({
               >
                 <Send className="w-5 h-5 text-blue-500" />
               </button>
-            )}
+            ))}
           </div>
         )}
       </motion.div>
@@ -1531,9 +1695,9 @@ const ContactItem = ({
           >
             <div className="flex justify-between mb-4">
               <div>
-                <h2 className={`font-semibold text-lg ${effectiveTheme.text || 'text-gray-100'}`}>{contact.name}</h2>
+                <h2 className={`font-semibold text-lg ${effectiveTheme.text || 'text-gray-900'}`}>{contact.name}</h2>
                 {contact.bio && (
-                  <p className={`text-sm mt-1 truncate ${effectiveTheme.textSecondary || 'text-gray-300'}`}>
+                  <p className={`text-sm mt-1 truncate ${effectiveTheme.textSecondary || 'text-gray-600'}`}>
                     {contact.bio}
                   </p>
                 )}
@@ -1548,8 +1712,8 @@ const ContactItem = ({
 
             {inviteStatus === "sent" && (
               <div className={`p-4 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'bg-yellow-900/20 border-yellow-700' : 'bg-yellow-500/10 border-yellow-300'}`}>
-                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-100'}`}>Invite pending</p>
-                <p className={`text-xs ${effectiveTheme.textSecondary || 'text-gray-300'}`}>
+                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-900'}`}>Invite pending</p>
+                <p className={`text-xs ${effectiveTheme.textSecondary || 'text-gray-600'}`}>
                   Waiting for {contact.name} to accept
                 </p>
               </div>
@@ -1557,7 +1721,7 @@ const ContactItem = ({
 
             {inviteStatus === "incoming" && (
               <div className={`p-4 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'bg-orange-900/20 border-orange-700' : 'bg-orange-500/10 border-orange-300'}`}>
-                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-100'}`}>Incoming request</p>
+                <p className={`text-sm font-medium ${effectiveTheme.text || 'text-gray-900'}`}>Incoming request</p>
                 <div className="flex justify-end mt-4">
                   <button
                     onClick={handleAcceptInvite}
@@ -1593,7 +1757,7 @@ const ContactItem = ({
                 <>
                   <button
                     onClick={() => setShowInviteModal(false)}
-                    className={`px-4 py-2 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'border-gray-700 text-gray-200' : ''}`}
+                    className={`px-4 py-2 rounded-xl border ${effectiveTheme.mode === 'dark' ? 'border-gray-700 text-gray-200' : 'border-gray-300 text-gray-900'}`}
                   >
                     Cancel
                   </button>

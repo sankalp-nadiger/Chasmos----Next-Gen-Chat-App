@@ -16,6 +16,8 @@ import {
   Download,
   Trash2,
   Info,
+  Upload,
+  Image as ImageIcon,
 } from "lucide-react";
 import Logo from "./Logo";
 import CosmosBackground from "./CosmosBg";
@@ -32,6 +34,10 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
   const [googleContactsSyncEnabled, setGoogleContactsSyncEnabled] = useState(false);
   const [language, setLanguage] = useState("English");
   const [isLoading, setIsLoading] = useState(false);
+  const [isBusiness, setIsBusiness] = useState(false);
+  const [autoMessageEnabled, setAutoMessageEnabled] = useState(false);
+  const [autoMessageText, setAutoMessageText] = useState("");
+  const [autoMessageImage, setAutoMessageImage] = useState("");
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
@@ -52,6 +58,18 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
           setSoundEnabled(data.sound);
           if (data.googleContactsSyncEnabled !== undefined) {
             setGoogleContactsSyncEnabled(data.googleContactsSyncEnabled);
+          }
+          if (data.isBusiness !== undefined) {
+            setIsBusiness(data.isBusiness);
+          }
+          if (data.autoMessageEnabled !== undefined) {
+            setAutoMessageEnabled(data.autoMessageEnabled);
+          }
+          if (data.autoMessageText !== undefined) {
+            setAutoMessageText(data.autoMessageText);
+          }
+          if (data.autoMessageImage !== undefined) {
+            setAutoMessageImage(data.autoMessageImage);
           }
         }
       } catch (error) {
@@ -106,6 +124,46 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
   const handleGoogleContactsSyncChange = (value) => {
     setGoogleContactsSyncEnabled(value);
     updateSettings('googleContactsSyncEnabled', value);
+  };
+
+  const handleAutoMessageEnabledChange = (value) => {
+    setAutoMessageEnabled(value);
+    updateSettings('autoMessageEnabled', value);
+  };
+
+  const handleAutoMessageTextChange = (e) => {
+    const value = e.target.value;
+    setAutoMessageText(value);
+  };
+
+  const handleAutoMessageTextBlur = () => {
+    updateSettings('autoMessageText', autoMessageText);
+  };
+
+  const handleAutoMessageImageChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Check file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image size should be less than 5MB');
+      return;
+    }
+
+    // Convert to base64
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64Image = reader.result;
+      setAutoMessageImage(base64Image);
+      // Update on backend
+      await updateSettings('autoMessageImage', base64Image);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveAutoMessageImage = async () => {
+    setAutoMessageImage("");
+    await updateSettings('autoMessageImage', "");
   };
 
 
@@ -248,6 +306,110 @@ const Settings = ({ onClose, effectiveTheme, onProfileClick }) => {
             </div>
           </div>
 
+          {/* Business Auto Message Settings - Only for business accounts */}
+          {isBusiness && (
+            <div className="mb-6">
+              <h3 className={`text-sm font-semibold ${effectiveTheme.textSecondary} uppercase tracking-wide mb-3`}>
+                Business Auto Message
+              </h3>
+              <div className={`${effectiveTheme.secondary} rounded-lg border ${effectiveTheme.border} overflow-hidden`}>
+                {/* Auto Message Toggle */}
+                <div className={`flex items-center justify-between p-4 border-b ${effectiveTheme.border} hover:${effectiveTheme.hover} transition-colors`}>
+                  <div className="flex items-center space-x-3">
+                    <div className={`w-10 h-10 rounded-lg ${effectiveTheme.accent} flex items-center justify-center`}>
+                      <Bell className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h4 className={`font-medium ${effectiveTheme.text}`}>
+                        Auto Message
+                      </h4>
+                      <p className={`text-sm ${effectiveTheme.textSecondary}`}>
+                        Send automatic initial message to new chats
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center">
+                    <button
+                      onClick={() => handleAutoMessageEnabledChange(!autoMessageEnabled)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        autoMessageEnabled ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          autoMessageEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Auto Message Text - Show only if enabled */}
+                {autoMessageEnabled && (
+                  <div className="p-4 space-y-4">
+                    {/* Image Upload */}
+                    <div>
+                      <label className={`block text-sm font-medium ${effectiveTheme.text} mb-2`}>
+                        Auto Message Image (Optional)
+                      </label>
+                      {autoMessageImage ? (
+                        <div className="relative inline-block">
+                          <img
+                            src={autoMessageImage}
+                            alt="Auto message preview"
+                            className={`w-32 h-32 object-cover rounded-lg border-2 ${effectiveTheme.border}`}
+                          />
+                          <button
+                            onClick={handleRemoveAutoMessageImage}
+                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
+                            title="Remove image"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className={`flex items-center justify-center w-32 h-32 border-2 border-dashed ${effectiveTheme.border} rounded-lg cursor-pointer hover:${effectiveTheme.hover} transition-colors`}>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleAutoMessageImageChange}
+                            className="hidden"
+                          />
+                          <div className="text-center">
+                            <Upload className={`w-6 h-6 mx-auto mb-1 ${effectiveTheme.textSecondary}`} />
+                            <span className={`text-xs ${effectiveTheme.textSecondary}`}>Upload Image</span>
+                          </div>
+                        </label>
+                      )}
+                      <p className={`text-xs ${effectiveTheme.textSecondary} mt-2`}>
+                        Max 5MB • JPG, PNG, WebP
+                      </p>
+                    </div>
+                    
+                    {/* Text Input */}
+                    <div>
+                      <label className={`block text-sm font-medium ${effectiveTheme.text} mb-2`}>
+                        Auto Message Text (Optional)
+                      </label>
+                      <textarea
+                        value={autoMessageText}
+                        onChange={handleAutoMessageTextChange}
+                        onBlur={handleAutoMessageTextBlur}
+                        placeholder="Enter your automatic message..."
+                        className={`w-full px-3 py-2 rounded-lg border ${effectiveTheme.border} ${effectiveTheme.secondary} ${effectiveTheme.text} focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none`}
+                        rows={3}
+                        maxLength={500}
+                      />
+                      <p className={`text-xs ${effectiveTheme.textSecondary} mt-1`}>
+                        {autoMessageText.length}/500 characters
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
 
           {/* App Information */}

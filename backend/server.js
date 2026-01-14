@@ -1332,7 +1332,6 @@ socket.on("remove reaction", async (data) => {
 
   //group-socket-events
   socket.on("disconnect", () => {
-    console.log("USER DISCONNECTED", socket.id);
     try {
       const uid = socket.userId;
       if (uid) {
@@ -1342,7 +1341,7 @@ socket.on("remove reaction", async (data) => {
         if (next <= 0) {
           try {
             io.emit('user offline', { userId: uid });
-            console.log(`[SOCKET] broadcast: user offline -> ${uid}`);
+            //console.log(`[SOCKET] broadcast: user offline -> ${uid}`);
           } catch (e) {
             console.error('[SOCKET] error broadcasting user offline', e);
           }

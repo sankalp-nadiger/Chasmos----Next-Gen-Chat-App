@@ -353,16 +353,50 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
   }
 });
 
+// Get user by ID (for checking auto message settings)
+export const getUserById = asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  
+  let user = null;
+  
+  // Check if userId is an email (contains @) or a valid ObjectId
+  if (userId.includes('@')) {
+    // Search by email
+    user = await User.findOne({ email: userId.toLowerCase() }).select(
+      "name email avatar bio isBusiness businessCategory autoMessageEnabled autoMessageText autoMessageImage"
+    );
+  } else {
+    // Search by ObjectId
+    try {
+      user = await User.findById(userId).select(
+        "name email avatar bio isBusiness businessCategory autoMessageEnabled autoMessageText autoMessageImage"
+      );
+    } catch (error) {
+      console.error('getUserById -> Invalid ObjectId format:', userId, error);
+    }
+  }
+
+  if (user) {
+    res.status(200).json(user);
+  } else {
+    res.status(404);
+    throw new Error("User not found");
+  }
+});
 
 // Get user settings
 export const getUserSettings = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id).select("settings googleContactsSyncEnabled");
+  const user = await User.findById(req.user._id).select("settings googleContactsSyncEnabled isBusiness autoMessageEnabled autoMessageText autoMessageImage");
 
   if (user) {
     res.status(200).json({
       notifications: user.settings?.notifications ?? true,
       sound: user.settings?.sound ?? true,
       googleContactsSyncEnabled: user.googleContactsSyncEnabled ?? false,
+      isBusiness: user.isBusiness ?? false,
+      autoMessageEnabled: user.autoMessageEnabled ?? false,
+      autoMessageText: user.autoMessageText ?? "",
+      autoMessageImage: user.autoMessageImage ?? "",
     });
   } else {
     res.status(404);
@@ -391,6 +425,35 @@ export const updateUserSettings = asyncHandler(async (req, res) => {
     if (req.body.googleContactsSyncEnabled !== undefined) {
       user.googleContactsSyncEnabled = req.body.googleContactsSyncEnabled;
     }
+    // Auto message settings for business accounts
+    if (req.body.autoMessageEnabled !== undefined) {
+      user.autoMessageEnabled = req.body.autoMessageEnabled;
+    }
+    if (req.body.autoMessageText !== undefined) {
+      user.autoMessageText = req.body.autoMessageText;
+    }
+    // Handle auto message image upload
+    if (req.body.autoMessageImage !== undefined) {
+      // If it's a base64 image, upload to Supabase
+      if (req.body.autoMessageImage && req.body.autoMessageImage.startsWith('data:image/')) {
+        try {
+          const { uploadBase64ImageToSupabase } = await import("../utils/uploadToSupabase.js");
+          const imageUrl = await uploadBase64ImageToSupabase(
+            req.body.autoMessageImage,
+            "avatars",
+            "auto-messages"
+          );
+          user.autoMessageImage = imageUrl;
+        } catch (err) {
+          console.error("Auto message image upload failed:", err);
+          // Continue without failing the entire request
+          user.autoMessageImage = "";
+        }
+      } else {
+        // If it's empty string or URL, use it directly
+        user.autoMessageImage = req.body.autoMessageImage;
+      }
+    }
 
     const updatedUser = await user.save();
 
@@ -398,6 +461,9 @@ export const updateUserSettings = asyncHandler(async (req, res) => {
       notifications: updatedUser.settings.notifications,
       sound: updatedUser.settings.sound,
       googleContactsSyncEnabled: updatedUser.googleContactsSyncEnabled ?? false,
+      autoMessageEnabled: updatedUser.autoMessageEnabled ?? false,
+      autoMessageText: updatedUser.autoMessageText ?? "",
+      autoMessageImage: updatedUser.autoMessageImage ?? "",
     });
   } else {
     res.status(404);
@@ -771,28 +837,24 @@ export const rejectChatRequest = asyncHandler(async (req, res) => {
 /**
  * GET all business accounts
  */
-export const getBusinessUsers = async (req, res) => {
-  try {
-    const businesses = await User.find({ isBusiness: true })
-      .select("name avatar bio businessCategory acceptedChatRequests sentChatRequests receivedChatRequests email") // include necessary fields
-      .sort({ createdAt: -1 });
+export const getBusinessUsers = asyncHandler(async (req, res) => {
+  const businesses = await User.find({ isBusiness: true })
+    .select("name avatar bio businessCategory acceptedChatRequests sentChatRequests receivedChatRequests email") // include necessary fields
+    .sort({ createdAt: -1 });
 
-    // Category count
-    const categoryCounts = businesses.reduce((acc, user) => {
-      const cat = user.businessCategory || "Other";
-      acc[cat] = (acc[cat] || 0) + 1;
-      return acc;
-    }, {});
+  // Category count
+  const categoryCounts = businesses.reduce((acc, user) => {
+    const cat = user.businessCategory || "Other";
+    acc[cat] = (acc[cat] || 0) + 1;
+    return acc;
+  }, {});
 
-    res.status(200).json({
-      businesses,
-      categoryCounts,
-      total: businesses.length,
-    });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to fetch business users" });
-  }
-};
+  res.status(200).json({
+    businesses,
+    categoryCounts,
+    total: businesses.length,
+  });
+});
 
   // POST /api/user/changes
   // Request body: { keys: ["e:email@example.com", "p:1234567890", ...] }
