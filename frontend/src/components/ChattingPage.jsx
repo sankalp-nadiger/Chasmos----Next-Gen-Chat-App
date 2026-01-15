@@ -10984,11 +10984,13 @@ const handleOpenGroupInfo = (group) => {
                 <div className="p-4">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center space-x-3">
-                      <Logo
-                        size="md"
-                        showText={true}
-                        textClassName={effectiveTheme.text}
-                      />
+                     <Logo
+  size="md"
+  variant="compact"   // only this one stays smaller
+  showText={true}
+  textClassName={effectiveTheme.text}
+/>
+
                     </div>
                     <div className="flex items-center gap-2">
                       <button
