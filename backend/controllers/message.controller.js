@@ -6,6 +6,7 @@ import Group from "../models/group.model.js";
 import User from "../models/user.model.js";
 import Attachment from "../models/attachment.model.js";
 import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
+import { getSocketIOInstance } from "../services/scheduledMessageCron.js";
 
 // Helper to normalize message timestamp for clients
 const normalizeMessage = (m) => {
@@ -186,12 +187,26 @@ export const allMessages = asyncHandler(async (req, res) => {
 });
 
 export const sendMessage = asyncHandler(async (req, res) => {
-  const { content, chatId, attachments, type = "text", isScheduled, scheduledFor, userId, poll, repliedTo, mentions } = req.body;
+  const { content, chatId, attachments, type = "text", isScheduled, scheduledFor, userId, poll, repliedTo, mentions, autoMessage } = req.body;
   // normalize isScheduled which may be boolean or string from client
   const isScheduledFlag = (isScheduled === true || isScheduled === 'true' || isScheduled === '1' || isScheduled === 1);
   // normalize scheduledFor into a Date if present
   const scheduledForDate = scheduledFor ? new Date(scheduledFor) : null;
-  //console.log("➡️ [SEND MESSAGE] Request received", { chatId, userId, content, attachments, type, isScheduled: isScheduledFlag, scheduledFor: scheduledForDate, poll, repliedTo });
+  
+  console.log("➡️ [SEND MESSAGE] Request received", { 
+    chatId, 
+    userId, 
+    content: content?.substring(0, 50), 
+    hasAttachments: !!attachments?.length,
+    type, 
+    isScheduled: isScheduledFlag, 
+    scheduledFor: scheduledForDate, 
+    hasPoll: !!poll, 
+    hasRepliedTo: !!repliedTo,
+    hasAutoMessage: !!(autoMessage && autoMessage.content),
+    autoMessageSenderId: autoMessage?.senderId
+  });
+  
   if (!content && (!attachments || attachments.length === 0) && !poll) {
     console.log("Invalid data passed into request");
     return res.sendStatus(400);
@@ -305,6 +320,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
   };
 
   try {
+    console.log("[sendMessage] Creating user's message...");
     var message = await Message.create(newMessage);
     console.log("[sendMessage] Message created:", message._id);
 
@@ -371,12 +387,36 @@ export const sendMessage = asyncHandler(async (req, res) => {
     // Attach normalized timestamp before sending
     const messageOut = normalizeMessage(message);
 
+    // Emit user's message via socket
+    try {
+      const io = getSocketIOInstance();
+      if (io && chat && chat._id) {
+        try {
+          io.to(String(chat._id)).emit("message recieved", messageOut);
+        } catch (e) {}
+
+        const users = (chat.users && chat.users.length) ? chat.users : (chat.participants || []);
+        if (Array.isArray(users)) {
+          users.forEach((u) => {
+            try {
+              const uid = u && (u._id ? String(u._id) : String(u));
+              if (uid) {
+                io.to(uid).emit("message recieved", messageOut);
+              }
+            } catch (e) {}
+          });
+        }
+      }
+    } catch (e) {}
+
     // If a new chat was created, return chat info as well
     if (createdNewChat) {
       console.log("[sendMessage] Returning new chat and message");
       return res.json({ message: messageOut, chat });
     }
-    res.json(messageOut);
+
+    // Return consistent envelope `{ message: ... }` so frontend can read `resJson.message`
+    return res.json({ message: messageOut });
   } catch (error) {
     console.error("[sendMessage] Error creating message:", error);
     res.status(400);

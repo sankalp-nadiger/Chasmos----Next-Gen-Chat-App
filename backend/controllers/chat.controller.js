@@ -61,6 +61,66 @@ export const accessChat = asyncHandler(async (req, res) => {
 
     try {
       const createdChat = await Chat.create(chatData);
+      console.log('[accessChat] ✅ New chat created:', createdChat._id);
+      
+      // Check if the other user (userId) has auto message enabled
+      try {
+        const otherUser = await User.findById(userId).select('autoMessageEnabled autoMessageText autoMessageImage name avatar');
+        console.log('[accessChat] Other user auto message check:', {
+          userId,
+          autoMessageEnabled: otherUser?.autoMessageEnabled,
+          hasAutoMessageText: !!otherUser?.autoMessageText,
+          hasAutoMessageImage: !!otherUser?.autoMessageImage
+        });
+        
+        if (otherUser && otherUser.autoMessageEnabled && (otherUser.autoMessageText || otherUser.autoMessageImage)) {
+          console.log('[accessChat] Creating auto message for new chat...');
+          
+          // Prepare attachments if image exists
+          const autoMessageAttachments = [];
+          if (otherUser.autoMessageImage) {
+            // Create an attachment document for the image
+            const Attachment = (await import("../models/attachment.model.js")).default;
+            const imageAttachment = await Attachment.create({
+              fileUrl: otherUser.autoMessageImage,
+              fileType: 'image',
+              mimeType: 'image/jpeg',
+              fileName: 'auto-message-image.jpg',
+              uploadedBy: userId,
+            });
+            autoMessageAttachments.push(imageAttachment._id);
+          }
+          
+          // Create auto message immediately
+          const autoMsg = await Message.create({
+            sender: userId,
+            content: otherUser.autoMessageText || "",
+            chat: createdChat._id,
+            type: otherUser.autoMessageImage ? "attachment" : "text",
+            attachments: autoMessageAttachments,
+            repliedTo: [],
+            mentions: [],
+            isScheduled: false,
+            scheduledFor: null,
+            scheduledSent: false,
+            poll: null,
+          });
+          
+          console.log('[accessChat] ✅ Auto message created and saved:', autoMsg._id);
+          
+          // Populate the auto message
+          await autoMsg.populate("sender", "name avatar");
+          await autoMsg.populate("attachments");
+          await autoMsg.populate("chat");
+          
+          // Update chat's lastMessage to the auto message
+          await Chat.findByIdAndUpdate(createdChat._id, { lastMessage: autoMsg._id });
+        }
+      } catch (autoMsgErr) {
+        console.error('[accessChat] ❌ Failed to create auto message:', autoMsgErr.message);
+        // Don't fail the chat creation if auto message fails
+      }
+      
       const FullChat = await Chat.findOne({ _id: createdChat._id }).populate(
         "users",
         "-password"

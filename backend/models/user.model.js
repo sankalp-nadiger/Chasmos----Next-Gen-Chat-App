@@ -137,6 +137,19 @@ const userSchema = new mongoose.Schema(
     businessCategory: {
       type: String,
       default: ""
+    },
+    // Auto message for business accounts
+    autoMessageEnabled: {
+      type: Boolean,
+      default: false
+    },
+    autoMessageText: {
+      type: String,
+      default: ""
+    },
+    autoMessageImage: {
+      type: String,
+      default: ""
     }
   },
   

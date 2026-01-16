@@ -8,14 +8,21 @@ import html2canvas from 'html2canvas';
  * @param {string} options.userId - Current user ID
  * @param {Function} options.onScreenshotDetected - Callback when screenshot is detected
  * @param {boolean} options.enabled - Whether screenshot detection is enabled
+ * @param {boolean} options.isPendingChat - Whether the current chat is a pending chat (not yet created in DB)
  */
-export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, enabled = true }) => {
+export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, enabled = true, isPendingChat = false }) => {
   const isCapturing = useRef(false);
   const lastCaptureTime = useRef(0);
 
   useEffect(() => {
     if (!enabled) {
       console.log('Screenshot detection disabled by flag:', { enabled, chatId, userId });
+      return;
+    }
+    
+    // Skip if this is a pending chat (not yet created in DB)
+    if (isPendingChat) {
+      console.log('Screenshot detection disabled for pending chat:', { chatId, isPendingChat });
       return;
     }
 
@@ -476,7 +483,7 @@ export const useScreenshotDetection = ({ chatId, userId, onScreenshotDetected, e
       document.removeEventListener('paste', handlePaste);
       window.removeEventListener('focus', handleWindowFocus);
     };
-  }, [chatId, userId, enabled, onScreenshotDetected]);
+  }, [chatId, userId, enabled, onScreenshotDetected, isPendingChat]);
 
   return null;
 };
