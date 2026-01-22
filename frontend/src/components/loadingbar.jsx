@@ -265,14 +265,10 @@ const LoadingBar = () => {
                 
                 {/* Logo */}
                 <div className="relative mb-5 z-10">
-                 <div className="w-20 h-20 rounded-full bg-white flex items-center justify-center shadow overflow-hidden animate-bounce-custom">
-  <img
-    src={logo}
-    alt="Chasmos Logo"
-    className="w-16 h-16 object-contain"
-    draggable="false"
-  />
+                <div className="w-20 h-20 rounded-full bg-white flex items-center justify-center shadow overflow-hidden animate-bounce-custom">
+  <img src={logo} className="w-18 h-18 object-contain" />
 </div>
+
 
 
                 </div>
