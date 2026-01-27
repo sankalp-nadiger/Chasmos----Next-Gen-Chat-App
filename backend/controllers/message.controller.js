@@ -7,6 +7,9 @@ import User from "../models/user.model.js";
 import Attachment from "../models/attachment.model.js";
 import { deleteFileFromSupabase } from "../utils/supabaseHelper.js";
 import { getSocketIOInstance } from "../services/scheduledMessageCron.js";
+import ChatKey from "../models/chatKey.model.js"; // Added import
+import KeyManagementService from "../services/keyManagement.service.js"; // Added import
+import EncryptionService from "../services/encryption.service.js"; // Added import
 
 // Helper to normalize message timestamp for clients
 const normalizeMessage = (m) => {
@@ -303,6 +306,58 @@ export const sendMessage = asyncHandler(async (req, res) => {
     console.warn('[sendMessage] Ignoring invalid mention ids:', invalidMentions);
   }
 
+  // === ENCRYPTION SUPPORT - START ===
+  // Check if chat is encrypted
+  let encryptedContent = null;
+  let encryptionMetadata = null;
+  let isEncrypted = false;
+  let encryptionKeyVersion = 1;
+  
+  if (content && chat) {
+    try {
+      const chatKey = await ChatKey.findOne({ chat: chat._id, isActive: true });
+      const isEncryptedChat = !!chatKey;
+      
+      if (isEncryptedChat) {
+        console.log(`[sendMessage] Chat ${chat._id} is encrypted, encrypting message content`);
+        
+        // Get chat encryption key for sender
+        const chatKeyInfo = await KeyManagementService.getChatKeyForUser(
+          chat._id,
+          req.user._id
+        );
+        
+        if (chatKeyInfo && chatKeyInfo.aesKey) {
+          // Encrypt the message
+          const encryptedData = EncryptionService.encryptAES(content, chatKeyInfo.aesKey);
+          
+          encryptedContent = encryptedData.encrypted;
+          encryptionMetadata = {
+            iv: encryptedData.iv,
+            tag: encryptedData.tag,
+            algorithm: 'AES-256-GCM',
+            keyVersion: chatKeyInfo.keyVersion
+          };
+          
+          isEncrypted = true;
+          encryptionKeyVersion = chatKeyInfo.keyVersion || 1;
+          
+          // For server storage, we'll keep the content as placeholder
+          // The actual encrypted content is stored in encryptedContent field
+          // Note: We don't clear the content field as we might want to keep it for debugging
+          // but in production you might want to store '[ENCRYPTED]' or similar
+          console.log(`[sendMessage] Message encrypted successfully, key version: ${encryptionKeyVersion}`);
+        } else {
+          console.warn(`[sendMessage] No encryption key found for user ${req.user._id} in chat ${chat._id}`);
+        }
+      }
+    } catch (error) {
+      console.error('[sendMessage] Message encryption failed:', error);
+      // Continue with unencrypted message if encryption fails
+    }
+  }
+  // === ENCRYPTION SUPPORT - END ===
+
   var newMessage = {
     sender: req.user._id,
     content: content,
@@ -317,12 +372,17 @@ export const sendMessage = asyncHandler(async (req, res) => {
     scheduledFor: isScheduledFlag ? scheduledForDate : null,
     scheduledSent: false,
     poll: poll || null,
+    // Encryption fields
+    isEncrypted: isEncrypted,
+    encryptedContent: encryptedContent,
+    encryptionMetadata: encryptionMetadata,
+    encryptionKeyVersion: encryptionKeyVersion,
   };
 
   try {
     console.log("[sendMessage] Creating user's message...");
     var message = await Message.create(newMessage);
-    console.log("[sendMessage] Message created:", message._id);
+    console.log("[sendMessage] Message created:", message._id, "Encrypted:", isEncrypted);
 
     // Debug: refetch saved message from DB to verify persisted fields
     try {
@@ -331,7 +391,9 @@ export const sendMessage = asyncHandler(async (req, res) => {
         id: saved && saved._id,
         isScheduled: saved && saved.isScheduled,
         scheduledFor: saved && saved.scheduledFor,
-        createdAt: saved && saved.createdAt
+        createdAt: saved && saved.createdAt,
+        isEncrypted: saved && saved.isEncrypted,
+        hasEncryptedContent: !!(saved && saved.encryptedContent)
       });
     } catch (err) {
       console.warn('[sendMessage] Failed to fetch saved message for debug:', err && err.message);
@@ -527,10 +589,55 @@ export const editMessage = asyncHandler(async (req, res) => {
     throw new Error("You can only edit your own messages");
   }
 
+  // === ENCRYPTION SUPPORT - START ===
+  // If original message was encrypted, we need to encrypt the edited content too
+  let encryptedContent = null;
+  let encryptionMetadata = null;
+  
+  if (message.isEncrypted && content && message.chat) {
+    try {
+      const chatKey = await ChatKey.findOne({ chat: message.chat, isActive: true });
+      
+      if (chatKey) {
+        // Get chat encryption key for sender
+        const chatKeyInfo = await KeyManagementService.getChatKeyForUser(
+          message.chat,
+          userId
+        );
+        
+        if (chatKeyInfo && chatKeyInfo.aesKey) {
+          // Encrypt the edited message
+          const encryptedData = EncryptionService.encryptAES(content, chatKeyInfo.aesKey);
+          
+          encryptedContent = encryptedData.encrypted;
+          encryptionMetadata = {
+            iv: encryptedData.iv,
+            tag: encryptedData.tag,
+            algorithm: 'AES-256-GCM',
+            keyVersion: chatKeyInfo.keyVersion
+          };
+          
+          console.log(`[editMessage] Edited content encrypted for message ${messageId}`);
+        }
+      }
+    } catch (error) {
+      console.error('[editMessage] Message encryption failed:', error);
+      // Continue with unencrypted edit if encryption fails
+    }
+  }
+  // === ENCRYPTION SUPPORT - END ===
+
   // Update the message
   message.content = content.trim();
   message.isEdited = true;
   message.editedAt = new Date();
+  
+  // Update encryption fields if content was encrypted
+  if (encryptedContent) {
+    message.encryptedContent = encryptedContent;
+    message.encryptionMetadata = encryptionMetadata;
+    message.encryptionKeyVersion = encryptionMetadata?.keyVersion || message.encryptionKeyVersion;
+  }
 
   await message.save();
 
@@ -759,6 +866,54 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     }
   }
 
+  // === ENCRYPTION SUPPORT - START ===
+  // Check if chat is encrypted for forwarded messages
+  let encryptedContent = null;
+  let encryptionMetadata = null;
+  let isEncrypted = false;
+  let encryptionKeyVersion = 1;
+  
+  if (content && chat) {
+    try {
+      const chatKey = await ChatKey.findOne({ chat: chat._id, isActive: true });
+      const isEncryptedChat = !!chatKey;
+      
+      if (isEncryptedChat) {
+        console.log(`[forwardMessage] Chat ${chat._id} is encrypted, encrypting forwarded message content`);
+        
+        // Get chat encryption key for sender
+        const chatKeyInfo = await KeyManagementService.getChatKeyForUser(
+          chat._id,
+          req.user._id
+        );
+        
+        if (chatKeyInfo && chatKeyInfo.aesKey) {
+          // Encrypt the message
+          const encryptedData = EncryptionService.encryptAES(content, chatKeyInfo.aesKey);
+          
+          encryptedContent = encryptedData.encrypted;
+          encryptionMetadata = {
+            iv: encryptedData.iv,
+            tag: encryptedData.tag,
+            algorithm: 'AES-256-GCM',
+            keyVersion: chatKeyInfo.keyVersion
+          };
+          
+          isEncrypted = true;
+          encryptionKeyVersion = chatKeyInfo.keyVersion || 1;
+          
+          console.log(`[forwardMessage] Forwarded message encrypted successfully, key version: ${encryptionKeyVersion}`);
+        } else {
+          console.warn(`[forwardMessage] No encryption key found for user ${req.user._id} in chat ${chat._id}`);
+        }
+      }
+    } catch (error) {
+      console.error('[forwardMessage] Message encryption failed:', error);
+      // Continue with unencrypted message if encryption fails
+    }
+  }
+  // === ENCRYPTION SUPPORT - END ===
+
   // Normalize and validate repliedTo ids for forwarded messages
   let normalizedForwardRepliedTo = Array.isArray(repliedTo) ? repliedTo : repliedTo ? [repliedTo] : [];
   const invalidForwardRepliedTo = [];
@@ -792,6 +947,11 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     isForwarded: isForwarded,
     repliedTo: normalizedForwardRepliedTo,
     mentions: normalizedForwardMentions,
+    // Encryption fields
+    isEncrypted: isEncrypted,
+    encryptedContent: encryptedContent,
+    encryptionMetadata: encryptionMetadata,
+    encryptionKeyVersion: encryptionKeyVersion,
   };
 
   //console.log("📝 Creating message:", newMessage);

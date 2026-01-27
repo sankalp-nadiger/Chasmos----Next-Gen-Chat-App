@@ -112,6 +112,21 @@ const userSchema = new mongoose.Schema(
         googleId: { type: String }
       }
     ],
+     // Encryption keys
+    rsaPublicKey: { type: String },
+    rsaPrivateKey: { type: String }, // Encrypted with user's password
+    ecdhPublicKey: { type: String },
+    ecdhPrivateKey: { type: String }, // Encrypted with user's password
+    keySalt: { type: String }, // For password-based key derivation
+    
+    // Device keys for multi-device support
+    deviceKeys: [{
+      deviceId: { type: String },
+      rsaPublicKey: { type: String },
+      ecdhPublicKey: { type: String },
+      createdAt: { type: Date, default: Date.now },
+      lastUsed: { type: Date }
+    }],
 
     // Block functionality
     blockedUsers: [{
