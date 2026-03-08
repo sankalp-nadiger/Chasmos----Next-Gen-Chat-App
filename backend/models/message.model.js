@@ -51,7 +51,18 @@ const messageSchema = new Schema(
     deliveredBy: [{ type: Schema.Types.ObjectId, ref: 'User' }]
     ,
     // List of user ids who should NOT see this message when fetching messages
-    excludeUsers: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: [] }
+    excludeUsers: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: [] },
+    
+    // End-to-end encryption fields
+    isEncrypted: { type: Boolean, default: false },
+    encryptedContent: { type: String },
+    encryptionMetadata: {
+      iv: { type: String },
+      tag: { type: String },
+      algorithm: { type: String, default: 'AES-256-GCM' },
+      keyVersion: { type: Number, default: 1 }
+    },
+    encryptionKeyVersion: { type: Number, default: 1 }
   },
   { timestamps: true }
 );
@@ -69,5 +80,8 @@ messageSchema.index({ keepFor: 1 });
 messageSchema.index({ mentions: 1 });
 // Index excludeUsers for efficient filtering of per-message visibility
 messageSchema.index({ excludeUsers: 1 });
+// Index for encrypted messages
+messageSchema.index({ isEncrypted: 1 });
+messageSchema.index({ chat: 1, isEncrypted: 1 });
 
 export default mongoose.model("Message", messageSchema);

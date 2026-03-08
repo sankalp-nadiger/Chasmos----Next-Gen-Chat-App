@@ -65,7 +65,47 @@ export const allMessages = asyncHandler(async (req, res) => {
       // If this chat is not a group chat, skip membership interval checks
       const chatObj = await Chat.findById(req.params.chatId).select('isGroupChat').lean();
       if (!chatObj || !chatObj.isGroupChat) {
-        const out = messages.map(normalizeMessage);
+        // === DECRYPTION SUPPORT - START ===
+        // Decrypt encrypted messages for the current user
+        const out = await Promise.all(messages.map(async (m) => {
+          const normalized = normalizeMessage(m);
+          
+          // If message is encrypted, decrypt it for the user
+          if (m.isEncrypted && m.encryptedContent && m.encryptionMetadata) {
+            try {
+              const chatKeyInfo = await KeyManagementService.getChatKeyForUser(
+                req.params.chatId,
+                req.user._id
+              );
+              
+              if (chatKeyInfo && chatKeyInfo.aesKey) {
+                const decryptedContent = EncryptionService.decryptAES(
+                  {
+                    encrypted: m.encryptedContent,
+                    iv: m.encryptionMetadata.iv,
+                    tag: m.encryptionMetadata.tag
+                  },
+                  chatKeyInfo.aesKey
+                );
+                
+                // Replace content with decrypted version
+                normalized.content = decryptedContent;
+                normalized.wasDecrypted = true;
+              } else {
+                // User doesn't have access to this chat's encryption key
+                normalized.content = '[ENCRYPTED - NO KEY]';
+                normalized.decryptionFailed = true;
+              }
+            } catch (decryptError) {
+              console.error('[allMessages] Failed to decrypt message:', m._id, decryptError);
+              normalized.content = '[FAILED TO DECRYPT]';
+              normalized.decryptionError = true;
+            }
+          }
+          
+          return normalized;
+        }));
+        // === DECRYPTION SUPPORT - END ===
         return res.json(out);
       }
     // Compute membership intervals for this user from Group.joinedBy/joinedAt and leftBy/leftAt
@@ -181,7 +221,47 @@ export const allMessages = asyncHandler(async (req, res) => {
     }
 
     // Attach a normalized `timestamp` field so clients can use scheduledFor when appropriate
-    const out = messages.map(normalizeMessage);
+    // === DECRYPTION SUPPORT - START ===
+    // Decrypt encrypted messages for the current user
+    const out = await Promise.all(messages.map(async (m) => {
+      const normalized = normalizeMessage(m);
+      
+      // If message is encrypted, decrypt it for the user
+      if (m.isEncrypted && m.encryptedContent && m.encryptionMetadata) {
+        try {
+          const chatKeyInfo = await KeyManagementService.getChatKeyForUser(
+            req.params.chatId,
+            req.user._id
+          );
+          
+          if (chatKeyInfo && chatKeyInfo.aesKey) {
+            const decryptedContent = EncryptionService.decryptAES(
+              {
+                encrypted: m.encryptedContent,
+                iv: m.encryptionMetadata.iv,
+                tag: m.encryptionMetadata.tag
+              },
+              chatKeyInfo.aesKey
+            );
+            
+            // Replace content with decrypted version
+            normalized.content = decryptedContent;
+            normalized.wasDecrypted = true;
+          } else {
+            // User doesn't have access to this chat's encryption key
+            normalized.content = '[ENCRYPTED - NO KEY]';
+            normalized.decryptionFailed = true;
+          }
+        } catch (decryptError) {
+          console.error('[allMessages] Failed to decrypt message:', m._id, decryptError);
+          normalized.content = '[FAILED TO DECRYPT]';
+          normalized.decryptionError = true;
+        }
+      }
+      
+      return normalized;
+    }));
+    // === DECRYPTION SUPPORT - END ===
     res.json(out);
   } catch (error) {
     res.status(400);
@@ -307,7 +387,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
   }
 
   // === ENCRYPTION SUPPORT - START ===
-  // Check if chat is encrypted
+  // Auto-initialize encryption for all chats and encrypt messages
   let encryptedContent = null;
   let encryptionMetadata = null;
   let isEncrypted = false;
@@ -315,10 +395,58 @@ export const sendMessage = asyncHandler(async (req, res) => {
   
   if (content && chat) {
     try {
-      const chatKey = await ChatKey.findOne({ chat: chat._id, isActive: true });
-      const isEncryptedChat = !!chatKey;
+      let chatKey = await ChatKey.findOne({ chat: chat._id, isActive: true });
       
-      if (isEncryptedChat) {
+      // Auto-initialize encryption if not already set up
+      if (!chatKey) {
+        console.log(`[sendMessage] Auto-initializing encryption for chat ${chat._id}`);
+        
+        // Get all chat participants
+        const participants = chat.users && chat.users.length > 0 
+          ? chat.users 
+          : chat.participants || [];
+        
+        // Ensure all participants have encryption keys
+        let allUsersHaveKeys = true;
+        for (const participantId of participants) {
+          const participant = await User.findById(participantId).select('rsaPublicKey rsaPrivateKey');
+          if (!participant || !participant.rsaPublicKey || !participant.rsaPrivateKey) {
+            console.log(`[sendMessage] User ${participantId} missing encryption keys, auto-generating...`);
+            
+            // Auto-generate keys for user
+            const rsaKeyPair = EncryptionService.generateRSAKeyPair();
+            const ecdhKeyPair = EncryptionService.generateECDHKeyPair();
+            const salt = require('crypto').randomBytes(32).toString('base64');
+            
+            await User.findByIdAndUpdate(participantId, {
+              rsaPublicKey: rsaKeyPair.publicKey,
+              rsaPrivateKey: rsaKeyPair.privateKey,
+              ecdhPublicKey: ecdhKeyPair.publicKey,
+              ecdhPrivateKey: ecdhKeyPair.privateKey,
+              keySalt: salt
+            });
+          }
+        }
+        
+        // Initialize chat encryption
+        try {
+          const encryptionInfo = await KeyManagementService.initializeChatEncryption(
+            chat._id,
+            participants,
+            req.user._id
+          );
+          
+          // Refresh chatKey
+          chatKey = await ChatKey.findOne({ chat: chat._id, isActive: true });
+          console.log(`[sendMessage] Chat encryption initialized successfully for chat ${chat._id}`);
+        } catch (initError) {
+          console.error('[sendMessage] Failed to auto-initialize encryption:', initError);
+          // Continue without encryption if initialization fails
+        }
+      }
+      
+      // Now encrypt the message if we have a chat key
+      if (chatKey) {
         console.log(`[sendMessage] Chat ${chat._id} is encrypted, encrypting message content`);
         
         // Get chat encryption key for sender
@@ -342,14 +470,12 @@ export const sendMessage = asyncHandler(async (req, res) => {
           isEncrypted = true;
           encryptionKeyVersion = chatKeyInfo.keyVersion || 1;
           
-          // For server storage, we'll keep the content as placeholder
-          // The actual encrypted content is stored in encryptedContent field
-          // Note: We don't clear the content field as we might want to keep it for debugging
-          // but in production you might want to store '[ENCRYPTED]' or similar
           console.log(`[sendMessage] Message encrypted successfully, key version: ${encryptionKeyVersion}`);
         } else {
           console.warn(`[sendMessage] No encryption key found for user ${req.user._id} in chat ${chat._id}`);
         }
+      } else {
+        console.warn(`[sendMessage] Could not establish encryption for chat ${chat._id}, sending unencrypted`);
       }
     } catch (error) {
       console.error('[sendMessage] Message encryption failed:', error);
