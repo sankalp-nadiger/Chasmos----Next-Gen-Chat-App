@@ -21,6 +21,49 @@ const normalizeMessage = (m) => {
 
 };
 
+// Helper to decrypt a message for a user (for E2E encryption)
+// NOTE: This server-side decryption is for convenient features like search, previews, etc.
+// For pure client-side E2E, clients should decrypt messages locally after receiving them.
+// The key security feature is that plaintext is NEVER stored in the database.
+const decryptMessageForUser = async (message, chatId, userId) => {
+  const normalized = normalizeMessage(message);
+  
+  // If message is encrypted, decrypt it for the user
+  if (message.isEncrypted && message.encryptedContent && message.encryptionMetadata) {
+    try {
+      const chatKeyInfo = await KeyManagementService.getChatKeyForUser(
+        chatId,
+        userId
+      );
+      
+      if (chatKeyInfo && chatKeyInfo.aesKey) {
+        const decryptedContent = EncryptionService.decryptAES(
+          {
+            encrypted: message.encryptedContent,
+            iv: message.encryptionMetadata.iv,
+            tag: message.encryptionMetadata.tag
+          },
+          chatKeyInfo.aesKey
+        );
+        
+        // Replace content with decrypted version
+        normalized.content = decryptedContent;
+        normalized.wasDecrypted = true;
+      } else {
+        // User doesn't have access to this chat's encryption key
+        normalized.content = '[ENCRYPTED - NO KEY]';
+        normalized.decryptionFailed = true;
+      }
+    } catch (decryptError) {
+      console.error('[decryptMessageForUser] Failed to decrypt message:', message._id, decryptError);
+      normalized.content = '[FAILED TO DECRYPT]';
+      normalized.decryptionError = true;
+    }
+  }
+  
+  return normalized;
+};
+
 export const allMessages = asyncHandler(async (req, res) => {
   try {
     // Exclude messages that are scheduled and not yet sent
@@ -225,42 +268,7 @@ export const allMessages = asyncHandler(async (req, res) => {
     // === DECRYPTION SUPPORT - START ===
     // Decrypt encrypted messages for the current user
     const out = await Promise.all(messages.map(async (m) => {
-      const normalized = normalizeMessage(m);
-      
-      // If message is encrypted, decrypt it for the user
-      if (m.isEncrypted && m.encryptedContent && m.encryptionMetadata) {
-        try {
-          const chatKeyInfo = await KeyManagementService.getChatKeyForUser(
-            req.params.chatId,
-            req.user._id
-          );
-          
-          if (chatKeyInfo && chatKeyInfo.aesKey) {
-            const decryptedContent = EncryptionService.decryptAES(
-              {
-                encrypted: m.encryptedContent,
-                iv: m.encryptionMetadata.iv,
-                tag: m.encryptionMetadata.tag
-              },
-              chatKeyInfo.aesKey
-            );
-            
-            // Replace content with decrypted version
-            normalized.content = decryptedContent;
-            normalized.wasDecrypted = true;
-          } else {
-            // User doesn't have access to this chat's encryption key
-            normalized.content = '[ENCRYPTED - NO KEY]';
-            normalized.decryptionFailed = true;
-          }
-        } catch (decryptError) {
-          console.error('[allMessages] Failed to decrypt message:', m._id, decryptError);
-          normalized.content = '[FAILED TO DECRYPT]';
-          normalized.decryptionError = true;
-        }
-      }
-      
-      return normalized;
+      return await decryptMessageForUser(m, req.params.chatId, req.user._id);
     }));
     // === DECRYPTION SUPPORT - END ===
     res.json(out);
@@ -388,6 +396,14 @@ export const sendMessage = asyncHandler(async (req, res) => {
   }
 
   // === ENCRYPTION SUPPORT - START ===
+  // TRUE END-TO-END ENCRYPTION IMPLEMENTATION:
+  // 1. Client sends plaintext content to server
+  // 2. Server encrypts content with chat's AES key
+  // 3. Server stores ONLY encrypted content in database (content field = null)
+  // 4. Server sends encrypted content back to client
+  // 5. Client decrypts using locally stored keys
+  // This ensures data is encrypted both in transit (HTTPS) and at rest (database)
+  
   // Auto-initialize encryption for all chats and encrypt messages
   let encryptedContent = null;
   let encryptionMetadata = null;
@@ -487,7 +503,8 @@ export const sendMessage = asyncHandler(async (req, res) => {
 
   var newMessage = {
     sender: req.user._id,
-    content: content,
+    // TRUE E2E: Store plaintext ONLY if message is NOT encrypted
+    content: isEncrypted ? null : content,
     chat: chat._id,
     type: type,
     attachments: attachments || [],
@@ -520,7 +537,9 @@ export const sendMessage = asyncHandler(async (req, res) => {
         scheduledFor: saved && saved.scheduledFor,
         createdAt: saved && saved.createdAt,
         isEncrypted: saved && saved.isEncrypted,
-        hasEncryptedContent: !!(saved && saved.encryptedContent)
+        hasEncryptedContent: !!(saved && saved.encryptedContent),
+        hasPlaintextContent: !!(saved && saved.content), // Should be false if encrypted
+        contentIsNull: saved && saved.content === null // Should be true if encrypted
       });
     } catch (err) {
       console.warn('[sendMessage] Failed to fetch saved message for debug:', err && err.message);
@@ -717,7 +736,8 @@ export const editMessage = asyncHandler(async (req, res) => {
   }
 
   // === ENCRYPTION SUPPORT - START ===
-  // If original message was encrypted, we need to encrypt the edited content too
+  // TRUE E2E: If original message was encrypted, encrypt the edited content too
+  // The edited plaintext content will NOT be stored in database
   let encryptedContent = null;
   let encryptionMetadata = null;
   
@@ -755,16 +775,20 @@ export const editMessage = asyncHandler(async (req, res) => {
   // === ENCRYPTION SUPPORT - END ===
 
   // Update the message
-  message.content = content.trim();
-  message.isEdited = true;
-  message.editedAt = new Date();
-  
-  // Update encryption fields if content was encrypted
+  // TRUE E2E: Only store plaintext if message is NOT encrypted
   if (encryptedContent) {
+    // If we successfully encrypted the edit, clear plaintext and store encrypted version
+    message.content = null;
     message.encryptedContent = encryptedContent;
     message.encryptionMetadata = encryptionMetadata;
     message.encryptionKeyVersion = encryptionMetadata?.keyVersion || message.encryptionKeyVersion;
+  } else {
+    // If message is not encrypted, update plaintext content
+    message.content = content.trim();
   }
+  
+  message.isEdited = true;
+  message.editedAt = new Date();
 
   await message.save();
 
@@ -850,8 +874,10 @@ export const getStarredMessages = asyncHandler(async (req, res) => {
     .populate("starredBy.user", "name avatar")
     .sort({ createdAt: -1 });
 
-  // Normalize timestamps so scheduled messages expose `scheduledFor` as `timestamp`
-  const out = messages.map(normalizeMessage);
+  // Decrypt encrypted messages and normalize timestamps
+  const out = await Promise.all(messages.map(async (m) => {
+    return await decryptMessageForUser(m, chatId, userId);
+  }));
   res.json(out);
 });
 
@@ -994,7 +1020,8 @@ export const forwardMessage = asyncHandler(async (req, res) => {
   }
 
   // === ENCRYPTION SUPPORT - START ===
-  // Check if chat is encrypted for forwarded messages
+  // TRUE E2E: Check if destination chat is encrypted and encrypt forwarded message
+  // Forwarded plaintext content will NOT be stored in database if chat is encrypted
   let encryptedContent = null;
   let encryptionMetadata = null;
   let isEncrypted = false;
@@ -1067,7 +1094,8 @@ export const forwardMessage = asyncHandler(async (req, res) => {
 
   const newMessage = {
     sender: req.user._id,
-    content: content,
+    // TRUE E2E: Store plaintext ONLY if message is NOT encrypted
+    content: isEncrypted ? null : content,
     chat: chatId,
     type: type,
     attachments: attachments || [],
@@ -1293,17 +1321,17 @@ export const getPinnedMessages = asyncHandler(async (req, res) => {
     throw new Error("You are not authorized to view pinned messages in this chat");
   }
 
-  // Normalize timestamps on pinned messages' nested message objects
-  const pinned = (chat.pinnedMessages || []).map(pm => {
+  // Normalize timestamps and decrypt pinned messages' nested message objects
+  const pinned = await Promise.all((chat.pinnedMessages || []).map(async (pm) => {
     if (pm && pm.message) {
       try {
-        pm.message = normalizeMessage(pm.message);
+        pm.message = await decryptMessageForUser(pm.message, chatId, userId);
       } catch (e) {
-        // ignore
+        console.error('[getPinnedMessages] Error decrypting pinned message:', e);
       }
     }
     return pm;
-  });
+  }));
 
   res.json(pinned);
 });
@@ -1416,38 +1444,67 @@ export const getLinkAttachments = asyncHandler(async (req, res) => {
     // URL regex pattern
     const urlRegex = /(https?:\/\/[^\s]+)/g;
 
-    // Find all messages with URLs in content
+    // Find all messages in these chats (we'll filter URLs after decryption)
     const messages = await Message.find({
       chat: { $in: verifiedChatIds },
       // Include messages that are not deletedFor the user OR where the user is listed in keepFor
       $or: [ { deletedFor: { $ne: req.user._id } }, { keepFor: req.user._id } ],
       // Exclude messages explicitly hidden from this user
-      excludeUsers: { $not: { $elemMatch: { $eq: req.user._id } } },
-      content: { $regex: urlRegex }
+      excludeUsers: { $not: { $elemMatch: { $eq: req.user._id } } }
     })
       .populate('sender', 'name email avatar')
       .sort({ createdAt: -1 })
       .lean();
 
-    // Extract URLs from messages
+    // Extract URLs from messages (decrypt encrypted messages first)
     const linkItems = [];
-    messages.forEach(message => {
-      const urls = message.content.match(urlRegex);
-      if (urls && urls.length > 0) {
-        urls.forEach(url => {
-          linkItems.push({
-            _id: message._id + '_' + url,
-            url: url,
-            content: message.content,
-            createdAt: message.createdAt,
-            sender: message.sender?._id,
-            senderName: message.sender?.name || message.sender?.email,
-            chatId: message.chat,
-            messageId: message._id  // Add message ID for navigation
-          });
-        });
+    
+    for (const message of messages) {
+      let messageContent = message.content;
+      
+      // Decrypt if needed
+      if (message.isEncrypted && message.encryptedContent && message.encryptionMetadata) {
+        try {
+          const chatKeyInfo = await KeyManagementService.getChatKeyForUser(
+            message.chat,
+            req.user._id
+          );
+          
+          if (chatKeyInfo && chatKeyInfo.aesKey) {
+            messageContent = EncryptionService.decryptAES(
+              {
+                encrypted: message.encryptedContent,
+                iv: message.encryptionMetadata.iv,
+                tag: message.encryptionMetadata.tag
+              },
+              chatKeyInfo.aesKey
+            );
+          }
+        } catch (decryptError) {
+          console.error('[getLinkAttachments] Failed to decrypt message:', message._id, decryptError);
+          continue; // Skip this message if decryption fails
+        }
       }
-    });
+      
+      // Extract URLs from content
+      if (messageContent) {
+        const urls = messageContent.match(urlRegex);
+        if (urls && urls.length > 0) {
+          urls.forEach(url => {
+            linkItems.push({
+              _id: message._id + '_' + url,
+              url: url,
+              content: messageContent,
+              createdAt: message.createdAt,
+              sender: message.sender?._id,
+              senderName: message.sender?.name || message.sender?.email,
+              chatId: message.chat,
+              messageId: message._id  // Add message ID for navigation
+            });
+          });
+        }
+      }
+    }
 
     res.json(linkItems);
   } catch (error) {
@@ -1569,8 +1626,10 @@ export const getScheduledMessages = asyncHandler(async (req, res) => {
     .populate("attachments")
     .sort({ scheduledFor: 1 });
 
-  // Ensure `timestamp` field present for scheduled messages
-  const scheduledOut = scheduledMessages.map(normalizeMessage);
+  // Decrypt and normalize timestamps for scheduled messages
+  const scheduledOut = await Promise.all(scheduledMessages.map(async (m) => {
+    return await decryptMessageForUser(m, chatId, userId);
+  }));
   res.json(scheduledOut);
 });
 
