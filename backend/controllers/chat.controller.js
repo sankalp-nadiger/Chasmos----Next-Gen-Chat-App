@@ -80,15 +80,20 @@ export const accessChat = asyncHandler(async (req, res) => {
   if (isChat.length > 0) {
     // Decrypt lastMessage for preview (E2E encryption support)
     const chat = isChat[0];
+    let decryptedLastMessage = null;
     if (chat && chat.lastMessage) {
       try {
-        chat.lastMessage = await decryptLastMessage(chat.lastMessage, chat._id, req.user._id);
+        decryptedLastMessage = await decryptLastMessage(chat.lastMessage, chat._id, req.user._id);
       } catch (e) {
         console.error('[accessChat] Failed to decrypt lastMessage:', e);
       }
     }
     // Produce a plain object and ensure a `name` property exists for frontend
     const chatObj = (chat && chat.toObject && typeof chat.toObject === 'function') ? chat.toObject() : { ...chat };
+    // Explicitly assign the decrypted lastMessage to chatObj
+    if (decryptedLastMessage) {
+      chatObj.lastMessage = decryptedLastMessage;
+    }
     chatObj.name = chatObj.chatName || chatObj.name || (chatObj.groupSettings && chatObj.groupSettings.name) || "";
     res.send(chatObj);
   } else {
@@ -232,9 +237,10 @@ export const fetchChats = asyncHandler(async (req, res) => {
     for (const chat of (Array.isArray(populatedResults) ? populatedResults : [])) {
       try {
         // Decrypt lastMessage for preview (E2E encryption support)
+        let decryptedLastMessage = null;
         if (chat && chat.lastMessage) {
           try {
-            chat.lastMessage = await decryptLastMessage(chat.lastMessage, chat._id, req.user._id);
+            decryptedLastMessage = await decryptLastMessage(chat.lastMessage, chat._id, req.user._id);
           } catch (e) {
             console.error('[fetchChats] Failed to decrypt lastMessage:', e);
           }
@@ -252,6 +258,10 @@ export const fetchChats = asyncHandler(async (req, res) => {
 
         // attach unreadCount to the chat object (lean/POJO safe)
         const chatObj = (chat && chat.toObject && typeof chat.toObject === 'function') ? chat.toObject() : { ...chat };
+        // Explicitly assign the decrypted lastMessage to chatObj
+        if (decryptedLastMessage) {
+          chatObj.lastMessage = decryptedLastMessage;
+        }
         // If a Group doc exists for this chat, attach it and mirror feature flags into groupSettings
         const maybeGroup = groupsByChat && groupsByChat[String(chatObj._id)];
         if (maybeGroup) {
@@ -432,6 +442,15 @@ export const fetchRecentChatsForForward = asyncHandler(async (req, res) => {
         if (chat.lastMessage) {
           const lm = chat.lastMessage;
           previewTimestamp = (lm.isScheduled && lm.scheduledSent && lm.scheduledFor) ? lm.scheduledFor : (lm.createdAt || lm.updatedAt || previewTimestamp);
+        }
+
+        // Decrypt lastMessage if encrypted
+        if (chat.lastMessage) {
+          try {
+            chat.lastMessage = await decryptLastMessage(chat.lastMessage, chat._id, userId);
+          } catch (e) {
+            console.error('[fetchRecentChatsForForward] Failed to decrypt lastMessage:', e);
+          }
         }
 
         let lastMessageText = "";
@@ -825,6 +844,15 @@ export const getRecentChats = async (req, res) => {
     const formattedChats = [];
     // Compute unread counts for each chat (exclude system messages)
     for (const chat of chats) {
+      // Decrypt lastMessage at the beginning (E2E encryption support)
+      if (chat.lastMessage) {
+        try {
+          chat.lastMessage = await decryptLastMessage(chat.lastMessage, chat._id, userId);
+        } catch (e) {
+          console.error('[getRecentChats] Failed to decrypt lastMessage:', e);
+        }
+      }
+
       let unread = 0;
       try {
         unread = await Message.countDocuments({
@@ -1079,7 +1107,17 @@ export const fetchPreviousChats = asyncHandler(async (req, res) => {
       .populate({ path: 'lastMessage.sender', select: '_id email name' })
       .lean();
 
-    const formattedChats = (chats || []).map((chat) => {
+    const formattedChats = [];
+    for (const chat of (chats || [])) {
+      // Decrypt lastMessage if encrypted
+      if (chat.lastMessage) {
+        try {
+          chat.lastMessage = await decryptLastMessage(chat.lastMessage, chat._id, userId);
+        } catch (e) {
+          console.error('[fetchPreviousChats] Failed to decrypt lastMessage:', e);
+        }
+      }
+
       const otherUser =
         (Array.isArray(chat.participants) &&
           chat.participants.find((p) => String(p._id) !== String(userId))) ||
@@ -1152,8 +1190,8 @@ export const fetchPreviousChats = asyncHandler(async (req, res) => {
         };
       }
 
-      return chatData;
-    });
+      formattedChats.push(chatData);
+    }
 
     res.status(200).json(formattedChats);
   } catch (err) {

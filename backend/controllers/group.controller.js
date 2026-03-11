@@ -344,8 +344,13 @@ export const joinGroupByInviteLink = async (req, res) => {
         const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
         const io = getSocketIOInstance();
         if (io && group && group.chat) {
-          // Only emit to chat room for group messages (NOT to individual user rooms)
+          // Emit to chat room
           io.to(String(group.chat)).emit('message recieved', populated);
+          // Emit to user rooms for chat list updates
+          const users = (group.participants && group.participants.length) ? group.participants : [];
+          users.forEach(u => {
+            try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
+          });
         }
       } catch (e) {
         console.warn('joinGroup: failed to emit socket event', e && e.message);
@@ -487,8 +492,14 @@ export const addMember = async (req, res) => {
           // mark this system message so clients can skip updating previews
           populated.skipPreview = true;
 
-          // Emit to chat room - frontend will filter by excludeUsers when displaying
+          // Emit to chat room
           io.to(String(group.chat)).emit('message recieved', populated);
+          
+          // Emit to user rooms for chat list updates
+          const users = (group.participants && group.participants.length) ? group.participants : [];
+          users.forEach(u => {
+            try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
+          });
         }
       } catch (e) {
         console.warn('addMember: failed to emit group system message', e && e.message);
@@ -703,8 +714,13 @@ export const removeMember = async (req, res) => {
         const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
         const io = getSocketIOInstance();
         if (io && group && group.chat) {
-          // Only emit to chat room for group messages (NOT to individual user rooms)
+          // Emit to chat room
           io.to(String(group.chat)).emit('message recieved', populatedMsg);
+          // Emit to user rooms for chat list updates
+          const users = (group.participants && group.participants.length) ? group.participants : [];
+          users.forEach(u => {
+            try { io.to(String(u)).emit('message recieved', populatedMsg); } catch (e) {}
+          });
         }
       } catch (e) {
         console.warn('removeMember: failed to emit system message', e && e.message);
@@ -909,8 +925,13 @@ export const exitGroup = async (req, res) => {
         const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
         const io = getSocketIOInstance();
         if (io && group && group.chat) {
-          // Only emit to chat room for group messages (NOT to individual user rooms)
+          // Emit to chat room
           io.to(String(group.chat)).emit('message recieved', populated);
+          // Emit to user rooms for chat list updates
+          const users = (group.participants && group.participants.length) ? group.participants : [];
+          users.forEach(u => {
+            try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
+          });
         }
       } catch (e) {
         console.warn('exitGroup: failed to emit socket event', e && e.message);
@@ -1258,8 +1279,13 @@ export const updateGroupSettings = async (req, res) => {
               const populated = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
               populated.skipPreview = true;
               if (io) {
-                // Only emit to chat room for group messages (NOT to individual user rooms)
+                // Emit to chat room
                 try { io.to(String(group.chat)).emit('message recieved', populated); } catch (e) {}
+                // Emit to user rooms for chat list updates
+                const users = (group.participants && group.participants.length) ? group.participants : [];
+                users.forEach(u => {
+                  try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
+                });
               }
             } catch (e) {
               console.warn('Failed to create promotion message for', pid, e && e.message);
@@ -1278,8 +1304,13 @@ export const updateGroupSettings = async (req, res) => {
               const populated = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
               populated.skipPreview = true;
               if (io) {
-                // Only emit to chat room for group messages (NOT to individual user rooms)
+                // Emit to chat room
                 try { io.to(String(group.chat)).emit('message recieved', populated); } catch (e) {}
+                // Emit to user rooms for chat list updates
+                const users = (group.participants && group.participants.length) ? group.participants : [];
+                users.forEach(u => {
+                  try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
+                });
               }
               // Emit 'removed from group' only to the removed user(s) provided
               // by the frontend. Do NOT broadcast this event to the room or

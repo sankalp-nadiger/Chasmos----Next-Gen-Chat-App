@@ -2,6 +2,52 @@ import asyncHandler from "express-async-handler";
 import Chat from "../models/chat.model.js";
 import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
+import ChatKey from "../models/chatKey.model.js";
+import KeyManagementService from "../services/keyManagement.service.js";
+import EncryptionService from "../services/encryption.service.js";
+
+// Helper to decrypt last message for chat preview (E2E encryption)
+const decryptLastMessage = async (lastMessage, chatId, userId) => {
+  if (!lastMessage) return null;
+  
+  const lmObj = (lastMessage.toObject && typeof lastMessage.toObject === 'function') 
+    ? lastMessage.toObject() 
+    : { ...lastMessage };
+  
+  // Add timestamp
+  const ts = (lmObj.isScheduled && lmObj.scheduledSent && lmObj.scheduledFor) 
+    ? lmObj.scheduledFor 
+    : (lmObj.createdAt || lmObj.updatedAt || null);
+  lmObj.timestamp = ts;
+  
+  // Decrypt if encrypted
+  if (lmObj.isEncrypted && lmObj.encryptedContent && lmObj.encryptionMetadata) {
+    try {
+      const chatKeyInfo = await KeyManagementService.getChatKeyForUser(chatId, userId);
+      
+      if (chatKeyInfo && chatKeyInfo.aesKey) {
+        const decryptedContent = EncryptionService.decryptAES(
+          {
+            encrypted: lmObj.encryptedContent,
+            iv: lmObj.encryptionMetadata.iv,
+            tag: lmObj.encryptionMetadata.tag
+          },
+          chatKeyInfo.aesKey
+        );
+        
+        lmObj.content = decryptedContent;
+        lmObj.wasDecrypted = true;
+      } else {
+        lmObj.content = '[ENCRYPTED]';
+      }
+    } catch (decryptError) {
+      console.error('[decryptLastMessage] Failed to decrypt:', decryptError);
+      lmObj.content = '[ENCRYPTED]';
+    }
+  }
+  
+  return lmObj;
+};
 
 // Archive a chat for current user
 export const archiveChat = asyncHandler(async (req, res) => {
@@ -63,10 +109,24 @@ export const getArchivedChats = asyncHandler(async (req, res) => {
       ]
     });
 
-  const archivedChats = user.archivedChats.map(archived => ({
-    ...archived.chat.toObject(),
-    archivedAt: archived.archivedAt
-  }));
+  const archivedChats = [];
+  for (const archived of (user.archivedChats || [])) {
+    const chatObj = archived.chat.toObject();
+    
+    // Decrypt lastMessage if encrypted
+    if (chatObj.lastMessage) {
+      try {
+        chatObj.lastMessage = await decryptLastMessage(chatObj.lastMessage, chatObj._id, userId);
+      } catch (e) {
+        console.error('[getArchivedChats] Failed to decrypt lastMessage:', e);
+      }
+    }
+    
+    archivedChats.push({
+      ...chatObj,
+      archivedAt: archived.archivedAt
+    });
+  }
 
   res.status(200).json(archivedChats);
 });

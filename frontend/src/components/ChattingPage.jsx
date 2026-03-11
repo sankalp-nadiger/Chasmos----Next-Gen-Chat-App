@@ -8657,13 +8657,17 @@ const handleOpenGroupInfo = (group) => {
             }
 
             // Not found anywhere — choose the best target key to append the message to.
+            // IMPORTANT: Only use chatId for the message bucket, NOT senderId
+            // This prevents group messages from appearing in personal chats
             const candidates = [];
-            if (appendKey) candidates.push(String(appendKey));
             if (chatId) candidates.push(String(chatId));
             if (newMessage && newMessage.chat)
               candidates.push(String(newMessage.chat._id || newMessage.chat.id || ""));
-            if (senderId) candidates.push(String(senderId));
-            if (selectedContact)
+            // For messages, ALWAYS prefer chatId over other identifiers
+            // Only fall back to senderId for legacy 1:1 chats without a chatId
+            if (!chatId && senderId) candidates.push(String(senderId));
+            if (appendKey) candidates.push(String(appendKey));
+            if (selectedContact && isCurrentChat)
               candidates.push(
                 String(
                   selectedContact.chatId || selectedContact.id || selectedContact._id || ""
@@ -8673,50 +8677,44 @@ const handleOpenGroupInfo = (group) => {
             // dedupe and remove falsy
             const uniqCandidates = Array.from(new Set((candidates || []).filter(Boolean)));
 
-            // Prefer an existing bucket in prev, otherwise fall back to appendKey or first candidate
-            let targetKey = null;
-            for (const c of uniqCandidates) {
-              if (prev && Object.prototype.hasOwnProperty.call(prev, c)) {
-                targetKey = c;
-                break;
+            // Use chatId as the single source of truth for message bucket
+            let targetKey = String(chatId || (newMessage && newMessage.chat && (newMessage.chat._id || newMessage.chat.id)) || "");
+            
+            // If no chatId, fall back to looking for existing bucket or appendKey
+            if (!targetKey) {
+              for (const c of uniqCandidates) {
+                if (prev && Object.prototype.hasOwnProperty.call(prev, c)) {
+                  targetKey = c;
+                  break;
+                }
               }
+              if (!targetKey) targetKey = String(appendKey || uniqCandidates[0] || senderId || "");
             }
-            if (!targetKey) targetKey = String(appendKey || uniqCandidates[0] || chatId || senderId || "");
 
             const existing = prev?.[targetKey] || [];
             const updatedMessages = [...existing, formatted];
             const filtered = filterDuplicateSystemMessages(updatedMessages);
             let out = { ...prev, [targetKey]: filtered };
 
-            // Ensure the appended message is available under all candidate keys and selectedContact variants
+            // Only mirror the message to alternate keys if they refer to the SAME chat
+            // This ensures messages don't leak between different chats
             try {
-              // Propagate to candidate keys (chatId, senderId, appendKey, newMessage.chat)
-              for (const c of uniqCandidates) {
-                if (!c) continue;
-                if (c === targetKey) continue;
-                const arr = out[c] && Array.isArray(out[c]) ? out[c].slice() : [];
-                const exists = arr.some((m) => String(m.id || m._id) === String(formatted.id));
-                if (!exists) {
-                  arr.push(formatted);
-                  out[c] = filterDuplicateSystemMessages(arr);
-                }
-              }
-
-              // Also mirror to selectedContact keys if present
-              const scKeys = [];
-              if (selectedContact) {
+              // If this is the currently selected chat, ensure message appears under selectedContact keys
+              if (isCurrentChat && selectedContact) {
+                const scKeys = [];
                 if (selectedContact.id) scKeys.push(String(selectedContact.id));
                 if (selectedContact.chatId) scKeys.push(String(selectedContact.chatId));
                 if (selectedContact._id) scKeys.push(String(selectedContact._id));
-              }
-              const uniqScKeys = Array.from(new Set(scKeys.filter(Boolean)));
-              for (const k of uniqScKeys) {
-                if (!k) continue;
-                const arr = out[k] && Array.isArray(out[k]) ? out[k].slice() : [];
-                const exists = arr.some((m) => String(m.id || m._id) === String(formatted.id));
-                if (!exists) {
-                  arr.push(formatted);
-                  out[k] = filterDuplicateSystemMessages(arr);
+                
+                const uniqScKeys = Array.from(new Set(scKeys.filter(Boolean)));
+                for (const k of uniqScKeys) {
+                  if (!k || k === targetKey) continue;
+                  const arr = out[k] && Array.isArray(out[k]) ? out[k].slice() : [];
+                  const exists = arr.some((m) => String(m.id || m._id) === String(formatted.id));
+                  if (!exists) {
+                    arr.push(formatted);
+                    out[k] = filterDuplicateSystemMessages(arr);
+                  }
                 }
               }
             } catch (e) {}

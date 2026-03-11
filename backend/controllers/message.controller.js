@@ -599,25 +599,23 @@ export const sendMessage = asyncHandler(async (req, res) => {
     try {
       const io = getSocketIOInstance();
       if (io && chat && chat._id) {
-        // Always emit to the chat room
+        // Always emit to the chat room for real-time updates
         try {
           io.to(String(chat._id)).emit("message recieved", messageOut);
         } catch (e) {}
 
-        // ONLY emit to individual user rooms for 1-on-1 chats
-        // Do NOT emit to user rooms for group chats (causes messages to appear in wrong chats)
-        if (!chat.isGroupChat) {
-          const users = (chat.users && chat.users.length) ? chat.users : (chat.participants || []);
-          if (Array.isArray(users)) {
-            users.forEach((u) => {
-              try {
-                const uid = u && (u._id ? String(u._id) : String(u));
-                if (uid) {
-                  io.to(uid).emit("message recieved", messageOut);
-                }
-              } catch (e) {}
-            });
-          }
+        // Also emit to individual user rooms for chat list updates and notifications
+        // Frontend should filter messages by chatId to prevent displaying in wrong chat
+        const users = (chat.users && chat.users.length) ? chat.users : (chat.participants || []);
+        if (Array.isArray(users)) {
+          users.forEach((u) => {
+            try {
+              const uid = u && (u._id ? String(u._id) : String(u));
+              if (uid) {
+                io.to(uid).emit("message recieved", messageOut);
+              }
+            } catch (e) {}
+          });
         }
       }
     } catch (e) {}
