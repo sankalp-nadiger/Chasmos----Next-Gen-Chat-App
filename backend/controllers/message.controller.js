@@ -592,8 +592,8 @@ export const sendMessage = asyncHandler(async (req, res) => {
       console.warn('[sendMessage] Failed to clear chat.deletedBy:', err && err.message);
     }
 
-    // Attach normalized timestamp before sending
-    const messageOut = normalizeMessage(message);
+    // Decrypt message for sender before sending (so they can see their own encrypted message)
+    const messageOut = await decryptMessageForUser(message, chat._id, req.user._id);
 
     // Emit user's message via socket
     try {
@@ -796,9 +796,12 @@ export const editMessage = asyncHandler(async (req, res) => {
   await message.populate("sender", "name avatar email");
   await message.populate("attachments");
 
+  // Decrypt the edited message before sending back to client
+  const decryptedMessage = await decryptMessageForUser(message, message.chat, userId);
+
   res.json({
     message: "Message edited successfully",
-    updatedMessage: message
+    updatedMessage: decryptedMessage
   });
 });
 
@@ -1145,8 +1148,8 @@ export const forwardMessage = asyncHandler(async (req, res) => {
     //console.log("🆙 Updating chat lastMessage");
     await Chat.findByIdAndUpdate(chatId, { lastMessage: message });
 
-    // Attach normalized timestamp for forwarded message
-    const forwardOut = normalizeMessage(message);
+    // Decrypt forwarded message for sender before sending
+    const forwardOut = await decryptMessageForUser(message, chatId, req.user._id);
     //console.log("🎉 Forward message complete");
     res.json(forwardOut);
 

@@ -7,6 +7,52 @@ import Screenshot from "../models/screenshot.model.js";
 import { getSocketIOInstance } from "../services/scheduledMessageCron.js";
 import { uploadBase64ImageToSupabase } from "../utils/uploadToSupabase.js";
 import crypto from "crypto";
+import ChatKey from "../models/chatKey.model.js";
+import KeyManagementService from "../services/keyManagement.service.js";
+import EncryptionService from "../services/encryption.service.js";
+
+// Helper to decrypt last message for chat preview (E2E encryption)
+const decryptLastMessage = async (lastMessage, chatId, userId) => {
+  if (!lastMessage) return null;
+  
+  const lmObj = (lastMessage.toObject && typeof lastMessage.toObject === 'function') 
+    ? lastMessage.toObject() 
+    : { ...lastMessage };
+  
+  // Add timestamp
+  const ts = (lmObj.isScheduled && lmObj.scheduledSent && lmObj.scheduledFor) 
+    ? lmObj.scheduledFor 
+    : (lmObj.createdAt || lmObj.updatedAt || null);
+  lmObj.timestamp = ts;
+  
+  // Decrypt if encrypted
+  if (lmObj.isEncrypted && lmObj.encryptedContent && lmObj.encryptionMetadata) {
+    try {
+      const chatKeyInfo = await KeyManagementService.getChatKeyForUser(chatId, userId);
+      
+      if (chatKeyInfo && chatKeyInfo.aesKey) {
+        const decryptedContent = EncryptionService.decryptAES(
+          {
+            encrypted: lmObj.encryptedContent,
+            iv: lmObj.encryptionMetadata.iv,
+            tag: lmObj.encryptionMetadata.tag
+          },
+          chatKeyInfo.aesKey
+        );
+        
+        lmObj.content = decryptedContent;
+        lmObj.wasDecrypted = true;
+      } else {
+        lmObj.content = '[ENCRYPTED]';
+      }
+    } catch (decryptError) {
+      console.error('[decryptLastMessage] Failed to decrypt:', decryptError);
+      lmObj.content = '[ENCRYPTED]';
+    }
+  }
+  
+  return lmObj;
+};
 
 export const accessChat = asyncHandler(async (req, res) => {
   const { userId } = req.body;
@@ -32,20 +78,14 @@ export const accessChat = asyncHandler(async (req, res) => {
   });
 
   if (isChat.length > 0) {
-    // Ensure consistent timestamp on lastMessage for client display
+    // Decrypt lastMessage for preview (E2E encryption support)
     const chat = isChat[0];
     if (chat && chat.lastMessage) {
       try {
-        const lm = chat.lastMessage;
-        const ts = (lm.isScheduled && lm.scheduledSent && lm.scheduledFor) ? lm.scheduledFor : (lm.createdAt || lm.updatedAt || null);
-        if (lm.toObject && typeof lm.toObject === 'function') {
-          const obj = lm.toObject();
-          obj.timestamp = ts;
-          chat.lastMessage = obj;
-        } else {
-          chat.lastMessage.timestamp = ts;
-        }
-      } catch (e) {}
+        chat.lastMessage = await decryptLastMessage(chat.lastMessage, chat._id, req.user._id);
+      } catch (e) {
+        console.error('[accessChat] Failed to decrypt lastMessage:', e);
+      }
     }
     // Produce a plain object and ensure a `name` property exists for frontend
     const chatObj = (chat && chat.toObject && typeof chat.toObject === 'function') ? chat.toObject() : { ...chat };
@@ -191,19 +231,13 @@ export const fetchChats = asyncHandler(async (req, res) => {
     const resultsWithUnread = [];
     for (const chat of (Array.isArray(populatedResults) ? populatedResults : [])) {
       try {
-        // Normalize lastMessage timestamp like before
+        // Decrypt lastMessage for preview (E2E encryption support)
         if (chat && chat.lastMessage) {
           try {
-            const lm = chat.lastMessage;
-            const ts = (lm.isScheduled && lm.scheduledSent && lm.scheduledFor) ? lm.scheduledFor : (lm.createdAt || lm.updatedAt || null);
-            if (lm.toObject && typeof lm.toObject === 'function') {
-              const obj = lm.toObject();
-              obj.timestamp = ts;
-              chat.lastMessage = obj;
-            } else {
-              chat.lastMessage.timestamp = ts;
-            }
-          } catch (e) {}
+            chat.lastMessage = await decryptLastMessage(chat.lastMessage, chat._id, req.user._id);
+          } catch (e) {
+            console.error('[fetchChats] Failed to decrypt lastMessage:', e);
+          }
         }
 
         // Count unread messages for this user (exclude messages of type 'system', deleted messages,
@@ -283,10 +317,8 @@ export const fetchChats = asyncHandler(async (req, res) => {
               }
 
               if (found) {
-                const lmObj = (found.toObject && typeof found.toObject === 'function') ? found.toObject() : { ...found };
-                const ts = (lmObj.isScheduled && lmObj.scheduledSent && lmObj.scheduledFor) ? lmObj.scheduledFor : (lmObj.createdAt || lmObj.updatedAt || null);
-                lmObj.timestamp = ts;
-                chatObj.lastMessage = lmObj;
+                // Decrypt the found last message
+                chatObj.lastMessage = await decryptLastMessage(found, chat._id, userId);
                 chatObj.unreadCount = 0;
               } else {
                 chatObj.lastMessage = null;
