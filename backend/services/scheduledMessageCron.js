@@ -92,20 +92,23 @@ const sendScheduledMessages = async () => {
         // Decrypt message before emitting (E2E encryption support)
         const messageToEmit = await decryptMessageForEmission(message, message.chat._id);
 
-        // Emit socket event to all users in the chat room AND to each participant's userId room
+        // Emit socket event to chat room
         if (ioInstance && message.chat && message.chat._id) {
           // To chat room (for users who joined the chat)
           ioInstance.to(message.chat._id.toString()).emit("message recieved", messageToEmit);
 
-          // To each userId room (for users not in the chat room)
-          const users = (message.chat.users && message.chat.users.length)
-            ? message.chat.users
-            : (message.chat.participants || []);
-          if (Array.isArray(users)) {
-            users.forEach(user => {
-              const userId = user._id ? user._id.toString() : user.toString();
-              ioInstance.to(userId).emit("message recieved", messageToEmit);
-            });
+          // ONLY emit to individual user rooms for 1-on-1 chats
+          // Do NOT emit to user rooms for group chats (causes messages to appear in wrong chats)
+          if (!message.chat.isGroupChat) {
+            const users = (message.chat.users && message.chat.users.length)
+              ? message.chat.users
+              : (message.chat.participants || []);
+            if (Array.isArray(users)) {
+              users.forEach(user => {
+                const userId = user._id ? user._id.toString() : user.toString();
+                ioInstance.to(userId).emit("message recieved", messageToEmit);
+              });
+            }
           }
         }
       } catch (error) {

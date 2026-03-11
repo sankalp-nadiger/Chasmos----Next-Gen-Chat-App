@@ -344,11 +344,8 @@ export const joinGroupByInviteLink = async (req, res) => {
         const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
         const io = getSocketIOInstance();
         if (io && group && group.chat) {
+          // Only emit to chat room for group messages (NOT to individual user rooms)
           io.to(String(group.chat)).emit('message recieved', populated);
-          const users = (group.participants && group.participants.length) ? group.participants : [];
-          users.forEach(u => {
-            try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
-          });
         }
       } catch (e) {
         console.warn('joinGroup: failed to emit socket event', e && e.message);
@@ -490,15 +487,8 @@ export const addMember = async (req, res) => {
           // mark this system message so clients can skip updating previews
           populated.skipPreview = true;
 
-          // Emit only to admins and the newly added user so personal views update.
-          // Do NOT broadcast to the whole room here to avoid exposing the system message to excluded users in real-time.
-          const adminIdsLocal = [];
-          if (group.admin) adminIdsLocal.push(String(group.admin));
-          if (Array.isArray(group.admins)) group.admins.forEach(a => { if (a) adminIdsLocal.push(String(a)); });
-          const emitTargets = new Set([...adminIdsLocal, String(userId)]);
-          emitTargets.forEach(id => {
-            try { io.to(String(id)).emit('message recieved', populated); } catch (e) {}
-          });
+          // Emit to chat room - frontend will filter by excludeUsers when displaying
+          io.to(String(group.chat)).emit('message recieved', populated);
         }
       } catch (e) {
         console.warn('addMember: failed to emit group system message', e && e.message);
@@ -713,15 +703,8 @@ export const removeMember = async (req, res) => {
         const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
         const io = getSocketIOInstance();
         if (io && group && group.chat) {
-          // Emit to the chat room so the group's message area updates
-          // Emit the system message to the room; clients may filter by `excludeUsers` on fetch
+          // Only emit to chat room for group messages (NOT to individual user rooms)
           io.to(String(group.chat)).emit('message recieved', populatedMsg);
-
-          // Emit only to admins and the removed user so their personal views update
-          const emitTargets = new Set([...adminIds, String(memberId)]);
-          emitTargets.forEach(id => {
-            try { io.to(String(id)).emit('message recieved', populatedMsg); } catch (e) {}
-          });
         }
       } catch (e) {
         console.warn('removeMember: failed to emit system message', e && e.message);
@@ -752,6 +735,16 @@ export const removeMember = async (req, res) => {
     }
 
     await group.save();
+
+    // Update Chat document to remove member from users and participants arrays
+    try {
+      await Chat.findByIdAndUpdate(group.chat, {
+        $pull: { users: memberId, participants: memberId, admins: memberId }
+      });
+      console.log('[removeMember] Removed user from Chat.users and Chat.participants');
+    } catch (chatUpdateErr) {
+      console.error('[removeMember] Failed to update Chat document:', chatUpdateErr);
+    }
 
     // After removing member, emit a 'removed from group' event to the removed user so their UI updates immediately
     try {
@@ -916,14 +909,8 @@ export const exitGroup = async (req, res) => {
         const { getSocketIOInstance } = await import('../services/scheduledMessageCron.js');
         const io = getSocketIOInstance();
         if (io && group && group.chat) {
-          // Emit to the chat room
+          // Only emit to chat room for group messages (NOT to individual user rooms)
           io.to(String(group.chat)).emit('message recieved', populated);
-
-          // Emit to each current participant (this includes the leaving user)
-          const users = (group.participants && group.participants.length) ? group.participants : [];
-          users.forEach(u => {
-            try { io.to(String(u)).emit('message recieved', populated); } catch (e) {}
-          });
         }
       } catch (e) {
         console.warn('exitGroup: failed to emit socket event', e && e.message);
@@ -959,7 +946,15 @@ export const exitGroup = async (req, res) => {
 
     await group.save();
 
-    // Do NOT modify Chat.participants here — keep Chat as-is per request.
+    // Update Chat document to remove user from users and participants arrays
+    try {
+      await Chat.findByIdAndUpdate(group.chat, {
+        $pull: { users: userId, participants: userId, admins: userId }
+      });
+      console.log('[exitGroup] Removed user from Chat.users and Chat.participants');
+    } catch (chatUpdateErr) {
+      console.error('[exitGroup] Failed to update Chat document:', chatUpdateErr);
+    }
 
     // Emit a 'removed from group' event to the leaving user so their UI updates immediately
     try {
@@ -1263,11 +1258,8 @@ export const updateGroupSettings = async (req, res) => {
               const populated = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
               populated.skipPreview = true;
               if (io) {
-                // emit to group room
+                // Only emit to chat room for group messages (NOT to individual user rooms)
                 try { io.to(String(group.chat)).emit('message recieved', populated); } catch (e) {}
-                // emit to admins and the promoted user
-                const emitTargets = new Set([...adminIdsLocal, String(pid)]);
-                emitTargets.forEach(id => { try { io.to(String(id)).emit('message recieved', populated); } catch (e) {} });
               }
             } catch (e) {
               console.warn('Failed to create promotion message for', pid, e && e.message);
@@ -1286,11 +1278,8 @@ export const updateGroupSettings = async (req, res) => {
               const populated = await Message.findById(created._id).populate('sender', 'name avatar email').populate('attachments').populate('chat');
               populated.skipPreview = true;
               if (io) {
-                // emit to group room
+                // Only emit to chat room for group messages (NOT to individual user rooms)
                 try { io.to(String(group.chat)).emit('message recieved', populated); } catch (e) {}
-                // emit to admins and the removed user
-                const emitTargets = new Set([...adminIdsLocal, String(rid)]);
-                emitTargets.forEach(id => { try { io.to(String(id)).emit('message recieved', populated); } catch (e) {} });
               }
               // Emit 'removed from group' only to the removed user(s) provided
               // by the frontend. Do NOT broadcast this event to the room or
