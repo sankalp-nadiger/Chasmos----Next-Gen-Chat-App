@@ -1,5 +1,6 @@
 // controllers/encryption.controller.js
 import asyncHandler from "express-async-handler";
+import crypto from "crypto";
 import EncryptionService from "../services/encryption.service.js";
 import KeyManagementService from "../services/keyManagement.service.js";
 import User from "../models/user.model.js";
@@ -31,7 +32,7 @@ export const generateUserKeys = asyncHandler(async (req, res) => {
     const ecdhKeyPair = EncryptionService.generateECDHKeyPair();
     
     // Generate salt for password-based key derivation
-    const salt = require('crypto').randomBytes(32).toString('base64');
+    const salt = crypto.randomBytes(32).toString('base64');
     
     // Derive key from password to encrypt private keys
     const derivedKey = EncryptionService.hashPassword(password, salt);
@@ -208,7 +209,6 @@ export const decryptMessage = asyncHandler(async (req, res) => {
     }
     
     // Get message
-    const Message = require('../models/message.model.js').default;
     const message = await Message.findById(messageId);
     
     if (!message) {

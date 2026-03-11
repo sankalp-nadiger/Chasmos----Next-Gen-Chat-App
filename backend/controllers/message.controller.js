@@ -1,5 +1,6 @@
 import asyncHandler from "express-async-handler";
 import mongoose from "mongoose";
+import crypto from "crypto";
 import Message from "../models/message.model.js";
 import Chat from "../models/chat.model.js";
 import Group from "../models/group.model.js";
@@ -416,7 +417,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
             // Auto-generate keys for user
             const rsaKeyPair = EncryptionService.generateRSAKeyPair();
             const ecdhKeyPair = EncryptionService.generateECDHKeyPair();
-            const salt = require('crypto').randomBytes(32).toString('base64');
+            const salt = crypto.randomBytes(32).toString('base64');
             
             await User.findByIdAndUpdate(participantId, {
               rsaPublicKey: rsaKeyPair.publicKey,

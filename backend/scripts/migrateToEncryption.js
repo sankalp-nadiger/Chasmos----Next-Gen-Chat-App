@@ -1,5 +1,6 @@
 // scripts/migrateToEncryption.js
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import User from '../models/user.model.js';
 import Chat from '../models/chat.model.js';
@@ -32,7 +33,7 @@ const migrateToEncryption = async () => {
         user.ecdhPrivateKey = ecdhKeyPair.privateKey;
         
         // Generate salt
-        user.keySalt = require('crypto').randomBytes(32).toString('base64');
+        user.keySalt = crypto.randomBytes(32).toString('base64');
         
         await user.save();
         console.log(`Generated keys for user: ${user.email}`);
